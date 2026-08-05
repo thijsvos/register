@@ -5,8 +5,11 @@
 node_modules/
 app/dist/
 
-# Dev vault (cargo run -- serve ./devvault)
-/devvault/
+# Dev vault (cargo run -- serve ./devvault). Unanchored on purpose: a second
+# devvault/ anywhere in the tree makes that command mean different things from
+# different directories, because cargo finds Cargo.toml by walking up while the
+# path argument stays relative to where you are standing.
+devvault/
 
 # OS
 .DS_Store
