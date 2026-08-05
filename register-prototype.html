@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>REGISTER — SECOND BRAIN SYSTEM · MK-II</title>
+<script>/* boot into the OS scheme before first paint */
+if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
+<style>
+/* ================================================================
+   REGISTER MK-II · DESIGN PROTOTYPE · REV.E
+   Idiom: engineering-grade monochrome. One typeface family (Commit
+   Mono), one pixel micro face (Departure Mono), one accent used for
+   live status only. 1px hairlines are the only chrome. Nothing moves
+   unless it means something. State changes are instant.
+
+   Rev E merges the design review: real fonts load, wikilinks and
+   full-text search work, the chrome shows only true state, and the
+   product's defining screens (search, TODAY, conflict, settings/BYOF,
+   agent-edit-live) are all reachable from one prototype.
+   ================================================================ */
+
+/* ---- fonts: OFL faces, self-hostable at ship (§03) -------------- */
+@font-face{font-family:"Commit Mono";font-weight:400;font-display:swap;
+  src:url("https://cdn.jsdelivr.net/fontsource/fonts/commit-mono@latest/latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Commit Mono";font-weight:700;font-display:swap;
+  src:url("https://cdn.jsdelivr.net/fontsource/fonts/commit-mono@latest/latin-700-normal.woff2") format("woff2")}
+@font-face{font-family:"Departure Mono";font-weight:400;font-display:swap;
+  src:url("https://cdn.jsdelivr.net/gh/projectnoonnu/2409-1@1.0/DepartureMono-Regular.woff2") format("woff2")}
+
+:root{
+  --bg:#ffffff;
+  --fg:#000000;
+  --line:#000000;
+  --dim:#454545;              /* content-safe: ~9.7:1 on white (AAA) */
+  --faint:#8a8a8a;            /* DECORATIVE ONLY — crosses, meters, rules */
+  --hover:rgba(0,0,0,.055);
+  --scrim:rgba(0,0,0,.28);
+  --signal:#ff2a00;           /* one accent. live status only. */
+  --add:#0a7d33;              /* conflict diff: incoming (still hairline-boxed) */
+  --sel-bg:#000000;
+  --sel-fg:#ffffff;
+  --hi:var(--fg);             /* brightest ink — titles, active, emphasis */
+  --font-ui:"TX-02","Berkeley Mono","Commit Mono",ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  --font-micro:"Departure Mono","Commit Mono",var(--font-ui);
+}
+html.dark{
+  /* one ink, tuned per surface — soft dark, not maximum contrast */
+  --bg:oklch(0.17 0.006 74);        /* warm near-black, never #000 */
+  --hi:oklch(0.94 0.004 85);        /* brightest ink: titles, active, emphasis */
+  --fg:oklch(0.855 0.004 82);       /* body ink, demoted to kill halation */
+  --line:oklch(0.80 0.004 82);      /* hairlines dimmed on dark */
+  --dim:oklch(0.66 0.004 82);
+  --faint:oklch(0.46 0.004 82);
+  --hover:rgba(255,255,255,.08);
+  --scrim:rgba(0,0,0,.64);
+  --add:#4ecb71;
+  --sel-bg:oklch(0.94 0.004 85);
+  --sel-fg:oklch(0.17 0.006 74);
+}
+html.teletype{--font-ui:"Server Mono","Commit Mono",ui-monospace,Menlo,monospace}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+html{background:var(--bg);color-scheme:light}
+html.dark{color-scheme:dark}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:var(--font-ui);
+  font-size:13px;line-height:1.55;
+  background:var(--bg);color:var(--fg);
+  -webkit-font-smoothing:antialiased;
+}
+/* brightest ink reserved for structure + emphasis (dark-mode readability) */
+.mark,h1.doc-title,.view h1,h2.sec,.grp-h,strong,blockquote.blk{color:var(--hi)}
+::selection{background:var(--sel-bg);color:var(--sel-fg)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:1px dashed var(--fg);outline-offset:2px}
+
+/* micro layer — Departure Mono on its 11px pixel grid (§02/§03) */
+.pane-label,footer .cell,.doc-kicker,.barcode-label,
+.pal-head,.pal-foot,.view-kicker{font-family:var(--font-micro)}
+
+/* scrollbars — chunky, terminal-grade */
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg);border-left:1px solid var(--line)}
+::-webkit-scrollbar-thumb{background:var(--fg)}
+
+/* ---- frame ------------------------------------------------------ */
+.app{display:grid;grid-template-rows:44px minmax(0,1fr) 30px;height:100vh}
+.mid{display:grid;grid-template-columns:250px minmax(0,1fr) 268px;min-height:0}
+body.no-insp .mid{grid-template-columns:250px minmax(0,1fr)}
+body.no-insp .insp{display:none}
+
+.cross{position:fixed;z-index:60;color:var(--faint);font-size:12px;line-height:1;pointer-events:none;user-select:none}
+.c-tl{top:3px;left:5px}.c-tr{top:3px;right:5px}
+.c-bl{bottom:3px;left:5px}.c-br{bottom:3px;right:5px}
+
+/* ---- header ----------------------------------------------------- */
+header{display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+.brand{display:flex;flex-direction:column;justify-content:center;gap:1px;
+  padding:0 16px;border-right:1px solid var(--line);min-width:210px}
+.mark{font-weight:700;font-size:14px;letter-spacing:.08em}
+.mark .tm{font-size:9px;vertical-align:super}
+.mark .sq{color:var(--fg)}                 /* brand mark is NOT the signal color */
+.sub{font-size:9px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;font-family:var(--font-micro)}
+.crumb{flex:1;display:flex;align-items:center;padding:0 16px;
+  font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hstats{flex:none;display:flex;align-items:center;gap:8px;padding:0 12px;border-left:1px solid var(--line)}
+#clock{font-size:11px;letter-spacing:.02em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.key{border:1px solid var(--line);padding:2px 8px;font-size:10.5px;letter-spacing:.06em;white-space:nowrap}
+.key:hover,.key[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-fg)}
+.key.idx{display:none}
+
+/* ---- sidebar ---------------------------------------------------- */
+aside.side{border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:var(--bg)}
+.pane-label{display:flex;justify-content:space-between;align-items:baseline;
+  padding:8px 14px 6px;border-bottom:1px solid var(--line);
+  font-size:11px;font-weight:400;letter-spacing:.14em;text-transform:uppercase}
+.pane-label .r{color:var(--dim)}
+nav#nav{border-bottom:1px solid var(--line)}
+.nrow{display:grid;grid-template-columns:36px 1fr auto;gap:8px;align-items:baseline;
+  padding:6px 14px;cursor:pointer;font-size:12px;white-space:nowrap}
+.nrow:hover{background:var(--hover)}
+.nrow:focus-visible{outline:1px dashed var(--fg);outline-offset:-3px}
+.nrow.act,.nrow.act:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.nrow .ref{color:var(--dim);font-size:11px}
+.nrow.act .ref{color:var(--sel-fg)}
+.nrow .nm{overflow:hidden;text-overflow:ellipsis;letter-spacing:.02em}
+.nrow .ct{font-size:10px;color:var(--dim);font-variant-numeric:tabular-nums}
+.nrow.act .ct{color:var(--sel-fg)}
+.tags{border-bottom:1px solid var(--line);padding:4px 0}
+.trow{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:baseline;
+  padding:4px 14px;font-size:11.5px;cursor:pointer}
+.trow:hover{background:var(--hover)}
+.trow .meter{color:var(--faint);letter-spacing:-.5px}
+.trow .n{color:var(--dim);font-size:10px;font-variant-numeric:tabular-nums;min-width:2ch;text-align:right}
+.side-foot{margin-top:auto;border-top:1px solid var(--line);padding:10px 14px 12px;
+  font-size:9.5px;letter-spacing:.06em;color:var(--dim)}
+.store{display:flex;justify-content:space-between;text-transform:uppercase;margin-bottom:4px;font-family:var(--font-micro);font-size:10px}
+.store b{color:var(--fg);font-weight:400}
+.store .live{color:var(--signal)}
+.barcode{height:20px;margin-top:8px;background:repeating-linear-gradient(90deg,
+  var(--fg) 0 2px, transparent 2px 4px,
+  var(--fg) 4px 5px, transparent 5px 9px,
+  var(--fg) 9px 12px, transparent 12px 14px)}
+.barcode-label{text-align:center;letter-spacing:.30em;font-size:11px;margin-top:5px;text-transform:uppercase;color:var(--dim)}
+
+/* ---- editor / views container ----------------------------------- */
+main{overflow-y:auto;min-height:0}
+.doc{max-width:672px;margin:0 auto;padding:44px 56px 120px;counter-reset:blk;outline:none}
+.doc-kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+h1.doc-title{font-size:22px;line-height:1.2;font-weight:700;letter-spacing:.02em;margin-bottom:18px}
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);margin-bottom:34px}
+.meta-grid>div{padding:7px 11px;border-right:1px solid var(--line);min-width:0}
+.meta-grid>div:last-child{border-right:none}
+.meta-grid label{display:block;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:1px;font-family:var(--font-micro)}
+.meta-grid span{font-size:11.5px;font-variant-numeric:tabular-nums;letter-spacing:.02em;white-space:nowrap}
+.mg-status{color:var(--signal)}
+
+.blk{position:relative;counter-increment:blk}
+.blk:hover::before{content:counter(blk,decimal-leading-zero);
+  position:absolute;left:-40px;top:.35em;font-size:9px;color:var(--faint);letter-spacing:.08em}
+p.blk{margin:0 0 15px}
+h2.sec{display:flex;align-items:baseline;gap:10px;margin:36px 0 12px;padding-bottom:6px;
+  border-bottom:1px solid var(--line);font-size:12.5px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase}
+h2.sec .no{color:var(--dim);font-weight:400}
+.todo{display:flex;gap:10px;margin:0 0 6px;cursor:default}
+.todo .box{cursor:pointer;user-select:none;letter-spacing:0}
+.todo.done .txt{color:var(--dim);text-decoration:line-through}
+table.tbl{width:100%;border-collapse:collapse;border:1px solid var(--line);margin:0 0 16px;font-size:12px}
+.tbl th{background:var(--sel-bg);color:var(--sel-fg);font-size:9.5px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;text-align:left;padding:6px 10px;border:1px solid var(--line)}
+.tbl td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+.tbl td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tbl td.c{text-align:center}
+blockquote.blk{border-left:2px solid var(--fg);padding:2px 0 2px 16px;margin:0 0 16px}
+blockquote .att{display:block;margin-top:6px;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--dim)}
+.code{position:relative;border:1px solid var(--line);padding:13px 15px;margin:0 0 16px;
+  font-size:12px;line-height:1.6;overflow-x:auto;white-space:pre}
+.code .lang{position:absolute;top:0;right:0;background:var(--sel-bg);color:var(--sel-fg);
+  font-size:8.5px;letter-spacing:.14em;padding:2px 7px}
+.callout{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);
+  padding:11px 13px;margin:0 0 16px}
+.chip{flex:none;background:var(--sel-bg);color:var(--sel-fg);font-size:9px;
+  letter-spacing:.14em;padding:1px 6px;transform:translateY(2px)}
+.chip.o{background:none;color:var(--fg);border:1px solid var(--line)}
+.rule{display:flex;align-items:center;gap:12px;margin:30px 0;color:var(--faint);font-size:10px}
+.rule::before,.rule::after{content:"";flex:1;border-top:1px solid var(--line)}
+.wl{border-bottom:1px dashed var(--fg);cursor:pointer}
+.wl:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.wl.dead{border-bottom-style:dotted;color:var(--dim)}
+.eor{margin-top:56px;text-align:center;font-size:9.5px;letter-spacing:.28em;
+  text-transform:uppercase;color:var(--faint)}
+
+/* ---- generic view scaffold (TODAY / CONFLICT / SETTINGS / SEARCH) */
+.view{max-width:768px;margin:0 auto;padding:44px 56px 120px}
+.view-kicker{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.view h1{font-size:22px;font-weight:700;letter-spacing:.02em;margin-bottom:6px}
+.view .lede{color:var(--dim);font-size:12px;margin-bottom:26px;max-width:64ch}
+.grp-h{display:flex;align-items:baseline;gap:10px;margin:26px 0 10px;padding-bottom:5px;
+  border-bottom:1px solid var(--line);font-size:11px;font-weight:700;letter-spacing:.14em;
+  text-transform:uppercase;font-family:var(--font-micro)}
+.grp-h .n{color:var(--dim);font-weight:400}
+
+/* TODAY tasks */
+.task{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:baseline;
+  padding:7px 0;border-bottom:1px solid var(--hover);font-size:13px}
+.task .box{cursor:pointer;user-select:none}
+.task.done .t{color:var(--dim);text-decoration:line-through}
+.task .src{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer}
+.task .src:hover{color:var(--fg)}
+
+/* CONFLICT diff — side by side, never a modal (§ note 003) */
+.diff{border:1px solid var(--line);margin-bottom:20px}
+.diff-head{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--line)}
+.diff-head>div{padding:7px 12px;font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-family:var(--font-micro)}
+.diff-head>div:first-child{border-right:1px solid var(--line)}
+.dline{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid var(--hover)}
+.dline:last-child{border-bottom:none}
+.dcell{padding:8px 12px;font-size:12.5px;cursor:pointer;border-right:1px solid var(--hover)}
+.dcell:last-child{border-right:none}
+.dcell.same{cursor:default;color:var(--dim)}
+.dcell.diff-a,.dcell.diff-b{position:relative}
+.dcell.pick{background:var(--sel-bg);color:var(--sel-fg)}
+.dcell.pick::after{content:"◉ KEPT";position:absolute;right:10px;top:8px;font-size:8px;letter-spacing:.12em;font-family:var(--font-micro)}
+.dcell .mk{color:var(--faint);margin-right:8px;font-size:10px}
+.resolvebar{display:flex;justify-content:space-between;align-items:center;gap:12px;
+  padding:9px 12px;border:1px solid var(--line);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+.btn{border:1px solid var(--line);padding:5px 12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+.btn:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.btn:disabled{color:var(--dim);cursor:not-allowed}
+.btn:disabled:hover{background:none;color:var(--dim)}
+
+/* SETTINGS */
+.set-row{display:grid;grid-template-columns:150px 1fr;gap:16px;align-items:start;
+  padding:14px 0;border-bottom:1px solid var(--hover)}
+.set-row .lab{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);padding-top:6px;font-family:var(--font-micro)}
+.seg{display:inline-flex;border:1px solid var(--line)}
+.seg{flex-wrap:wrap}
+.seg button{padding:5px 13px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;border-right:1px solid var(--line);white-space:nowrap}
+.seg button:last-child{border-right:none}
+.seg button[aria-pressed="true"]{background:var(--sel-bg);color:var(--sel-fg)}
+.byof{border:1px solid var(--line);padding:13px}
+.byof p{font-size:11.5px;color:var(--dim);margin-bottom:10px;max-width:60ch}
+.byof .file{border:1px solid var(--line);padding:6px 12px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;display:inline-block;cursor:pointer}
+.byof .file:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.byof .status{margin-top:10px;font-size:11px;letter-spacing:.04em}
+.byof .status b{color:var(--signal)}
+.legal{border:1px solid var(--line);border-width:2px;padding:11px 13px;margin-top:16px;font-size:11px;line-height:1.6;color:var(--dim)}
+.legal b{color:var(--fg)}
+
+/* SEARCH results (rendered in palette list) */
+.pr-note{display:grid;grid-template-columns:36px 1fr auto;gap:10px;align-items:baseline}
+.pr-note .snip{color:var(--dim);font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prow.sel .pr-note .snip{color:var(--sel-fg)}
+mark{background:var(--signal);color:#fff;padding:0 1px}
+.prow.sel mark{background:var(--sel-fg);color:var(--sel-bg)}
+
+/* ---- inspector -------------------------------------------------- */
+aside.insp{border-left:1px solid var(--line);overflow-y:auto;min-height:0;font-size:11.5px}
+.kv{display:grid;grid-template-columns:92px 1fr;gap:8px;padding:6px 14px;border-bottom:1px solid var(--line)}
+.kv label{font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);padding-top:2px}
+.kv span{font-variant-numeric:tabular-nums;letter-spacing:.02em;overflow-wrap:anywhere}
+.orow{display:grid;grid-template-columns:26px 1fr;gap:8px;padding:5px 14px;cursor:pointer;font-size:11px}
+.orow:hover{background:var(--hover)}
+.orow .on{color:var(--dim);font-size:10px}
+.brow{display:grid;grid-template-columns:36px 1fr;gap:8px;padding:5px 14px;font-size:11px;cursor:pointer}
+.brow:hover{background:var(--hover)}
+.brow .ref{color:var(--dim);font-size:10px}
+.insp-empty{padding:8px 14px;color:var(--dim);font-size:10.5px;letter-spacing:.04em}
+
+/* ---- status bar ------------------------------------------------- */
+footer{display:flex;align-items:center;gap:0;border-top:1px solid var(--line);
+  font-size:11px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;overflow:hidden}
+footer .cell{padding:0 12px;display:flex;align-items:center;gap:7px;height:100%;border-right:1px solid var(--line)}
+footer .cell.grow{flex:1;border-right:none;justify-content:flex-end;border-left:1px solid var(--line);margin-left:-1px}
+footer .cell b{font-weight:400;color:var(--fg)}
+.live{color:var(--signal);animation:pip 2.4s steps(2,jump-none) infinite}
+@keyframes pip{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){.live{animation:none}}
+
+/* ---- command palette -------------------------------------------- */
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:100;
+  display:flex;justify-content:center;align-items:flex-start;padding-top:11vh}
+.pal{width:min(600px,92vw);background:var(--bg);border:1px solid var(--line);
+  outline:1px solid var(--line);outline-offset:3px}
+.pal-head{display:flex;justify-content:space-between;padding:8px 13px;border-bottom:1px solid var(--line);
+  font-size:11px;font-weight:400;letter-spacing:.16em;text-transform:uppercase}
+.pal-head span{color:var(--dim)}
+.pal-in{display:flex;gap:9px;align-items:center;padding:10px 13px;border-bottom:1px solid var(--line)}
+.pal-in .pr{color:var(--signal);font-weight:700}
+.pal-in input{flex:1;font:inherit;font-size:13px;letter-spacing:.02em;background:none;
+  border:none;outline:none;color:var(--fg)}
+.pal-in input::placeholder{color:var(--dim)}
+.pal-list{max-height:52vh;overflow-y:auto}
+.pal-sec{padding:6px 13px 3px;font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim);font-family:var(--font-micro)}
+.prow{display:flex;justify-content:space-between;gap:14px;padding:7px 13px;cursor:pointer;font-size:12px;align-items:baseline}
+.prow>span:first-child{overflow:hidden;text-overflow:ellipsis}
+.prow .k{color:var(--dim);font-size:10.5px;letter-spacing:.08em;white-space:nowrap}
+.prow.sel{background:var(--sel-bg);color:var(--sel-fg)}
+.prow.sel .k,.prow.sel .pr-note .ref{color:var(--sel-fg)}
+.pr-note .ref{color:var(--dim);font-size:11px}
+.pal-empty{padding:16px 13px;font-size:11px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+.pal-foot{padding:6px 13px;border-top:1px solid var(--line);font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--dim);display:flex;justify-content:space-between}
+
+/* ---- responsive ------------------------------------------------- */
+@media (max-width:1080px){.insp{display:none}.mid{grid-template-columns:250px minmax(0,1fr)}}
+@media (max-width:760px){
+  .mid{grid-template-columns:minmax(0,1fr)}
+  .side{position:fixed;top:44px;bottom:30px;left:0;width:260px;z-index:70;
+    transform:translateX(-100%);transition:none;box-shadow:1px 0 0 var(--line)}
+  body.side-open .side{transform:none}
+  .key.idx{display:inline-block}
+  .brand{min-width:0}.crumb{display:none}
+  .doc,.view{padding:32px 20px 96px}
+  .meta-grid{grid-template-columns:repeat(2,1fr)}
+  .meta-grid>div:nth-child(2){border-right:none}
+  .meta-grid>div{border-bottom:1px solid var(--line)}
+  .meta-grid>div:nth-child(n+3){border-bottom:none}
+  .blk:hover::before{display:none}
+  .diff-head,.dline{grid-template-columns:1fr}
+  .dcell{border-right:none;border-bottom:1px solid var(--hover)}
+}
+</style>
+</head>
+<body>
+<span class="cross c-tl">+</span><span class="cross c-tr">+</span>
+<span class="cross c-bl">+</span><span class="cross c-br">+</span>
+
+<div class="app">
+
+  <!-- ══ HEADER ═════════════════════════════════════════════════ -->
+  <header>
+    <div class="brand">
+      <div class="mark"><span class="sq">■</span> REGISTER<span class="tm">™</span></div>
+      <div class="sub">Second brain system · MK-II</div>
+    </div>
+    <div class="crumb" id="crumb">INDEX / 003 / TERMINAL-AESTHETICS</div>
+    <div class="hstats">
+      <button class="key idx" id="btnIdx" title="Toggle index">IDX</button>
+      <span id="clock">0000-00-00 00:00:00Z</span>
+      <button class="key" id="btnInv" title="Invert display">INV</button>
+      <button class="key" id="btnPal" title="Command palette">⌘K</button>
+    </div>
+  </header>
+
+  <!-- ══ MIDDLE ═════════════════════════════════════════════════ -->
+  <div class="mid">
+
+    <!-- sidebar -->
+    <aside class="side">
+      <div class="pane-label">Index <span class="r" id="idxCount">[0]</span></div>
+      <nav id="nav"></nav>
+      <div class="pane-label">Tags</div>
+      <div class="tags" id="tags"></div>
+      <div class="side-foot">
+        <div class="store"><span>Vault</span><b>~/vault</b></div>
+        <div class="store"><span>Files</span><b id="sfFiles">— · —</b></div>
+        <div class="store"><span>Watcher</span><b><span class="live">●</span> LIVE</b></div>
+        <div class="barcode"></div>
+        <div class="barcode-label">RG · MK-II · REV.E</div>
+      </div>
+    </aside>
+
+    <!-- editor + views -->
+    <main id="main">
+      <div class="doc" id="doc" contenteditable="true" spellcheck="false"></div>
+      <div class="view" id="viewToday" hidden></div>
+      <div class="view" id="viewConflict" hidden></div>
+      <div class="view" id="viewSettings" hidden></div>
+    </main>
+
+    <!-- inspector -->
+    <aside class="insp">
+      <div class="pane-label">Properties</div>
+      <div class="kv"><label>Type</label><span id="iType">Note</span></div>
+      <div class="kv"><label>Ref</label><span id="iRef">—</span></div>
+      <div class="kv"><label>Words</label><span id="iWords">—</span></div>
+      <div class="kv"><label>Encoding</label><span>UTF-8 · LF</span></div>
+      <div class="kv"><label>Tags</label><span id="iTags">—</span></div>
+      <div class="pane-label">Outline</div>
+      <div id="outline"></div>
+      <div class="pane-label">Backlinks <span class="r" id="blCount">[0]</span></div>
+      <div id="backlinks"></div>
+    </aside>
+
+  </div>
+
+  <!-- ══ STATUS BAR — honest instrumentation only ═══════════════ -->
+  <footer>
+    <div class="cell"><span class="live">●</span> Watcher <b>Live</b></div>
+    <div class="cell">Vault <b>~/vault</b></div>
+    <div class="cell" id="rt">Render <b>—</b></div>
+    <div class="cell grow" id="wc">— words</div>
+    <div class="cell" id="fileStat">— files</div>
+    <div class="cell">Git <b>Clean</b></div>
+  </footer>
+
+</div>
+
+<!-- ══ COMMAND PALETTE ══════════════════════════════════════════ -->
+<div class="scrim" id="scrim" hidden>
+  <div class="pal" role="dialog" aria-label="Command palette">
+    <div class="pal-head">Command &amp; search <span>[ESC]</span></div>
+    <div class="pal-in"><span class="pr">›</span>
+      <input id="palq" placeholder="Search notes or type a command…" autocomplete="off">
+    </div>
+    <div class="pal-list" id="palList"></div>
+    <div class="pal-foot"><span>↑↓ navigate · ↵ open/run · full-text over the vault</span><span id="palCount">0 results</span></div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   DATA — pages live in memory; edits persist for the session.
+   Every note carries frontmatter-equivalent fields + tags, so the
+   sidebar tag meters, inspector, search and backlinks are all
+   DERIVED from real content (never hardcoded chrome).
+   ================================================================ */
+const PAGES = {
+  "000": { slug:"INBOX", title:"INBOX", type:"Queue", kicker:"QUEUE · REF 000 · ZERO BY FRIDAY",
+    created:"2026-06-01", tags:["inbox"], body:`
+<p class="blk">Unprocessed captures. Everything lands here first; nothing is allowed to rot here.</p>
+<table class="tbl blk"><tr><th>T</th><th>Source</th><th>Item</th></tr>
+<tr><td class="num">08:12Z</td><td class="c"><span class="chip o">X.COM</span></td><td>Thread on phosphor CRT persistence — save frames for reference</td></tr>
+<tr><td class="num">07:44Z</td><td class="c"><span class="chip o">WEB</span></td><td>Berkeley Mono v2 (TX-02) changelog — new box-drawing weights</td></tr>
+<tr><td class="num">Mon</td><td class="c"><span class="chip o">MAIL</span></td><td>Foundry reply re: desktop + web license quote</td></tr>
+<tr><td class="num">Mon</td><td class="c"><span class="chip o">CLIP</span></td><td>Local-first sync notes — git vs relay, see <span class="wl">[[PERF-DOCTRINE]]</span></td></tr>
+<tr><td class="num">Sun</td><td class="c"><span class="chip o">X.COM</span></td><td>Registration-cross corner marks — collect print references</td></tr></table>
+<div class="eor">— End of record · 000 —</div>` },
+
+  "001": { slug:"DAILY-LOG", title:"DAILY LOG", type:"Log", kicker:"LOG · REF 001 · APPEND-ONLY",
+    created:"2026-01-02", tags:["log"], body:`
+<h2 class="sec blk"><span class="no">§</span>2026-08-05 · Wednesday</h2>
+<div class="todo blk"><span class="box" contenteditable="false">[x]</span><span class="txt">Ship MK-II design prototype</span></div>
+<div class="todo blk"><span class="box" contenteditable="false">[ ]</span><span class="txt">Reply to foundry re: license tiers</span></div>
+<div class="todo blk"><span class="box" contenteditable="false">[ ]</span><span class="txt">Verify agent-edit-to-paint under 100ms</span></div>
+<table class="tbl blk"><tr><th>Time</th><th>Entry</th></tr>
+<tr><td class="num">07:12Z</td><td>Cold start. Coffee. Read <span class="wl">[[AS-WE-MAY-THINK]]</span> again.</td></tr>
+<tr><td class="num">09:30Z</td><td>Cut the third accent color. Then cut the second.</td></tr>
+<tr><td class="num">13:47Z</td><td>Render loop under 1ms on a 400-word note. Keep it there — see <span class="wl">[[PERF-DOCTRINE]]</span>.</td></tr></table>
+<div class="rule">§</div>
+<h2 class="sec blk"><span class="no">§</span>2026-08-04 · Tuesday</h2>
+<p class="blk">Archived. See <span class="wl">[[W31-REVIEW]]</span>.</p>
+<div class="eor">— End of record · 001 —</div>` },
+
+  "002": { slug:"READING-LIST", title:"READING LIST", type:"Collection", kicker:"COLLECTION · REF 002",
+    created:"2026-03-14", tags:["reading"], body:`
+<p class="blk">Status glyphs: ○ queued · ◐ reading · ◉ done.</p>
+<table class="tbl blk"><tr><th>Title</th><th>Author</th><th>St</th><th>Added</th></tr>
+<tr><td><span class="wl">[[AS-WE-MAY-THINK]]</span></td><td>V. Bush</td><td class="c">◉</td><td class="num">03-14</td></tr>
+<tr><td>The Design of Everyday Things</td><td>D. Norman</td><td class="c">◉</td><td class="num">03-20</td></tr>
+<tr><td>Dieter Rams: Ten Principles</td><td>—</td><td class="c">◐</td><td class="num">05-02</td></tr>
+<tr><td>The Elements of Typographic Style</td><td>R. Bringhurst</td><td class="c">◐</td><td class="num">06-11</td></tr>
+<tr><td>Local-first Software (Ink &amp; Switch)</td><td>Kleppmann et al.</td><td class="c">○</td><td class="num">07-28</td></tr></table>
+<div class="eor">— End of record · 002 —</div>` },
+
+  "003": { slug:"TERMINAL-AESTHETICS", title:"TERMINAL AESTHETICS", type:"Note", kicker:"NOTE · REF 003 · REV 07",
+    created:"2026-07-28", tags:["design","research"], body:`
+<h2 class="sec blk"><span class="no">01</span>Principles</h2>
+<p class="blk">A second brain is an instrument, not a lounge. The interface should read like a spec sheet: every pixel accounted for, every state visible, nothing that moves unless it means something.</p>
+<div class="todo blk done"><span class="box" contenteditable="false">[x]</span><span class="txt">One typeface family. Two weights. Zero exceptions.</span></div>
+<div class="todo blk done"><span class="box" contenteditable="false">[x]</span><span class="txt">Hairlines are the only chrome.</span></div>
+<div class="todo blk"><span class="box" contenteditable="false">[ ]</span><span class="txt">Inverse video replaces every hover glow.</span></div>
+<div class="todo blk"><span class="box" contenteditable="false">[ ]</span><span class="txt">Latency budget: 16ms or it doesn't ship.</span></div>
+<h2 class="sec blk"><span class="no">02</span>Type specification</h2>
+<table class="tbl blk"><tr><th>Role</th><th>Size</th><th>Track</th><th>Case</th></tr>
+<tr><td>Microlabel · Departure</td><td class="num">11px</td><td class="num">+16%</td><td>UPPER</td></tr>
+<tr><td>UI / nav · Commit</td><td class="num">11px</td><td class="num">+6%</td><td>UPPER</td></tr>
+<tr><td>Body · Commit</td><td class="num">13px</td><td class="num">0</td><td>Sentence</td></tr>
+<tr><td>Title · Commit 700</td><td class="num">22px</td><td class="num">+2%</td><td>Sentence</td></tr></table>
+<div class="callout blk"><span class="chip">NB</span><div>Latency is a design material. Treat the render budget like a load-bearing wall — see <span class="wl">[[PERF-DOCTRINE]]</span>.</div></div>
+<h2 class="sec blk"><span class="no">03</span>Tokens</h2>
+<div class="code blk"><span class="lang">CSS</span>:root {
+  --bg:     #ffffff;
+  --fg:     #000000;
+  --line:   #000000;
+  --signal: #ff2a00;   /* one accent. live status only. */
+}</div>
+<div class="rule">§</div>
+<blockquote class="blk">Precision is the aesthetic. Everything else is decoration.<span class="att">— Field note 014</span></blockquote>
+<h2 class="sec blk"><span class="no">04</span>Open questions</h2>
+<p class="blk">Does the inspector earn its 268 pixels, or should backlinks live inline at the foot of the note? Ship both behind the palette toggle and count which one survives a week of real use.</p>
+<p class="blk">Offline conflict UI: never a modal. Render both revisions side by side as a diff table and let the owner pick lines, the way a typesetter would pick sorts.</p>
+<div class="eor">— End of record · 003 —</div>` },
+
+  "004": { slug:"PERF-DOCTRINE", title:"PERF DOCTRINE", type:"Note", kicker:"NOTE · REF 004 · BUDGETS",
+    created:"2026-07-30", tags:["engineering","perf"], body:`
+<p class="blk">Latency is not a feature; it is the material. Every interaction has a budget, and the budget is enforced in CI — not aspired to in a README.</p>
+<table class="tbl blk"><tr><th>Path</th><th>Budget</th></tr>
+<tr><td>Interaction / doc switch</td><td class="num">&lt; 16 ms</td></tr>
+<tr><td>Agent edit → visible in UI</td><td class="num">≤ 100 ms</td></tr>
+<tr><td>Server start → editable</td><td class="num">&lt; 500 ms</td></tr>
+<tr><td>Release binary</td><td class="num">≤ 10 MB</td></tr></table>
+<p class="blk">The status bar shows the real render time so the budget is always in view. If a change breaks a budget, shrink the change — see <span class="wl">[[TERMINAL-AESTHETICS]]</span>.</p>
+<div class="eor">— End of record · 004 —</div>` },
+
+  "005": { slug:"AS-WE-MAY-THINK", title:"AS WE MAY THINK", type:"Reference", kicker:"REFERENCE · REF 005 · 1945",
+    created:"2026-03-14", tags:["reading","research"], body:`
+<p class="blk">Vannevar Bush, 1945. The memex: a device in which an individual stores all their books, records and communications, mechanized so it may be consulted with exceeding speed and flexibility. An enlarged intimate supplement to memory.</p>
+<blockquote class="blk">The process of tying two items together is the important thing.<span class="att">— As We May Think</span></blockquote>
+<p class="blk">Associative trails, not hierarchies. The direct ancestor of the wikilink — cited by <span class="wl">[[DAILY-LOG]]</span> and <span class="wl">[[READING-LIST]]</span>.</p>
+<div class="eor">— End of record · 005 —</div>` }
+};
+
+let ORDER = ["000","001","002","003","004","005"];
+let current = "003";
+let nextRef = 6;
+let mode = "note";                 // note | today | conflict | settings
+
+/* ---- utilities -------------------------------------------------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const esc = h => { const d = document.createElement("div"); d.innerHTML = h; return d.innerText; };
+const words = id => (esc(PAGES[id].body).trim().match(/\S+/g) || []).length;
+const bytes = id => new Blob([PAGES[id].body]).size;
+const pad = n => String(n).padStart(2,"0");
+const today = () => new Date().toISOString().slice(0,10);
+const norm = s => s.toUpperCase().replace(/[\s_]+/g,"-").replace(/[^\w\-⌘]/g,"").trim();
+
+/* resolve a [[target]] string to a page id, or null */
+function resolveTarget(raw){
+  const t = norm(raw);
+  if (/^\d{3}$/.test(t) && PAGES[t]) return t;              // by ref
+  for (const id of ORDER){
+    const p = PAGES[id];
+    if (norm(p.slug) === t || norm(p.title) === t) return id;
+  }
+  return null;
+}
+
+/* ---- nav + tags + chrome --------------------------------------- */
+function buildNav(){
+  $("#nav").innerHTML = ORDER.map(id => `
+    <div class="nrow${id===current&&mode==="note"?" act":""}" data-page="${id}" tabindex="0" role="button">
+      <span class="ref">${id}</span>
+      <span class="nm">${PAGES[id].title}</span>
+      <span class="ct">${words(id)}W</span>
+    </div>`).join("");
+  $("#idxCount").textContent = `[${ORDER.length}]`;
+}
+function buildTags(){
+  const counts = {};
+  ORDER.forEach(id => PAGES[id].tags.forEach(t => counts[t] = (counts[t]||0)+1));
+  const max = Math.max(1, ...Object.values(counts));
+  $("#tags").innerHTML = Object.entries(counts).sort((a,b)=>b[1]-a[1]).map(([t,n])=>{
+    const fill = Math.round(n/max*8);
+    return `<div class="trow" data-tag="${t}"><span>#${t}</span>
+      <span class="meter">${"▓".repeat(fill)}${"░".repeat(8-fill)}</span>
+      <span class="n">${pad(n)}</span></div>`;
+  }).join("");
+}
+function refreshChrome(){
+  const totalBytes = ORDER.reduce((a,id)=>a+bytes(id),0);
+  const kb = (totalBytes/1024).toFixed(1);
+  $("#fileStat").innerHTML = `<b>${ORDER.length}</b>&nbsp;files · <b>${kb}</b>&nbsp;KB`;
+  $("#sfFiles").textContent = `${ORDER.length} · ${kb} KB`;
+}
+
+$("#nav").addEventListener("click", e => {
+  const r = e.target.closest(".nrow");
+  if (r) openPage(r.dataset.page);
+});
+$("#nav").addEventListener("keydown", e => {
+  const rows = $$(".nrow");
+  const i = rows.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "j"){ e.preventDefault(); rows[Math.min(i+1,rows.length-1)]?.focus(); }
+  if (e.key === "ArrowUp"   || e.key === "k"){ e.preventDefault(); rows[Math.max(i-1,0)]?.focus(); }
+  if ((e.key === "Enter" || e.key === " ") && i>=0){ e.preventDefault(); openPage(rows[i].dataset.page); }
+});
+$("#tags").addEventListener("click", e => {
+  const r = e.target.closest(".trow"); if (!r) return;
+  palOpen(); palq.value = r.dataset.tag; palSel = 0; palRender();
+});
+
+/* ---- view switching -------------------------------------------- */
+function showView(m){
+  mode = m;
+  $("#doc").hidden = m !== "note";
+  $("#viewToday").hidden = m !== "today";
+  $("#viewConflict").hidden = m !== "conflict";
+  $("#viewSettings").hidden = m !== "settings";
+  $$(".nrow").forEach(r => r.classList.toggle("act", m==="note" && r.dataset.page === current));
+}
+
+/* ---- page render ------------------------------------------------ */
+function pageShell(id){
+  const p = PAGES[id];
+  return `
+<div class="doc-kicker">${p.kicker}</div>
+<h1 class="doc-title">${p.title}</h1>
+<div class="meta-grid" contenteditable="false">
+  <div><label>Created</label><span>${p.created}</span></div>
+  <div><label>Modified</label><span>${today()} ${pad(new Date().getUTCHours())}:${pad(new Date().getUTCMinutes())}Z</span></div>
+  <div><label>Words</label><span class="mg-words">—</span></div>
+  <div><label>Status</label><span class="mg-status">◉ ACTIVE</span></div>
+</div>` + p.body;
+}
+
+function openPage(id, t0){
+  if (!PAGES[id]) return;
+  t0 = t0 ?? performance.now();
+  showView("note");
+  current = id;
+  $("#doc").innerHTML = pageShell(id);
+  $("#crumb").textContent = `INDEX / ${id} / ${PAGES[id].slug}`;
+  $("#iRef").textContent = id;
+  $("#iType").textContent = PAGES[id].type;
+  $("#iTags").innerHTML = PAGES[id].tags.map(t=>`<span class="chip o">#${t}</span>`).join(" ") || "—";
+  $$(".nrow").forEach(r => r.classList.toggle("act", r.dataset.page === id));
+  refreshCounts();
+  buildOutline();
+  buildBacklinks(id);
+  document.body.classList.remove("side-open");
+  const dt = performance.now() - t0;
+  $("#rt").innerHTML = `Render <b>${dt.toFixed(2)}ms</b>`;
+}
+
+function refreshCounts(){
+  const w = words(current);
+  $("#wc").textContent = `${w} words · ${esc(PAGES[current].body).length} chars`;
+  $("#iWords").textContent = w;
+  const mg = $("#doc .mg-words"); if (mg) mg.textContent = w;
+  const row = document.querySelector(`.nrow[data-page="${current}"] .ct`);
+  if (row) row.textContent = `${w}W`;
+  refreshChrome();
+}
+
+function buildOutline(){
+  const secs = [...document.querySelectorAll("#doc h2.sec")];
+  $("#outline").innerHTML = secs.length
+    ? secs.map((s,i)=>`<div class="orow" data-i="${i}"><span class="on">${pad(i+1)}</span><span>${s.innerText.replace(/^[0-9§ ]+/,"")}</span></div>`).join("")
+    : `<div class="insp-empty">No sections</div>`;
+}
+$("#outline").addEventListener("click", e => {
+  const r = e.target.closest(".orow"); if (!r || r.dataset.i === undefined) return;
+  const s = document.querySelectorAll("#doc h2.sec")[+r.dataset.i];
+  if (s) $("#main").scrollTo({top: s.offsetTop - 60});
+});
+
+/* backlinks: DERIVED by scanning every note for wikilinks to id ---- */
+function buildBacklinks(id){
+  const hits = [];
+  for (const other of ORDER){
+    if (other === id) continue;
+    const found = [...PAGES[other].body.matchAll(/\[\[([^\]]+)\]\]/g)]
+      .some(m => resolveTarget(m[1]) === id);
+    if (found) hits.push(other);
+  }
+  $("#blCount").textContent = `[${hits.length}]`;
+  $("#backlinks").innerHTML = hits.length
+    ? hits.map(o=>`<div class="brow" data-page="${o}"><span class="ref">${o}</span><span>${PAGES[o].title}</span></div>`).join("")
+    : `<div class="insp-empty">No inbound links</div>`;
+}
+$("#backlinks").addEventListener("click", e => {
+  const r = e.target.closest(".brow"); if (r) openPage(r.dataset.page);
+});
+
+/* ---- editor: persist + counts + todo toggles + WIKILINKS -------- */
+const doc = $("#doc");
+doc.addEventListener("input", () => {
+  const clone = doc.cloneNode(true);
+  clone.querySelectorAll(".doc-kicker,.doc-title,.meta-grid").forEach(n => n.remove());
+  PAGES[current].body = clone.innerHTML;
+  refreshCounts();
+});
+doc.addEventListener("click", e => {
+  const wl = e.target.closest(".wl");
+  if (wl){
+    e.preventDefault();
+    const raw = wl.textContent.replace(/[\[\]]/g,"").trim();
+    if (raw === "⌘K"){ palOpen(); return; }
+    const target = resolveTarget(raw);
+    if (target){ openPage(target); }
+    else { createFromLink(raw); }   // create-on-click, per §04
+    return;
+  }
+  if (e.target.classList.contains("box")){
+    const t = e.target.closest(".todo");
+    t.classList.toggle("done");
+    e.target.textContent = t.classList.contains("done") ? "[x]" : "[ ]";
+    doc.dispatchEvent(new Event("input"));
+  }
+});
+
+function createFromLink(raw){
+  const id = String(nextRef++).padStart(3,"0");
+  const title = raw.toUpperCase();
+  PAGES[id] = { slug:norm(raw), title, type:"Note", kicker:`NOTE · REF ${id} · NEW`,
+    created:today(), tags:[],
+    body:`<p class="blk">Blank sheet. Title required; the rest is yours.</p>
+<div class="eor">— End of record · ${id} —</div>` };
+  ORDER.push(id); buildNav(); buildTags(); openPage(id);
+}
+
+/* ---- new note --------------------------------------------------- */
+function newNote(){
+  const id = String(nextRef++).padStart(3,"0");
+  PAGES[id] = { slug:"UNTITLED", title:"UNTITLED", type:"Note", kicker:`NOTE · REF ${id} · REV 01`,
+    created: today(), tags:[],
+    body:`<p class="blk">Blank sheet. Title required; the rest is yours.</p>
+<div class="eor">— End of record · ${id} —</div>` };
+  ORDER.push(id); buildNav(); buildTags(); openPage(id);
+}
+
+/* ================================================================
+   TODAY — every open task across the vault, toggled in place.
+   ================================================================ */
+function openToday(){
+  const t0 = performance.now();
+  showView("today");
+  $("#crumb").textContent = "INDEX / TODAY / OPEN-TASKS";
+  const groups = [];
+  for (const id of ORDER){
+    const tmp = document.createElement("div"); tmp.innerHTML = PAGES[id].body;
+    const todos = [...tmp.querySelectorAll(".todo")];
+    if (!todos.length) continue;
+    groups.push({ id, todos: todos.map((el,i)=>({ done: el.classList.contains("done"),
+      text: el.querySelector(".txt").textContent, idx:i })) });
+  }
+  const open = groups.reduce((a,g)=>a+g.todos.filter(t=>!t.done).length,0);
+  const total = groups.reduce((a,g)=>a+g.todos.length,0);
+  $("#viewToday").innerHTML = `
+    <div class="view-kicker">AGGREGATE · ${today()} · DERIVED FROM VAULT</div>
+    <h1>TODAY</h1>
+    <p class="lede">${open} open · ${total} total. Toggling here writes straight through to the source note — this view stores nothing.</p>
+    ${groups.map(g=>`
+      <div class="grp-h"><span class="n">${g.id}</span> ${PAGES[g.id].title}</div>
+      ${g.todos.map(t=>`
+        <div class="task${t.done?" done":""}" data-page="${g.id}" data-idx="${t.idx}">
+          <span class="box">${t.done?"[x]":"[ ]"}</span>
+          <span class="t">${t.text}</span>
+          <span class="src" data-open="${g.id}">→ ${g.id}</span>
+        </div>`).join("")}
+    `).join("") || `<p class="lede">No tasks in the vault.</p>`}`;
+  $("#rt").innerHTML = `Render <b>${(performance.now()-t0).toFixed(2)}ms</b>`;
+}
+$("#viewToday").addEventListener("click", e => {
+  const open = e.target.closest("[data-open]");
+  if (open){ openPage(open.dataset.open); return; }
+  const task = e.target.closest(".task"); if (!task) return;
+  // write through to the source note body
+  const tmp = document.createElement("div"); tmp.innerHTML = PAGES[task.dataset.page].body;
+  const el = tmp.querySelectorAll(".todo")[+task.dataset.idx];
+  const nowDone = !el.classList.contains("done");
+  el.classList.toggle("done", nowDone);
+  el.querySelector(".box").textContent = nowDone ? "[x]" : "[ ]";
+  PAGES[task.dataset.page].body = tmp.innerHTML;
+  openToday();
+});
+
+/* ================================================================
+   CONFLICT — human vs disk, side by side. Never a modal (note 003).
+   ================================================================ */
+const CONFLICT = [
+  { a:"# Terminal aesthetics", b:"# Terminal aesthetics", same:true },
+  { a:"One typeface. Two weights.", b:"One typeface family. Two weights.", same:false },
+  { a:"- [ ] Latency budget: 16ms", b:"- [x] Latency budget: 16ms", same:false },
+  { a:"Hairlines are the only chrome.", b:"Hairlines are the only chrome.", same:true },
+  { a:"", b:"See [[PERF-DOCTRINE]] for the numbers.", same:false }
+];
+let picks = {};
+function openConflict(){
+  showView("conflict");
+  $("#crumb").textContent = "INDEX / 003 / ⚠ CONFLICT";
+  picks = {};
+  renderConflict();
+}
+function renderConflict(){
+  const rows = CONFLICT.map((l,i)=>{
+    if (l.same) return `<div class="dline">
+      <div class="dcell same">${l.a||"·"}</div><div class="dcell same">${l.b||"·"}</div></div>`;
+    const pa = picks[i]==="a"?" pick":"", pb = picks[i]==="b"?" pick":"";
+    return `<div class="dline">
+      <div class="dcell diff-a${pa}" data-i="${i}" data-side="a"><span class="mk">−</span>${l.a||"∅ (empty)"}</div>
+      <div class="dcell diff-b${pb}" data-i="${i}" data-side="b"><span class="mk">+</span>${l.b||"∅ (empty)"}</div></div>`;
+  }).join("");
+  const unresolved = CONFLICT.filter((l,i)=>!l.same && !picks[i]).length;
+  $("#viewConflict").innerHTML = `
+    <div class="view-kicker">003-TERMINAL-AESTHETICS.CONFLICT-1685Z.MD · UNRESOLVED</div>
+    <h1>Conflict · pick lines</h1>
+    <p class="lede">You edited this note in the UI while an agent rewrote it on disk. No revision is discarded and no modal blocks you — choose line by line, like a typesetter picking sorts.</p>
+    <div class="diff">
+      <div class="diff-head"><div>◐ LOCAL (your buffer)</div><div>◉ DISK (agent write)</div></div>
+      ${rows}
+    </div>
+    <div class="resolvebar">
+      <span>${unresolved? unresolved+" line(s) still to choose" : "All lines chosen"}</span>
+      <button class="btn" id="btnResolve" ${unresolved?"disabled":""}>Write merge → 003</button>
+    </div>`;
+}
+$("#viewConflict").addEventListener("click", e => {
+  const c = e.target.closest(".dcell.diff-a,.dcell.diff-b");
+  if (c){ picks[c.dataset.i] = c.dataset.side; renderConflict(); return; }
+  if (e.target.id === "btnResolve"){ openPage("003"); }
+});
+
+/* ================================================================
+   SETTINGS — theme, font theme, and a REAL bring-your-own-font load.
+   ================================================================ */
+function openSettings(){
+  showView("settings");
+  $("#crumb").textContent = "INDEX / SETTINGS / DISPLAY";
+  const dark = document.documentElement.classList.contains("dark");
+  const tele = document.documentElement.classList.contains("teletype");
+  $("#viewSettings").innerHTML = `
+    <div class="view-kicker">CONFIG · .register/config.json</div>
+    <h1>Settings</h1>
+    <p class="lede">Display only. Everything here writes to one small config file in the vault — never a database.</p>
+    <div class="set-row"><span class="lab">Scheme</span>
+      <div class="seg" id="segScheme">
+        <button data-v="light" aria-pressed="${!dark}">Light</button>
+        <button data-v="dark" aria-pressed="${dark}">Dark</button>
+      </div></div>
+    <div class="set-row"><span class="lab">Body face</span>
+      <div class="seg" id="segFont">
+        <button data-v="default" aria-pressed="${!tele}">Default · Commit</button>
+        <button data-v="teletype" aria-pressed="${tele}">Teletype · Server</button>
+      </div></div>
+    <div class="set-row"><span class="lab">Licensed font</span>
+      <div class="byof">
+        <p>Load your own <b>Berkeley&nbsp;Mono / TX-02</b> from disk. It registers as family <code>TX-02</code> — the first name in the stack — so the whole app restyles instantly. The bytes never leave this machine and are never committed.</p>
+        <label class="file">Choose .woff2 / .ttf / .otf<input type="file" id="byofInput" accept=".woff2,.ttf,.otf,.woff" hidden></label>
+        <div class="status" id="byofStatus">No licensed font loaded — showing Commit Mono.</div>
+      </div></div>
+    <div class="legal"><b>Why BYOF:</b> Berkeley Mono is commercial and cannot ship inside an open-source repo. A licensee loading their own copy for personal use is not the project distributing it. REGISTER ships only OFL faces (Commit Mono, Departure Mono, Server Mono).</div>`;
+}
+$("#viewSettings").addEventListener("click", e => {
+  const s = e.target.closest("#segScheme button");
+  if (s){ document.documentElement.classList.toggle("dark", s.dataset.v==="dark"); openSettings(); return; }
+  const f = e.target.closest("#segFont button");
+  if (f){ document.documentElement.classList.toggle("teletype", f.dataset.v==="teletype"); openSettings(); return; }
+});
+$("#viewSettings").addEventListener("change", async e => {
+  if (e.target.id !== "byofInput") return;
+  const file = e.target.files[0]; if (!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const face = new FontFace("TX-02", buf);
+    await face.load(); document.fonts.add(face);
+    $("#byofStatus").innerHTML = `<b>◉ Loaded</b> ${file.name} — registered as TX-02. App restyled.`;
+  }catch(err){
+    $("#byofStatus").innerHTML = `<b>✕ Failed</b> — ${file.name} is not a usable font file.`;
+  }
+});
+
+/* ================================================================
+   AGENT-EDIT-LIVE — the headline demo. Simulates Claude Code
+   appending a capture to the inbox on disk; the watcher fires and
+   the UI repaints. Instant state changes only (doctrine-safe).
+   ================================================================ */
+function demoAgentEdit(){
+  openPage("000");
+  const stamp = new Date().toISOString().slice(11,16)+"Z";
+  const row = `<tr class="agent-row"><td class="num">${stamp}</td><td class="c"><span class="chip">CLAUDE</span></td><td>Agent capture — filed by <span class="wl">[[PERF-DOCTRINE]]</span> run, appeared live via watcher</td></tr>`;
+  setTimeout(() => {
+    const table = $("#doc table.tbl");
+    if (!table){ return; }
+    const t0 = performance.now();
+    table.insertAdjacentHTML("beforeend", row);
+    const tr = table.querySelector(".agent-row");
+    tr.style.background = "var(--sel-bg)"; tr.querySelectorAll("td").forEach(td=>td.style.color="var(--sel-fg)");
+    doc.dispatchEvent(new Event("input"));
+    $("#rt").innerHTML = `Watcher +1 <b>${(performance.now()-t0).toFixed(2)}ms</b>`;
+    setTimeout(() => { tr.style.background=""; tr.querySelectorAll("td").forEach(td=>td.style.color=""); }, 1100);
+  }, 650);
+}
+
+/* ---- theme / inspector ------------------------------------------ */
+const invert = () => {
+  document.documentElement.classList.toggle("dark");
+  $("#btnInv").setAttribute("aria-pressed", document.documentElement.classList.contains("dark"));
+};
+const toggleInsp = () => document.body.classList.toggle("no-insp");
+$("#btnInv").addEventListener("click", invert);
+$("#btnIdx").addEventListener("click", () => document.body.classList.toggle("side-open"));
+
+/* ---- clock ------------------------------------------------------ */
+function tick(){ $("#clock").textContent = new Date().toISOString().slice(0,19).replace("T"," ") + "Z"; }
+tick(); setInterval(tick, 1000);
+
+/* ================================================================
+   COMMAND PALETTE — commands + REAL full-text note search.
+   ================================================================ */
+const CMDS = [
+  { label:"NEW NOTE",            k:"N",   run:newNote },
+  { label:"GO · TODAY / TASKS",  k:"⌘D",  run:openToday },
+  { label:"DEMO · AGENT EDIT (watch a note land live)", k:"⌘E", run:demoAgentEdit },
+  { label:"OPEN · CONFLICT RESOLVER", k:"⌘⇧R", run:openConflict },
+  { label:"SETTINGS · DISPLAY & BYOF", k:"⌘,", run:openSettings },
+  { label:"INVERT DISPLAY",      k:"I",   run:invert },
+  { label:"TOGGLE INSPECTOR",    k:"]",   run:toggleInsp },
+  { label:"COPY NOTE AS TEXT",   k:"⌘⇧C", run:copyNote },
+];
+function copyNote(){
+  const txt = esc(PAGES[current].body);
+  if (navigator.clipboard) navigator.clipboard.writeText(txt).catch(()=>{});
+  $("#rt").innerHTML = `Copied <b>${txt.length} chars</b>`;
+}
+function hl(text, q){
+  if (!q) return text;
+  const i = text.toUpperCase().indexOf(q.toUpperCase());
+  if (i<0) return text;
+  return text.slice(0,i)+"<mark>"+text.slice(i,i+q.length)+"</mark>"+text.slice(i+q.length);
+}
+
+const scrim = $("#scrim"), palq = $("#palq"), palList = $("#palList");
+let palSel = 0, palFlat = [];
+
+function searchNotes(q){
+  const Q = q.toUpperCase();
+  return ORDER.map(id => {
+    const p = PAGES[id];
+    const text = esc(p.body);
+    const hay = (p.title+" "+p.slug+" "+p.tags.join(" ")+" "+text).toUpperCase();
+    const pos = hay.indexOf(Q);
+    if (pos < 0) return null;
+    // snippet around first body hit
+    const bpos = text.toUpperCase().indexOf(Q);
+    const snip = bpos>=0 ? text.slice(Math.max(0,bpos-18), bpos+42).replace(/\s+/g," ").trim() : p.tags.map(t=>"#"+t).join(" ");
+    return { id, title:p.title, snip, score:(norm(p.title).includes(Q)?0:1) };
+  }).filter(Boolean).sort((a,b)=>a.score-b.score);
+}
+function palRender(){
+  const q = palq.value.trim();
+  const cmds = q ? CMDS.filter(c => c.label.toUpperCase().includes(q.toUpperCase())) : CMDS;
+  const notes = q ? searchNotes(q) : [];
+  palFlat = [];
+  let html = "";
+  if (notes.length){
+    html += `<div class="pal-sec">Notes · ${notes.length}</div>`;
+    notes.forEach(n=>{
+      const idx = palFlat.push({type:"note",id:n.id})-1;
+      html += `<div class="prow${idx===palSel?" sel":""}" data-i="${idx}">
+        <span class="pr-note"><span class="ref">${n.id}</span>
+        <span>${hl(n.title,q)}</span><span class="snip">${hl(n.snip,q)}</span></span></div>`;
+    });
+  }
+  if (cmds.length){
+    html += `<div class="pal-sec">Commands · ${cmds.length}</div>`;
+    cmds.forEach(c=>{
+      const idx = palFlat.push({type:"cmd",cmd:c})-1;
+      html += `<div class="prow${idx===palSel?" sel":""}" data-i="${idx}">
+        <span>${hl(c.label,q)}</span><span class="k">[${c.k}]</span></div>`;
+    });
+  }
+  palList.innerHTML = html || `<div class="pal-empty">No note or command matches “${q}”. [N] creates a note.</div>`;
+  $("#palCount").textContent = `${palFlat.length} result${palFlat.length===1?"":"s"}`;
+  const sel = palList.querySelector(".prow.sel");
+  if (sel) sel.scrollIntoView({block:"nearest"});
+}
+function palOpen(){ scrim.hidden = false; palq.value = ""; palSel = 0; palRender(); palq.focus(); }
+function palClose(){ scrim.hidden = true; }
+function palRun(){
+  const it = palFlat[palSel]; if (!it) return;
+  palClose();
+  if (it.type==="note") openPage(it.id); else it.cmd.run();
+}
+palq.addEventListener("input", () => { palSel = 0; palRender(); });
+palList.addEventListener("click", e => {
+  const r = e.target.closest(".prow"); if (!r) return;
+  palSel = +r.dataset.i; palRun();
+});
+scrim.addEventListener("click", e => { if (e.target === scrim) palClose(); });
+$("#btnPal").addEventListener("click", palOpen);
+
+/* ---- keys ------------------------------------------------------- */
+document.addEventListener("keydown", e => {
+  const meta = e.metaKey || e.ctrlKey;
+  if (meta && e.key.toLowerCase() === "k"){ e.preventDefault(); scrim.hidden ? palOpen() : palClose(); return; }
+  if (!scrim.hidden){
+    if (e.key === "Escape") palClose();
+    if (e.key === "ArrowDown"){ e.preventDefault(); palSel = Math.min(palSel+1, palFlat.length-1); palRender(); }
+    if (e.key === "ArrowUp"){ e.preventDefault(); palSel = Math.max(palSel-1, 0); palRender(); }
+    if (e.key === "Enter"){ e.preventDefault(); palRun(); }
+    return;
+  }
+  if (meta && e.key.toLowerCase() === "d"){ e.preventDefault(); openToday(); return; }
+  if (meta && e.key.toLowerCase() === "e"){ e.preventDefault(); demoAgentEdit(); return; }
+  if (meta && e.shiftKey && e.key.toLowerCase() === "r"){ e.preventDefault(); openConflict(); return; }
+  if (meta && e.key === ","){ e.preventDefault(); openSettings(); return; }
+  const t = e.target;
+  const typing = t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA";
+  if (typing || meta) return;
+  if (e.key === "n") newNote();
+  if (e.key === "i") invert();
+  if (e.key === "]") toggleInsp();
+});
+
+/* ---- boot ------------------------------------------------------- */
+buildNav(); buildTags(); refreshChrome();
+openPage("003");
+</script>
+</body>
+</html>

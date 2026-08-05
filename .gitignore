@@ -1,0 +1,12 @@
+# Rust
+/target/
+
+# Node
+node_modules/
+app/dist/
+
+# Dev vault (cargo run -- serve ./devvault)
+/devvault/
+
+# OS
+.DS_Store

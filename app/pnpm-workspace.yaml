@@ -1,0 +1,18 @@
+# pnpm 11 refuses to resolve lockfile entries published within `minimumReleaseAge`
+# minutes. Pinned here so a pnpm upgrade cannot silently change what CI enforces;
+# pnpm's own default is the same 1440 but is not part of any manifest.
+minimumReleaseAge: 1440
+
+# Dated exemption, not policy: @biomejs/biome@2.5.7 was published 2026-08-04T13:22Z
+# and clears the window at 2026-08-05T13:22Z. After that, re-run `pnpm install` and
+# delete this block.
+minimumReleaseAgeExclude:
+  - '@biomejs/biome@2.5.7'
+  - '@biomejs/cli-darwin-arm64@2.5.7'
+  - '@biomejs/cli-darwin-x64@2.5.7'
+  - '@biomejs/cli-linux-arm64-musl@2.5.7'
+  - '@biomejs/cli-linux-arm64@2.5.7'
+  - '@biomejs/cli-linux-x64-musl@2.5.7'
+  - '@biomejs/cli-linux-x64@2.5.7'
+  - '@biomejs/cli-win32-arm64@2.5.7'
+  - '@biomejs/cli-win32-x64@2.5.7'

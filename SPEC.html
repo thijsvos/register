@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev E</title>
+<script>/* boot into the OS scheme before first paint */
+if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
+<style>
+:root{
+  --bg:#ffffff; --fg:#000000; --line:#000000; --hi:#000000;
+  --dim:#454545; --faint:#8a8a8a;
+  --hover:rgba(0,0,0,.055);
+  --signal:#ff2a00;
+  --sel-bg:#000000; --sel-fg:#ffffff;
+}
+html.dark{
+  /* one ink, tuned per surface — soft dark, not maximum contrast */
+  --bg:oklch(0.17 0.006 74); --hi:oklch(0.94 0.004 85); --fg:oklch(0.855 0.004 82);
+  --line:oklch(0.80 0.004 82); --dim:oklch(0.66 0.004 82); --faint:oklch(0.46 0.004 82);
+  --hover:rgba(255,255,255,.08);
+  --sel-bg:oklch(0.94 0.004 85); --sel-fg:oklch(0.17 0.006 74);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg);color-scheme:light}
+html.dark{color-scheme:dark}
+body{
+  font-family:"Berkeley Mono","TX-02","Commit Mono",ui-monospace,"SF Mono","Cascadia Mono","JetBrains Mono",Menlo,Consolas,monospace;
+  font-size:13px;line-height:1.6;background:var(--bg);color:var(--fg);
+  -webkit-font-smoothing:antialiased;
+}
+.mast-mid h1,h2.sec,h3.sub,strong{color:var(--hi)}
+::selection{background:var(--sel-bg);color:var(--sel-fg)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--bg);border-left:1px solid var(--line)}
+::-webkit-scrollbar-thumb{background:var(--fg)}
+a{color:inherit;text-decoration:underline;text-underline-offset:3px}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+:focus-visible{outline:1px dashed var(--fg);outline-offset:2px}
+
+.sheet{max-width:900px;margin:0 auto;padding:36px 28px 90px}
+.cross{position:fixed;z-index:60;color:var(--fg);font-size:12px;line-height:1;pointer-events:none;user-select:none}
+.c-tl{top:3px;left:5px}.c-tr{top:3px;right:5px}.c-bl{bottom:3px;left:5px}.c-br{bottom:3px;right:5px}
+
+.mast{border:1px solid var(--line);outline:1px solid var(--line);outline-offset:3px;margin-bottom:34px}
+.mast-top{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:12px 16px;border-bottom:1px solid var(--line)}
+.mast-top .co{font-size:10px;letter-spacing:.22em;text-transform:uppercase}
+.mast-top .no{font-size:10px;letter-spacing:.14em;color:var(--dim)}
+.mast-mid{padding:22px 16px 18px}
+.mast-mid h1{font-size:26px;line-height:1.15;letter-spacing:.04em;text-transform:uppercase;font-weight:700}
+.mast-mid .sub{margin-top:6px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.mast-grid{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line)}
+.mast-grid>div{padding:8px 12px;border-right:1px solid var(--line)}
+.mast-grid>div:last-child{border-right:none}
+.mast-grid label{display:block;font-size:8.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.mast-grid span{font-size:11.5px;letter-spacing:.03em}
+.st{color:var(--signal)}
+.theme-key{border:1px solid var(--line);padding:2px 8px;font-size:10px;letter-spacing:.08em}
+.theme-key:hover{background:var(--sel-bg);color:var(--sel-fg)}
+
+.toc{border:1px solid var(--line);margin-bottom:40px}
+.toc-h{padding:8px 14px;border-bottom:1px solid var(--line);font-size:9.5px;font-weight:700;
+  letter-spacing:.2em;text-transform:uppercase}
+.toc-grid{display:grid;grid-template-columns:1fr 1fr}
+.toc a{display:grid;grid-template-columns:34px 1fr;gap:8px;padding:6px 14px;font-size:12px;
+  text-decoration:none;letter-spacing:.03em}
+.toc a:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.toc a .n{color:var(--dim);font-size:11px}
+.toc a:hover .n{color:var(--sel-fg)}
+
+section{margin:0 0 46px}
+h2.sec{display:flex;align-items:baseline;gap:12px;margin:0 0 16px;padding-bottom:8px;
+  border-bottom:2px solid var(--line);font-size:15px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase}
+h2.sec .no{color:var(--dim);font-weight:400;font-size:13px}
+h3.sub{margin:26px 0 10px;font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+  display:flex;align-items:center;gap:10px}
+h3.sub::after{content:"";flex:1;border-top:1px solid var(--line)}
+p{margin:0 0 13px;max-width:76ch}
+p.dim{color:var(--dim);font-size:12px}
+ul.plain{margin:0 0 14px;padding-left:0;list-style:none}
+ul.plain li{padding-left:18px;position:relative;margin-bottom:6px;max-width:76ch}
+ul.plain li::before{content:"▪";position:absolute;left:0;top:0}
+
+table{width:100%;border-collapse:collapse;border:1px solid var(--line);margin:0 0 18px;font-size:12px}
+th{background:var(--sel-bg);color:var(--sel-fg);font-size:9.5px;font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;text-align:left;padding:6px 10px;border:1px solid var(--line)}
+td{border:1px solid var(--line);padding:6px 10px;vertical-align:top}
+td.k{white-space:nowrap;font-weight:700}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.chip{display:inline-block;background:var(--sel-bg);color:var(--sel-fg);font-size:9px;
+  letter-spacing:.12em;padding:1px 6px;vertical-align:1px}
+.callout{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);
+  padding:11px 13px;margin:0 0 16px;max-width:80ch}
+.callout .chip{flex:none;transform:translateY(2px)}
+.callout.warn{border-width:2px}
+
+.code{border:1px solid var(--line);margin:0 0 18px}
+.codebar{display:flex;justify-content:space-between;align-items:center;gap:10px;
+  padding:5px 10px;border-bottom:1px solid var(--line)}
+.codebar .lbl{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.copy{border:1px solid var(--line);padding:1px 8px;font-size:9px;letter-spacing:.12em}
+.copy:hover{background:var(--sel-bg);color:var(--sel-fg)}
+.code pre{padding:12px 14px;font-size:12px;line-height:1.55;overflow-x:auto;white-space:pre}
+.rule{display:flex;align-items:center;gap:12px;margin:34px 0;color:var(--faint);font-size:10px}
+.rule::before,.rule::after{content:"";flex:1;border-top:1px solid var(--line)}
+
+.phase{border:1px solid var(--line);margin:0 0 22px}
+.phase-h{display:flex;justify-content:space-between;align-items:baseline;gap:12px;
+  padding:8px 13px;border-bottom:1px solid var(--line)}
+.phase-h .t{font-size:11.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}
+.phase-h .m{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.phase-b{padding:12px 13px}
+.phase-b p{font-size:12px}
+.phase .code{margin:10px 0 12px}
+.done{font-size:11.5px}
+.done .dh{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim);margin-bottom:4px}
+.done li{margin-bottom:3px}
+
+.barcode{height:22px;margin-top:44px;background:repeating-linear-gradient(90deg,
+  var(--fg) 0 2px, transparent 2px 4px,
+  var(--fg) 4px 5px, transparent 5px 9px,
+  var(--fg) 9px 12px, transparent 12px 14px)}
+.eor{margin-top:6px;text-align:center;font-size:9.5px;letter-spacing:.3em;
+  text-transform:uppercase;color:var(--faint)}
+
+@media (max-width:640px){
+  .sheet{padding:22px 14px 70px}
+  .mast-grid,.toc-grid{grid-template-columns:1fr 1fr}
+  .mast-grid>div:nth-child(2n){border-right:none}
+  .mast-grid>div{border-bottom:1px solid var(--line)}
+  .mast-grid>div:nth-child(n+3){border-bottom:none}
+  table{display:block;overflow-x:auto}
+}
+@media print{
+  .cross,.copy,.theme-key{display:none}
+  body{font-size:11px}
+  .sheet{max-width:none;padding:0}
+  .phase,.code,table{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<span class="cross c-tl">+</span><span class="cross c-tr">+</span>
+<span class="cross c-bl">+</span><span class="cross c-br">+</span>
+
+<div class="sheet">
+
+<!-- ═══════════════ MASTHEAD ═══════════════ -->
+<div class="mast">
+  <div class="mast-top">
+    <span class="co">Register Project · Engineering Document</span>
+    <span class="no">RG-SPEC-001 · REV E <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+  </div>
+  <div class="mast-mid">
+    <h1>Register RG-1<br>Build Specification</h1>
+    <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
+  </div>
+  <div class="mast-grid">
+    <div><label>Issued</label><span>2026-08-05 · Rev E</span></div>
+    <div><label>Status</label><span class="st">◉ Approved for build</span></div>
+    <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
+    <div><label>Builder</label><span>Claude Code, supervised</span></div>
+  </div>
+</div>
+
+<div class="callout"><span class="chip">Rev B</span><div><strong>Changes from Rev A:</strong> product renamed MEMEX → REGISTER (registration marks · CPU register · book of record). Architecture pivoted from browser-database to <strong>files-as-truth</strong>: a single Rust binary serves the unchanged web UI and reads/writes a plain markdown vault, so coding agents work with it out of the box, the Obsidian way. Yjs, IndexedDB-as-store, and y-sweet are removed; git replaces them for history and multi-device. <strong>§02 Design system is carried over verbatim and is non-negotiable.</strong></div></div>
+
+<div class="callout"><span class="chip">Rev C</span><div><strong>Changes from Rev B:</strong> all runtime and toolchain pins verified against current stable (2026-08) — Node 24 LTS, Rust 1.97, current Actions majors — and a <strong>version doctrine</strong> added (§06): pins live in one place each (.nvmrc, rust-toolchain.toml, packageManager), P0 re-verifies them against live sources at build time, and Dependabot keeps them current thereafter. No <code>latest</code> tags anywhere.</div></div>
+
+<div class="callout"><span class="chip">Rev D</span><div><strong>Changes from Rev C:</strong> scope language corrected from permanent to staged. §01 "non-goals" is now a <strong>v1 scope fence — deferred, not forbidden</strong>; a new <strong>§12 Roadmap</strong> gives every deferred feature an explicit landing path that preserves the vault contract; §10, §11, P11 and CONTRIBUTING guidance updated to a park-and-promote process (roadmap entry → ADR → milestone). The <strong>only permanent constraint is the §02 design system.</strong></div></div>
+
+<div class="callout warn"><span class="chip">Rev E</span><div><strong>Changes from Rev D — design review merged:</strong> a new <strong>§02b</strong> makes component states and all seven v1 screens (editor, search, first-run, conflict, TODAY, settings/BYOF, agent-edit-live) normative, so the builder stops improvising where §02 was silent. Type corrected — micro-label is <strong>11&nbsp;px</strong> on Departure Mono's pixel grid (was 9.5&nbsp;px, off-grid); body measure capped at ~68&nbsp;ch; note titles are sentence-case (uppercase reserved for chrome). Contrast fixed: <code>--dim</code> is now content-safe and <code>--faint</code> is decorative-only, retiring the false "AAA by construction" claim. Chrome shows <strong>only true state</strong> (watcher, vault, files, git, render) — the fabricated sync/store/activity gauges are gone. The reference prototype is now <strong>MK-II Rev E</strong> and implements this section.</div></div>
+
+<!-- ═══════════════ TOC ═══════════════ -->
+<div class="toc">
+  <div class="toc-h">Contents</div>
+  <div class="toc-grid">
+    <a href="#s01"><span class="n">§01</span><span>Product definition</span></a>
+    <a href="#s07"><span class="n">§07</span><span>Containerization &amp; distribution</span></a>
+    <a href="#s02"><span class="n">§02</span><span>Design system (non-negotiable)</span></a>
+    <a href="#s02b"><span class="n">§02b</span><span>Component states &amp; screen specs</span></a>
+    <a href="#s08"><span class="n">§08</span><span>Claude Code build plan A→Z</span></a>
+    <a href="#s03"><span class="n">§03</span><span>Typography &amp; font licensing</span></a>
+    <a href="#s09"><span class="n">§09</span><span>Testing &amp; QA</span></a>
+    <a href="#s04"><span class="n">§04</span><span>Architecture, vault &amp; agent contract</span></a>
+    <a href="#s10"><span class="n">§10</span><span>Milestones &amp; acceptance</span></a>
+    <a href="#s05"><span class="n">§05</span><span>Repository layout</span></a>
+    <a href="#s11"><span class="n">§11</span><span>Risks &amp; decisions</span></a>
+    <a href="#s06"><span class="n">§06</span><span>Budgets &amp; CI</span></a>
+    <a href="#s12"><span class="n">§12</span><span>Roadmap · post-v1 expansion</span></a>
+    <a href="#s13"><span class="n">§13</span><span>Appendix · sources</span></a>
+  </div>
+</div>
+
+<!-- ═══════════════ §01 ═══════════════ -->
+<section id="s01">
+<h2 class="sec"><span class="no">§01</span>Product definition</h2>
+<p><strong>REGISTER</strong> is a keyboard-first second brain whose entire state is a folder of markdown files. A single small binary (<code>register serve ~/vault</code>) renders that folder as a fast, terminal-grade UI on localhost. Humans edit through the UI; agents edit the files directly; the watcher keeps both views identical within 100&nbsp;ms. V1 ships five things — notes, links, tags, tasks, search — done to instrument grade; everything else is staged for later (§12), not refused.</p>
+
+<h3 class="sub">Operating principles</h3>
+<table>
+<tr><th style="width:30%">Principle</th><th>Meaning in practice</th></tr>
+<tr><td class="k">Files are the truth</td><td>No database, no hidden state. Every capability of the UI is expressible as a plain file edit. Derived data (backlinks, tasks, index) is computed, never stored.</td></tr>
+<tr><td class="k">Agent-compatible by construction</td><td>Not an "agent interface" — the vault itself is the interface. <code>register init</code> writes a CLAUDE.md agent contract into every vault so Claude Code (or any agent) knows the conventions with zero setup.</td></tr>
+<tr><td class="k">Instrument, not lounge</td><td>Every pixel accounted for, every state visible, nothing moves unless it means something. Zero transitions; the only animation is a status LED.</td></tr>
+<tr><td class="k">Latency is a material</td><td>16&nbsp;ms interaction budget, watcher→UI under 100&nbsp;ms, both enforced in CI. The status bar displays real render time.</td></tr>
+<tr><td class="k">Keyboard first</td><td>⌘K is the front door. Every action reachable without a mouse; every control shows its key.</td></tr>
+<tr><td class="k">One accent</td><td>Monochrome plus a single signal color, used only for live status. Selection is inverse video.</td></tr>
+</table>
+
+<h3 class="sub">V1 scope fence — deferred, not forbidden</h3>
+<p>The following are out of <em>this run</em> to keep v1 small, fast, and finishable. Each one has a designed landing path in §12 that respects the vault contract, so adding it later is expansion, not rework. Deferred ≠ declined.</p>
+<ul class="plain">
+<li><strong>Deferred to §12:</strong> query/table views ("databases"), kanban boards, graph view, plugin system, rich-text surface, realtime co-editing, native mobile shells, importers.</li>
+<li><strong>Deferred infrastructure:</strong> any proprietary sync service. V1 history and multi-device are git (or the user's Syncthing/Drive); richer sync is a §12 item, not a v1 dependency.</li>
+<li><strong>Permanent, by design:</strong> no accounts requirement, no telemetry, and the §02 design system. These are the identity of the product; everything else is schedule.</li>
+</ul>
+</section>
+
+<!-- ═══════════════ §02 ═══════════════ -->
+<section id="s02">
+<h2 class="sec"><span class="no">§02</span>Design system · non-negotiable</h2>
+<p>Unchanged from Rev A and binding regardless of runtime: engineering-grade monochrome, one typeface family in two working weights, 1&nbsp;px hairlines as the only chrome, uppercase micro-labels with wide tracking, ISO-8601 timestamps, reference numbers on everything, registration crosses at the corners (the product is literally named after them). No shadows, no border-radius, no gradients. Emphasis is a double rule (border + offset outline). Active state is full inverse video.</p>
+
+<div class="code"><div class="codebar"><span class="lbl">File · app/src/styles/tokens.css</span><button class="copy">Copy</button></div>
+<pre>:root {
+  /* color — monochrome + one signal */
+  --bg: #ffffff;  --fg: #000000;  --line: #000000;
+  --dim: #454545;                    /* content-safe ≈9.7:1 on white (AAA) */
+  --faint: #8a8a8a;                  /* DECORATIVE ONLY — crosses, meters, rules; never content */
+  --hover: rgba(0,0,0,.055);
+  --signal: #ff2a00;                 /* status LED only */
+  --sel-bg: #000000; --sel-fg: #ffffff;
+  --hi: var(--fg);                   /* brightest ink; on dark it is lighter than body */
+
+  /* type */
+  --font-ui: "TX-02", "Berkeley Mono", "Commit Mono",
+             ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-micro: "Departure Mono", var(--font-ui);
+  --text-micro: 11px;   --track-micro: .16em;   /* Departure Mono renders on an 11px pixel grid */
+  --text-ui: 11px;      --track-ui: .06em;
+  --text-body: 13px;    --lh-body: 1.6;
+  --text-title: 22px;
+  --measure: 68ch;      /* body line-length cap — never full-bleed prose */
+
+  /* space (4px grid) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+}
+html.dark {
+  /* soft dark: warm near-black, demoted body ink, dimmed hairlines */
+  --bg: oklch(0.17 0.006 74);        /* not #000 — cuts halation */
+  --hi: oklch(0.94 0.004 85);        /* titles, active, emphasis */
+  --fg: oklch(0.855 0.004 82);       /* body ink, demoted from full white */
+  --line: oklch(0.80 0.004 82);
+  --dim: oklch(0.66 0.004 82);
+  --faint: oklch(0.46 0.004 82);
+  --hover: rgba(255,255,255,.08);
+  --sel-bg: oklch(0.94 0.004 85); --sel-fg: oklch(0.17 0.006 74);
+}</pre></div>
+
+<h3 class="sub">Type scale</h3>
+<table>
+<tr><th>Role</th><th>Face</th><th class="num">Size</th><th class="num">Track</th><th>Case</th><th>Use</th></tr>
+<tr><td class="k">Microlabel</td><td>Departure Mono</td><td class="num">11px</td><td class="num">+16%</td><td>UPPER</td><td>Pane labels, status bar, kickers (11px grid — never 9.5)</td></tr>
+<tr><td class="k">UI</td><td>Commit Mono 400/700</td><td class="num">11px</td><td class="num">+6%</td><td>UPPER</td><td>Nav, buttons, key hints, table headers</td></tr>
+<tr><td class="k">Body</td><td>Commit Mono 400</td><td class="num">13px</td><td class="num">0</td><td>Sentence</td><td>Note text, editor</td></tr>
+<tr><td class="k">Title</td><td>Commit Mono 700</td><td class="num">22px</td><td class="num">+2%</td><td>Sentence</td><td>Note titles (uppercase reserved for chrome, not content)</td></tr>
+</table>
+
+<h3 class="sub">Component doctrine</h3>
+<ul class="plain">
+<li><strong>Frame:</strong> header rail (44px) / sidebar (250px) / editor / inspector (268px) / status bar (30px), separated by 1px hairlines. Registration crosses at viewport corners.</li>
+<li><strong>Theme:</strong> boots into the OS scheme before first paint (inline head script); INV inverts; <code>color-scheme</code> declared per theme. <strong>Dark is tuned, not inverted:</strong> the rule is <em>one ink, tuned per surface</em> — a warm near-black ground (never #000), body ink demoted below full white to kill halation, hairlines dimmed, and the brightest ink (<code>--hi</code>) reserved for titles, active rows and emphasis. Light stays true black on white for long-form legibility. Pure #000/#fff maximum contrast is the amateur tell.</li>
+<li><strong>Motion:</strong> none. <code>prefers-reduced-motion</code> also stills the status LED.</li>
+<li><strong>A11y floor:</strong> visible dashed focus rings; full keyboard traversal (arrow / j-k in lists); text meets WCAG AA minimum, AAA for body — <code>--dim</code> is content-safe, <code>--faint</code> is decorative-only and never carries meaning; semantic landmarks.</li>
+<li><strong>Voice:</strong> plain, directive, instrument-voiced. "No notes match. [N] creates one." Errors state what happened and the fix; they never apologize.</li>
+</ul>
+</section>
+
+<!-- ═══════════════ §02b ═══════════════ -->
+<section id="s02b">
+<h2 class="sec"><span class="no">§02b</span>Component states &amp; screen specs · normative</h2>
+<p>Rev D shipped §02 as tokens plus prose. That is enough to make one screen look right and not enough to keep seven screens consistent — so a builder improvises exactly where it hurts (search, conflict, settings) and CI, which only greps for stray colors, never catches it. This section closes that gap: every interactive component's states and every v1 screen's layout are part of the contract. Build to these; do not invent.</p>
+
+<h3 class="sub">Interaction states — every interactive element</h3>
+<table>
+<tr><th>Component</th><th>Default</th><th>Hover</th><th>Active / selected</th><th>Focus (keyboard)</th></tr>
+<tr><td class="k">Nav row</td><td>fg on bg, dim ref</td><td>--hover wash</td><td>full inverse video</td><td>inset dashed ring; ↑↓ / j–k traversal</td></tr>
+<tr><td class="k">Button / key</td><td>1px box</td><td>inverse video</td><td>aria-pressed ⇒ inverse</td><td>dashed ring, offset 2px</td></tr>
+<tr><td class="k">Palette row</td><td>fg on bg</td><td>--hover</td><td>inverse (one at a time)</td><td>selection follows ↑↓, scrolls into view</td></tr>
+<tr><td class="k">Task / todo</td><td>[ ] fg</td><td>box cursor</td><td>[x] + dim strikethrough</td><td>toggle by click or ↵; writes to file</td></tr>
+<tr><td class="k">Wikilink</td><td>dashed underline</td><td>inverse</td><td>opens target instantly</td><td>dotted + dim when target missing (create-on-click)</td></tr>
+<tr><td class="k">Input</td><td>signal caret ›, no box</td><td>—</td><td>—</td><td>caret only; the label is the frame</td></tr>
+</table>
+<p class="dim">Disabled = --dim text, no hover, cursor not-allowed. No state has a transition — the change is instant. The only animation permitted anywhere is the status LED, and it stills under prefers-reduced-motion.</p>
+
+<h3 class="sub">Screens — layout is the source of truth</h3>
+<p>Seven screens make v1, each drawn below in the product's own idiom. Fidelity to these frames is a review gate, not a suggestion.</p>
+
+<div class="callout warn"><span class="chip">Core</span><div>The <strong>wikilink click is the defining interaction</strong> — capture, link, find. It must resolve by title or ref, open instantly, and create-on-miss. A prototype that renders <code>[[links]]</code> as dead text has demonstrated a skin, not the tool. Likewise ⌘K must run <strong>real full-text search</strong> over the corpus, not filter a fixed command list.</div></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 1 · EDITOR (default)</span></div>
+<pre>┌ header 44 ──────────────────────────────────────────┐
+│ ■ REGISTER   INDEX / 003 / TERMINAL-AESTHETICS   clock INV ⌘K│
+├ side 250 ──┬ editor (measure 68ch) ────────┬ inspector 268┤
+│ INDEX [6]  │ NOTE · REF 003 · REV 07          │ PROPERTIES   │
+│ 003 …  act │ Terminal aesthetics  (sentence)  │ REF 003      │
+│ 004 …      │ ┌created┬modified┬words┬status┐  │ OUTLINE      │
+│ TAGS       │ body 13px, [[wikilinks]] live   │ BACKLINKS[n] │
+│ #design ▓▓ │ - [ ] tasks toggle in place     │ (all derived)│
+├ footer 30 ─┴───────────────────────────┴─────────────┤
+│ ● WATCHER LIVE · VAULT ~/vault · RENDER 0.7ms · n files · GIT │
+└───────────────────────────────────────────────┘</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 2 · ⌘K — full-text search + commands (one surface)</span></div>
+<pre>┌ COMMAND &amp; SEARCH ──────────────────────── [ESC] ┐
+│ › termi|                                            │
+├─────────────────────────────────────────┤
+│ NOTES · 2                                            │
+│ 003  Terminal aesthetics   …read like a spec…       │  ← inverse when selected
+│ 004  Perf doctrine         …keep it there…          │
+│ COMMANDS · 1                                         │
+│ GO · TODAY / TASKS                          [⌘D]    │
+├─────────────────────────────────────────┤
+│ ↑↓ navigate · ↵ open/run              3 results       │
+└─────────────────────────────────────────┘
+Match is highlighted with the signal color; search covers
+title + body + tags client-side (MiniSearch, §04).</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 3 · EMPTY / FIRST-RUN</span></div>
+<pre>register serve ~/vault  →  empty vault
+
+  NO NOTES YET.
+  [N] creates the first one.   ⌘K opens the console.
+  Point Claude Code at this folder and it writes
+  straight to disk — you will watch the note appear.
+
+Voice is instrument, never apology: state the next action,
+do not decorate the absence.</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 4 · CONFLICT — human vs disk, side by side, never a modal</span></div>
+<pre>003-….conflict-1685Z.md · UNRESOLVED
+┌ ◐ LOCAL (your buffer) ────┬ ◉ DISK (agent write) ──┐
+│ = # Terminal aesthetics   │ = # Terminal aesthetics  │
+│ − One typeface. Two…      │ + One typeface FAMILY…   │ ← pick a side
+│ − [ ] Latency budget 16ms │ + [x] Latency budget…    │
+│ = Hairlines are chrome.   │ = Hairlines are chrome.  │
+│ − ∅ (empty)               │ + See [[PERF-DOCTRINE]]  │
+└────────────────────────┴─────────────────────┘
+[ all lines chosen ]                    ‹Write merge → 003›
+Chosen cell is inverse + ◉ KEPT. No revision is destroyed.</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 5 · TODAY — tasks derived from the whole vault</span></div>
+<pre>AGGREGATE · 2026-08-05 · DERIVED FROM VAULT
+TODAY              3 open · 5 total   (stores nothing)
+── 001 DAILY LOG ───────────────────────────────
+[ ] Reply to foundry re: license tiers            → 001
+[ ] Verify agent-edit-to-paint under 100ms        → 001
+── 003 TERMINAL AESTHETICS ─────────────────────
+[ ] Inverse video replaces every hover glow       → 003
+Toggling writes through to the source note.</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 6 · SETTINGS / BYOF — the only chrome that writes config</span></div>
+<pre>CONFIG · .register/config.json
+SCHEME     [ Light ][ Dark ]
+BODY FACE  [ Default·Commit ][ Teletype·Server ]
+LICENSED   ┌ load Berkeley Mono / TX-02 from disk ─────┐
+FONT       │ ‹Choose .woff2 / .ttf / .otf›             │
+           │ ◉ Loaded — registered as TX-02, restyled│
+           └────────────────────────────────┘
+╮ Berkeley Mono is commercial: BYOF only, bytes never
+╮ leave the machine, never committed (§03).</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Screen 7 · AGENT-EDIT-LIVE — the headline demo (status-bar states)</span></div>
+<pre>idle    ● WATCHER LIVE ·        · RENDER 0.70ms · 6 files
+agent   ● WATCHER LIVE · +1     · WATCHER +1 4.1ms · 7 files
+        └ external write to ~/vault/000-inbox.md detected,
+          row painted in place ≤100ms; LED is the only motion.
+This scene is M2 acceptance (§10): "Claude Code writing notes
+you watch appear." If the prototype can't stage it, it hasn't
+shown the product.</pre></div>
+
+<h3 class="sub">Fidelity enforcement</h3>
+<ul class="plain">
+<li>Grepping for hardcoded colors (§06) is necessary but not sufficient. Add a Playwright screenshot story per screen above, light and dark, diffed against a committed baseline — so layout drift fails CI, not review.</li>
+<li>The seven frames are the P1 / P5 / P6 / P8 acceptance surface: a screen is "done" only when it matches its frame and its components match the state matrix.</li>
+<li>Chrome shows only derivable truth. No gauge may display a number the system cannot measure (the retired sync/store/activity widgets are the anti-pattern).</li>
+</ul>
+</section>
+
+<!-- ═══════════════ §03 ═══════════════ -->
+<section id="s03">
+<h2 class="sec"><span class="no">§03</span>Typography &amp; font licensing</h2>
+
+<div class="callout warn"><span class="chip">Legal</span><div><strong>Berkeley Mono / TX-02 must never enter the repository.</strong> U.S. Graphics sells it commercially, states its commercial licenses are not compatible with open-source apps, restricts commercial use to UI elements, and generally disallows embedding in text editors/IDEs without direct permission. The design honors it via the font stack + a bring-your-own-font loader only. (Not legal advice; read the licenses.)</div></div>
+
+<table>
+<tr><th>Face</th><th>Role</th><th>Weights</th><th>License</th><th>Ships in repo</th><th>Source</th></tr>
+<tr><td class="k">Commit Mono</td><td>Default UI + body</td><td>400 / 700 (of 4)</td><td>SIL OFL 1.1</td><td>Yes — woff2 + OFL.txt</td><td>github.com/eigilnikolajsen/commit-mono</td></tr>
+<tr><td class="k">Departure Mono</td><td>Micro layer (labels, status, barcodes)</td><td>400, pixel, 11px grid</td><td>SIL OFL 1.1</td><td>Yes — woff2 + OFL.txt</td><td>departuremono.com</td></tr>
+<tr><td class="k">Server Mono</td><td>Alt body theme ("teletype")</td><td>400 + oblique only</td><td>SIL OFL 1.1</td><td>Yes — woff2 + OFL.txt</td><td>servermono.com</td></tr>
+<tr><td class="k">TX-02 Berkeley Mono</td><td>First in stack; loads only if user owns it</td><td>per user license</td><td>Commercial, proprietary</td><td><strong>Never</strong></td><td>usgraphics.com (BYOF)</td></tr>
+</table>
+
+<h3 class="sub">Bring-your-own-font (BYOF)</h3>
+<ul class="plain">
+<li>Settings → "Load licensed font": user picks a local <code>.woff2/.ttf/.otf</code>; bytes are stored in <code>.register/fonts/</code> inside the vault owner's config area, which is gitignored by <code>register init</code> so licensed fonts can never leak into a public repo.</li>
+<li>Registered at boot via the <code>FontFace</code> API under family <code>TX-02</code>, so the stack picks it up with zero CSS changes. A licensee's personal use of their own font is not the project's distribution.</li>
+<li>Repo hygiene: latin-subset woff2 only (~30–60&nbsp;KB each) in <code>app/public/fonts/&lt;face&gt;/</code> with each face's <code>OFL.txt</code> beside it; <code>font-display: swap</code>; preload the two shell fonts.</li>
+</ul>
+</section>
+
+<!-- ═══════════════ §04 ═══════════════ -->
+<section id="s04">
+<h2 class="sec"><span class="no">§04</span>Architecture, vault format &amp; agent contract</h2>
+
+<table>
+<tr><th>Layer</th><th>Choice</th><th>License</th><th>Why</th></tr>
+<tr><td class="k">Server / runtime</td><td>Rust: axum, tokio, tower-http, notify, rust-embed, serde + serde_yaml, ulid, clap</td><td>MIT/Apache</td><td>One static binary ≤ 10 MB, no runtime deps, instant start, cross-compiles everywhere, honest engineering-grade footprint. ~600 lines of server.</td></tr>
+<tr><td class="k">UI</td><td>TypeScript strict · Vite · Svelte 5 (runes)</td><td>MIT</td><td>Unchanged from Rev A; compiles tiny; embedded into the binary at build time.</td></tr>
+<tr><td class="k">Editor</td><td>CodeMirror 6 + lang-markdown + custom live decorations (lazy chunk)</td><td>MIT</td><td>Markdown stays the literal source; checkboxes/wikilinks render in place. No CRDT binding needed anymore.</td></tr>
+<tr><td class="k">Search</td><td>MiniSearch, client-side over the loaded corpus</td><td>MIT</td><td>~7 KB; a 1k-note vault fits comfortably in memory; zero server complexity.</td></tr>
+<tr><td class="k">Persistence</td><td>The filesystem. Atomic writes (tmp + rename), mtime/etag concurrency</td><td>—</td><td>The whole point. Nothing for an agent to corrupt but the files themselves — which are theirs to edit.</td></tr>
+<tr><td class="k">History / sync</td><td>git (optional, scaffolded by init; auto-checkpoint toggle)</td><td>—</td><td>Version history, diffs, multi-device, and branches for drafts — in the tool agents already master.</td></tr>
+<tr><td class="k">Lint / tests</td><td>Biome, Vitest, Playwright · cargo fmt, clippy, cargo test</td><td>MIT/Apache</td><td>One fast toolchain per language.</td></tr>
+</table>
+
+<h3 class="sub">Runtime diagram</h3>
+<div class="code"><div class="codebar"><span class="lbl">Diagram · one binary, one folder, two writers</span><button class="copy">Copy</button></div>
+<pre>            ┌─────────────────────────────────────────────┐
+            │  register (Rust binary, ≤10 MB)             │
+  browser   │  ├ serves embedded UI  (localhost:7777)     │
+  ────────► │  ├ REST: tree · read · write (atomic+etag)  │
+   UI edits │  ├ WS  : file events → clients              │
+            │  └ notify: watches the vault folder         │
+            └───────▲──────────────────────▲──────────────┘
+                    │ read/write           │ fs events
+            ┌───────┴──────────────────────┴──────────────┐
+            │  ~/vault  — plain markdown, the only truth  │
+            └───────▲──────────────────────▲──────────────┘
+                    │                      │
+             Claude Code /           git (history,
+             any agent, any          multi-device,
+             editor, any script      agent superpowers)</pre></div>
+
+<h3 class="sub">HTTP/WS API (complete)</h3>
+<table>
+<tr><th>Endpoint</th><th>Semantics</th></tr>
+<tr><td class="k">GET /api/tree</td><td>All files: path, ref, title, tags, mtime, size, etag. UI builds sidebar + search corpus from this plus bodies.</td></tr>
+<tr><td class="k">GET /api/note/{path}</td><td>Raw markdown + etag.</td></tr>
+<tr><td class="k">PUT /api/note/{path}</td><td>Body + If-Match etag. Atomic tmp+rename. Stale etag ⇒ 409; client writes <code>*.conflict-&lt;ts&gt;.md</code> and surfaces it. Missing path ⇒ create.</td></tr>
+<tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
+<tr><td class="k">WS /api/events</td><td><code>{created|changed|removed, path, etag}</code>, debounced 50 ms, coalesced. Powers live reload of agent edits.</td></tr>
+</table>
+<p class="dim">That is the entire server surface. Refs, links, tasks, tags, search, templates — all client-side derivations of plain text, so the file format alone defines the product.</p>
+
+<h3 class="sub">Vault format — normative</h3>
+<div class="code"><div class="codebar"><span class="lbl">Spec · vault layout + note format</span><button class="copy">Copy</button></div>
+<pre>vault/
+├── CLAUDE.md                    # agent contract (template below)
+├── 000-inbox.md                 # capture queue
+├── notes/003-terminal-aesthetics.md
+├── daily/2026-08-04.md
+├── templates/                   # notes offered by NEW FROM TEMPLATE
+└── .register/                   # app-owned; agents keep out
+    ├── config.json              # theme, fonts, flags
+    ├── fonts/                   # BYOF bytes (gitignored)
+    └── trash/
+
+notes/003-terminal-aesthetics.md
+---
+id: 01J2ZK7Q8W3E5R9T             # ULID, never changes
+ref: 003                         # zero-padded, immutable
+title: Terminal aesthetics
+created: 2026-07-28
+modified: 2026-08-04T13:47:00Z   # maintained by whoever writes
+tags: [design, research]
+---
+Body is plain markdown. [[Wikilinks]] resolve by title or ref.
+- [ ] tasks are plain text. Nothing else is special.
+
+Invariants: filename = ref-slug; ref = highest existing + 1;
+round-trip through the UI is byte-lossless outside frontmatter
+`modified`. This section is the compatibility contract — breaking
+it is a major version.</pre></div>
+
+<h3 class="sub">The agent contract — scaffolded into every vault by <code>register init</code></h3>
+<div class="code"><div class="codebar"><span class="lbl">Template · vault/CLAUDE.md</span><button class="copy">Copy</button></div>
+<pre># This folder is a REGISTER vault — agent contract
+
+Plain markdown, rendered live by the REGISTER app. There is no
+database; these files are the entire state. Edit them freely with
+normal file tools — the UI hot-reloads within 100 ms.
+
+## Layout
+notes/NNN-slug.md     # NNN = zero-padded ref, immutable
+daily/YYYY-MM-DD.md   # daily logs
+000-inbox.md          # capture queue — append, don't reorganize
+templates/            # note templates
+.register/            # app config — do not read or write
+
+## Note format (required frontmatter)
+---
+id: ULID              # never change an existing id
+ref: NNN              # never change an existing ref
+title: Plain title
+created: YYYY-MM-DD
+modified: ISO-8601    # update when you edit
+tags: [lowercase, words]
+---
+
+## Syntax that the app understands
+[[Title]] or [[NNN]]  wikilink        - [ ] / - [x]  task
+Everything else is ordinary markdown.
+
+## Creating a note
+1. ref  = highest NNN in notes/ + 1
+2. id   = fresh ULID
+3. file = notes/NNN-kebab-slug.md with full frontmatter
+
+## Rules
+- Never touch .register/ .
+- *.conflict-*.md are unresolved conflicts: merge into the
+  original, then delete the conflict file.
+- If this vault is a git repo, commit in small units with
+  messages like "note: 014 add crdt reading notes".</pre></div>
+</section>
+
+<!-- ═══════════════ §05 ═══════════════ -->
+<section id="s05">
+<h2 class="sec"><span class="no">§05</span>Repository layout</h2>
+<div class="code"><div class="codebar"><span class="lbl">Tree · target &lt; 5 MB total</span><button class="copy">Copy</button></div>
+<pre>register/
+├── .github/workflows/         ci.yml · release.yml · pages.yml (demo)
+├── .github/dependabot.yml     npm · cargo · actions · docker, weekly
+├── .nvmrc                     24            (Node pin — §06 manifest)
+├── rust-toolchain.toml        channel 1.97  (Rust pin — §06 manifest)
+├── deploy/                    Dockerfile · docker-compose.yml
+├── src/                       Rust server + CLI
+│   ├── main.rs                clap: serve · init · new · health
+│   ├── server.rs              axum routes + embedded UI
+│   ├── vault.rs               read/write/atomic/etag/trash
+│   ├── watch.rs               notify → WS broadcast
+│   └── scaffold.rs            init: folders, CLAUDE.md, git, .gitignore
+├── app/                       Frontend (embedded at build)
+│   ├── src/
+│   │   ├── styles/            tokens.css · base.css
+│   │   ├── core/              store.ts · api.ts · refs.ts · search.ts
+│   │   │                      links.ts · tasks.ts · frontmatter.ts
+│   │   ├── editor/            setup.ts · decorations/ · keymap.ts (lazy)
+│   │   ├── ui/                App.svelte · Frame/ · Palette/ · Panels/
+│   │   └── lib/               time.ts · ulid.ts · byof.ts
+│   ├── public/fonts/          commit-mono/ departure-mono/ server-mono/
+│   └── index.html · vite.config.ts · package.json · pnpm-lock.yaml
+├── tests/e2e/                 Playwright (drives the real binary)
+├── docs/                      screenshot.png ≤200 KB · ADRs/ · agents.md · ROADMAP.md
+├── CLAUDE.md                  repo agent manual (§08 — distinct from
+│                              the vault template in §04)
+├── SPEC.html · LICENSE (MIT) · Cargo.toml · Cargo.lock · biome.json</pre></div>
+</section>
+
+<!-- ═══════════════ §06 ═══════════════ -->
+<section id="s06">
+<h2 class="sec"><span class="no">§06</span>Budgets &amp; CI</h2>
+
+<h3 class="sub">Version doctrine</h3>
+<p>Every pin below was verified against current stable on 2026-08-04. Three rules keep it true forever: (1) each version lives in exactly <strong>one</strong> file, everything else references it; (2) phase P0 re-verifies this manifest against live sources (endoflife.date, official release pages) before scaffolding and bumps it if stable has moved; (3) Dependabot then owns drift. The literal string <code>latest</code> is banned from Dockerfiles, workflows, and manifests.</p>
+<table>
+<tr><th>Component</th><th>Pin (verified 2026-08)</th><th>Single source of truth</th><th>Note</th></tr>
+<tr><td class="k">Node.js</td><td>24 (Active LTS "Krypton")</td><td><code>.nvmrc</code> → CI + <code>engines</code>; <code>node:24-alpine</code> in Docker</td><td>26 is Current, LTS 2026-10; from 27 (Oct 2026) Node ships one all-LTS release per year — revisit at 24's maintenance date.</td></tr>
+<tr><td class="k">Rust</td><td>1.97 (stable)</td><td><code>rust-toolchain.toml</code>; <code>rust:1.97-alpine</code> in Docker</td><td>Six-week train; Dependabot bumps the toolchain file + image together.</td></tr>
+<tr><td class="k">pnpm</td><td>10.x</td><td><code>packageManager</code> field in app/package.json</td><td>Installed explicitly (<code>npm i -g pnpm@10</code>) — Corepack is removed from Node ≥ 25, so nothing may depend on it.</td></tr>
+<tr><td class="k">GitHub Actions</td><td>checkout@v5 · setup-node@v6 · pnpm/action-setup@v4 · dtolnay/rust-toolchain@stable</td><td>workflow files</td><td>Majors move fast in 2026 (runner Node migrations); Dependabot's <code>github-actions</code> ecosystem bumps them weekly.</td></tr>
+<tr><td class="k">npm / crate deps</td><td>exact via lockfiles</td><td><code>pnpm-lock.yaml</code> · <code>Cargo.lock</code> (committed)</td><td>Both lockfiles are committed; CI always installs frozen.</td></tr>
+</table>
+
+<div class="code"><div class="codebar"><span class="lbl">File · .github/dependabot.yml</span><button class="copy">Copy</button></div>
+<pre>version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /app
+    schedule: { interval: weekly }
+    groups: { app-deps: { patterns: ["*"] } }
+  - package-ecosystem: cargo
+    directory: /
+    schedule: { interval: weekly }
+    groups: { server-deps: { patterns: ["*"] } }
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /deploy
+    schedule: { interval: weekly }</pre></div>
+
+<h3 class="sub">Budgets</h3>
+<table>
+<tr><th>Budget</th><th class="num">Limit</th><th>Enforced by</th></tr>
+<tr><td class="k">Release binary</td><td class="num">≤ 10 MB</td><td>CI stat check on tagged builds</td></tr>
+<tr><td class="k">Idle RAM (1k-note vault)</td><td class="num">≤ 50 MB</td><td>e2e measurement on CI profile</td></tr>
+<tr><td class="k">Shell JS (initial)</td><td class="num">≤ 60 KB gz</td><td>size-limit</td></tr>
+<tr><td class="k">Editor chunk (lazy)</td><td class="num">≤ 150 KB gz</td><td>size-limit</td></tr>
+<tr><td class="k">Agent edit → visible in UI</td><td class="num">≤ 100 ms</td><td>Playwright: external write, assert repaint</td></tr>
+<tr><td class="k">Interaction / doc switch</td><td class="num">&lt; 16 ms</td><td>Status-bar RENDER readout + Playwright assertion</td></tr>
+<tr><td class="k">Server start → editable</td><td class="num">&lt; 500 ms</td><td>Playwright timing</td></tr>
+<tr><td class="k">Repository size</td><td class="num">&lt; 5 MB</td><td>CI git count-objects job</td></tr>
+</table>
+
+<div class="code"><div class="codebar"><span class="lbl">File · .github/workflows/ci.yml</span><button class="copy">Copy</button></div>
+<pre>name: CI
+on: [push, pull_request]
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: app } }
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4          # reads packageManager field
+      - uses: actions/setup-node@v6
+        with: { node-version-file: .nvmrc, cache: pnpm, cache-dependency-path: app/pnpm-lock.yaml }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check          # biome + svelte-check
+      - run: pnpm test -- --run
+      - run: pnpm build
+      - run: pnpm size
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable  # rust-toolchain.toml governs
+        with: { components: "rustfmt, clippy" }
+      - run: cargo fmt --check
+      - run: cargo clippy -- -D warnings
+      - run: cargo test
+  repo-size:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - run: |
+          KB=$(git count-objects -v | awk '/size-pack/ {print $2}')
+          echo "pack ${KB} KB"; test "$KB" -lt 5120</pre></div>
+<p class="dim">A separate <code>pages.yml</code> can publish a read-only demo build of the UI with a bundled sample vault to GitHub Pages — marketing, not the product.</p>
+</section>
+
+<!-- ═══════════════ §07 ═══════════════ -->
+<section id="s07">
+<h2 class="sec"><span class="no">§07</span>Containerization &amp; distribution</h2>
+
+<div class="code"><div class="codebar"><span class="lbl">File · deploy/Dockerfile (3-stage → scratch, image ≈ binary size)</span><button class="copy">Copy</button></div>
+<pre>FROM node:24-alpine AS ui                # 24 = Active LTS (§06 manifest)
+WORKDIR /build/app
+RUN npm i -g pnpm@10                     # explicit: Corepack gone in Node ≥25
+COPY app/package.json app/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY app/ .
+RUN pnpm build                       # → dist/, embedded next stage
+
+FROM rust:1.97-alpine AS server          # matches rust-toolchain.toml
+RUN apk add --no-cache musl-dev
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY src ./src
+COPY --from=ui /build/app/dist ./app/dist
+RUN cargo build --release            # static musl binary
+
+FROM scratch
+COPY --from=server /build/target/release/register /register
+VOLUME /vault
+EXPOSE 7777
+ENTRYPOINT ["/register","serve","/vault","--host","0.0.0.0","--port","7777"]</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">File · deploy/docker-compose.yml</span><button class="copy">Copy</button></div>
+<pre>services:
+  register:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    ports: ["7777:7777"]
+    volumes:
+      - ${VAULT_PATH:-./vault}:/vault
+    restart: unless-stopped
+# That's the whole stack. Agents run on the host against the same
+# mounted folder — the container only serves the UI.</pre></div>
+
+<div class="code"><div class="codebar"><span class="lbl">Commands · daily use</span><button class="copy">Copy</button></div>
+<pre># native (primary)
+register init ~/vault --git      # scaffold + CLAUDE.md + git
+register serve ~/vault           # UI on http://localhost:7777
+claude                           # in ~/vault — agent works the files
+
+# container (self-host / server / tailnet)
+VAULT_PATH=~/vault docker compose -f deploy/docker-compose.yml up -d</pre></div>
+
+<h3 class="sub">Distribution</h3>
+<ul class="plain">
+<li>GitHub Releases: prebuilt static binaries for macOS (arm64/x64), Linux (x64/arm64, musl), Windows — built by <code>release.yml</code> on tags, plus the container on ghcr.io.</li>
+<li><code>cargo install register-notes</code> for Rust users; Homebrew tap once v1.0 is out.</li>
+<li>Remote/multi-device pattern: run the container on a home server behind Tailscale; every device gets the UI, the vault stays one folder, git carries history.</li>
+</ul>
+</section>
+
+<!-- ═══════════════ §08 ═══════════════ -->
+<section id="s08">
+<h2 class="sec"><span class="no">§08</span>Claude Code build plan · A→Z</h2>
+<p>Thirteen phases, each a paste-ready prompt. Run in order; one conventional commit per phase (rollback point + clean context boundary). Keep this document in the repo root as <code>SPEC.html</code> so the agent can read it.</p>
+
+<h3 class="sub">A · One-time setup</h3>
+<div class="code"><div class="codebar"><span class="lbl">Shell · install + init</span><button class="copy">Copy</button></div>
+<pre># Claude Code (native installer; docs: code.claude.com/docs/en/setup)
+curl -fsSL https://claude.ai/install.sh | bash
+claude --version && claude doctor
+# requires a Pro / Max / Team / Enterprise or Console account
+
+# Rust toolchain for the server
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+mkdir register && cd register && git init
+# add this document as SPEC.html, create CLAUDE.md (block B), then:
+claude</pre></div>
+
+<h3 class="sub">B · CLAUDE.md — the repo agent manual</h3>
+<div class="code"><div class="codebar"><span class="lbl">File · CLAUDE.md (repo root — distinct from the vault template in §04)</span><button class="copy">Copy</button></div>
+<pre># REGISTER — agent operating manual
+
+Read SPEC.html before any task. It is the contract.
+
+## Commands
+cargo run -- serve ./devvault      # run server against a test vault
+cargo test · cargo fmt · cargo clippy -- -D warnings
+cd app && pnpm dev                 # UI dev (proxies /api to :7777)
+cd app && pnpm check && pnpm test && pnpm build && pnpm size
+
+## Hard rules
+1. §04 vault format is normative. Any change to it is a major
+   version and needs my explicit approval first.
+2. Design tokens only (§02). Never hardcode a color, font, or
+   size; everything derives from app/src/styles/tokens.css.
+3. Budgets are law (§06). If a change breaks a budget, shrink
+   the change, not the budget.
+4. Files are the truth. No databases, no localStorage, no state
+   the vault cannot express. IndexedDB is forbidden.
+5. All vault writes go through vault.rs atomic write + etag.
+   Never write files any other way.
+6. No new dependencies (crate or npm) without docs/ADRs/NNN.md
+   and my approval.
+7. Fonts: only OFL faces with OFL.txt beside them (§03). CI
+   greps for strays.
+8. Zero animations except the status LED; respect
+   prefers-reduced-motion; keep focus rings visible.
+9. TypeScript strict; Rust clippy clean with -D warnings.
+10. A phase is done when: cargo test + fmt + clippy AND pnpm
+    check + test + size are green. Then one conventional commit.
+11. Version doctrine (§06): before scaffolding, verify every
+    manifest pin against current stable (endoflife.date +
+    official release pages) and bump the manifest if stable has
+    moved. Pins live in .nvmrc / rust-toolchain.toml /
+    packageManager only; the string "latest" is banned in
+    Dockerfiles, workflows, and manifests; Dependabot owns
+    drift after P0.
+
+## Style
+Svelte 5 runes. Small modules. UI copy is plain, directive,
+instrument-voiced. Rust: no unwrap() outside tests.</pre></div>
+
+<h3 class="sub">C · Phase prompts</h3>
+
+<div class="phase"><div class="phase-h"><span class="t">P0 · Scaffold</span><span class="m">M0</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §04–§06. FIRST execute the §06 version doctrine:
+verify each manifest pin (Node LTS, Rust stable, pnpm major,
+action majors) against endoflife.date and the official release
+pages using web access; if stable has moved, update the pins
+you are about to write and note it in the commit body. THEN
+scaffold the two-part repo from §05: a Rust binary crate (clap
+CLI with serve/init/new/health stubs; deps only those named in
+§04; rust-toolchain.toml pinned per manifest) and app/ (Vite +
+Svelte 5 + TS strict + Biome + Vitest + size-limit; .nvmrc and
+packageManager per manifest; vite dev proxy /api →
+localhost:7777). Add .github/workflows/ci.yml and
+.github/dependabot.yml exactly as §06, .gitignore, MIT LICENSE,
+README with the §01 thesis. Finish with both toolchains green
+and commit "chore: scaffold".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>cargo run -- health prints ok; pnpm dev serves a blank page; CI green; repo &lt; 1 MB.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P1 · Design system &amp; frame</span><span class="m">M0</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §02, §02b, §03. Implement tokens.css verbatim and
+base.css. Vendor OFL woff2s for Commit Mono (400+700), Departure
+Mono, Server Mono into app/public/fonts/&lt;face&gt;/ with each
+OFL.txt; font-display:swap; preload the two shell fonts. Add the
+pre-paint OS-scheme boot script and per-theme color-scheme.
+Build the frame: header (REGISTER wordmark, breadcrumb, UTC
+clock, INV), empty sidebar, main, inspector, status bar with a
+real RENDER ms readout, corner registration crosses, custom
+scrollbars. Zero transitions. Commit "feat: design system+frame".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>Light/dark correct on OS switch; grep finds no hardcoded colors; every component matches the §02b state matrix and the screen wireframes; shell ≤ 60 KB gz.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P2 · Server core: vault I/O + watcher</span><span class="m">M1</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §04: API table and vault format are normative.
+Implement src/vault.rs (list/read/atomic write via tmp+rename/
+etag from mtime+len/trash-not-delete), src/watch.rs (notify →
+broadcast channel, 50 ms debounce+coalesce, ignore .register/
+and dotfiles), src/server.rs (axum: the five endpoints + WS
+/api/events + embedded app/dist via rust-embed with dev
+fallback to disk). CORS locked to same origin. Integration
+tests: concurrent PUT etag conflict returns 409; external file
+touch emits exactly one WS event. Commit "feat: server core".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>curl round-trip works; echo into the vault produces one WS event; cargo test green.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P3 · Client store: live tree + save pipeline</span><span class="m">M1</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Implement app/src/core/api.ts + store.ts: load /api/tree + note
+bodies into an in-memory corpus; sidebar from real data with
+inverse-video active state, refs and word counts; frontmatter.ts
+(parse/serialize, byte-preserving outside the modified field);
+refs.ts (highest+1); save pipeline debounced 500 ms with etag,
+409 ⇒ write conflict copy + status-bar notice. Subscribe to WS:
+external changes update tree and any open, unmodified note in
+place. New-note flow per §04 invariants. Commit "feat: store".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>Editing a file in a terminal updates the UI ≤ 100 ms; UI edits appear on disk ≤ 600 ms; refs monotonic.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P4 · Editor (CodeMirror 6, lazy)</span><span class="m">M1</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §02+§04. Implement app/src/editor/ as a lazy
+chunk: CM6 + lang-markdown on the note body. Live decorations:
+ATX headings per type scale, - [ ]/- [x] as clickable toggles
+that edit the text, [[wikilinks]] dash-underlined and click-to-
+open (create on missing), inline code + fences boxed per §02.
+External change while the buffer is clean ⇒ cursor-preserving
+minimal-diff replace; while dirty ⇒ keep buffer, flag EXTERNAL
+EDIT in the status bar, offer palette action "reload from disk".
+Words/chars + RENDER ms live. Chunk ≤ 150 KB gz. Commit
+"feat: editor".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>60fps typing on a 5k-word note; checkbox click mutates the file; agent edit mid-view hot-reloads cleanly.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P5 · Command palette &amp; keys</span><span class="m">M1</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §01–§02. Build the ⌘K palette (double-rule frame,
+inverse selection, key hints right-aligned): fuzzy note search +
+commands (new note, go daily, invert, toggle inspector, copy as
+markdown, reload from disk, open vault in file manager via a
+server endpoint). Global keymap: ⌘K, N, I, ], G-chords when not
+editing; Esc closes. Every control shows its key. Commit
+"feat: palette + keymap".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>Full session possible without a mouse; palette opens &lt; 16 ms.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P6 · Search, backlinks, tags</span><span class="m">M2</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Implement core/search.ts (MiniSearch over title/body/tags,
+incremental on store changes) and core/links.ts (wikilink parse
+→ backlinks map). Palette search hits full text with highlighted
+matches. Inspector: PROPERTIES, OUTLINE (clickable), BACKLINKS,
+TAGS with counts; sidebar tag meters from real data. Commit
+"feat: search + backlinks + tags".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>1k-note synthetic vault searches &lt; 20 ms; backlinks proven by tests.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P7 · Daily log, tasks, templates</span><span class="m">M2</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>core/tasks.ts parses - [ ] across the corpus. ⌘D / GO DAILY
+opens daily/YYYY-MM-DD.md, created from templates/daily.md if
+present (idempotent). TODAY view: open tasks grouped by note,
+toggle in place (writes through to files). Notes in templates/
+appear under NEW FROM TEMPLATE. Commit "feat: daily+tasks+
+templates".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>Toggling in TODAY edits the source file; daily creation is idempotent.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P8 · Agent contract: init + live-edit proof</span><span class="m">M2</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §04 agent contract — the CLAUDE.md template is
+normative. Implement src/scaffold.rs and `register init [path]
+[--git]`: create folders, 000-inbox.md, templates/daily.md,
+.register/config.json, the vault CLAUDE.md verbatim, and with
+--git: repo + .gitignore (.register/fonts, .register/trash).
+`register new "title"` creates a conforming note and prints its
+path. Write docs/agents.md: "Using REGISTER with Claude Code"
+(init, serve, then run claude in the vault). e2e test: while the
+UI is open, append to a note via shell and assert the UI shows
+it ≤ 100 ms; create a valid note via shell and assert it appears
+in the sidebar. Commit "feat: init + agent contract".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>Fresh vault → claude can create a valid linked note using only the vault CLAUDE.md; live-edit e2e green.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P9 · BYOF + font themes</span><span class="m">M3</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Read SPEC.html §03 — legal constraints are normative. Settings
+pane: load a local licensed font file; server stores bytes in
+.register/fonts/ (gitignored); served at /api/font and
+registered at boot via FontFace as family "TX-02"; remove wipes
+it. Font theme switch DEFAULT (Commit) / TELETYPE (Server Mono).
+Never fetch fonts from the network. Commit "feat: byof+themes".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>A licensed TX-02 file restyles the app instantly; git status stays clean; export contains no font bytes.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P10 · Release engineering</span><span class="m">M3</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Create deploy/Dockerfile and deploy/docker-compose.yml exactly
+as SPEC.html §07, plus .dockerignore. Add
+.github/workflows/release.yml: on tag v*, build static binaries
+(macOS arm64+x64, Linux x64+arm64 musl, Windows x64), attach to
+the GitHub release, push the image to ghcr.io/OWNER/register,
+and fail if any binary exceeds 10 MB. Document native + docker
+run modes in README. Commit "feat: release engineering".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>docker compose up serves on :7777 against a mounted vault; tag build publishes all artifacts within budget.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P11 · QA hardening</span><span class="m">M3</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Playwright against the real binary: boot → new note → type →
+⌘K nav → checkbox → reload persists → external-edit hot-reload;
+assert doc-switch &lt; 16 ms, start-to-editable &lt; 500 ms, agent-
+edit-to-paint ≤ 100 ms, idle RSS ≤ 50 MB on a 1k-note vault.
+Keyboard-only and reduced-motion audit; fix findings. Finish
+README (thesis, screenshot ≤ 200 KB, budgets, font licensing)
+and CONTRIBUTING.md stating the v1 scope fence (§01), the
+park-and-promote process (§12: roadmap entry → ADR →
+milestone), and that §02 design doctrine is the only permanent
+constraint; seed docs/ROADMAP.md from the §12 table. Commit
+"chore: qa hardening".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>CI fully green incl. e2e + budgets; a stranger goes clone → running in two commands.</li></ul></div>
+</div></div>
+
+<div class="phase"><div class="phase-h"><span class="t">P12 · Git checkpoints + remote mode</span><span class="m">M4 · optional</span></div><div class="phase-b">
+<div class="code"><div class="codebar"><span class="lbl">Prompt → Claude Code</span><button class="copy">Copy</button></div>
+<pre>Behind config flags, OFF by default: (1) auto-checkpoint — if
+the vault is a git repo, debounce-commit "checkpoint: HH:MMZ"
+after idle, never push; status bar shows GIT: CLEAN/N AHEAD.
+(2) remote mode — `register serve --host 0.0.0.0 --token X`
+requires the token as a bearer/cookie for API+WS; document the
+Tailscale pattern from §07. No accounts, no telemetry. Commit
+"feat: checkpoints + remote mode".</pre></div>
+<div class="done"><div class="dh">Done when</div><ul class="plain"><li>History accrues silently and usefully; tokenless remote requests are rejected; localhost stays tokenless.</li></ul></div>
+</div></div>
+</section>
+
+<!-- ═══════════════ §09 ═══════════════ -->
+<section id="s09">
+<h2 class="sec"><span class="no">§09</span>Testing &amp; QA</h2>
+<table>
+<tr><th>Layer</th><th>Tool</th><th>What it proves</th></tr>
+<tr><td class="k">Rust unit/integration</td><td>cargo test</td><td>atomic writes, etag conflicts (409), watcher debounce, trash semantics, scaffold output byte-exact vs §04 template</td></tr>
+<tr><td class="k">UI unit</td><td>Vitest</td><td>frontmatter byte-preservation, ref allocator, wikilink/task parsers, search index, conflict-copy naming</td></tr>
+<tr><td class="k">E2E</td><td>Playwright vs the real binary</td><td>full human loop; <strong>the agent loop</strong> (shell edits ↔ UI, both directions); latency + RAM budgets</td></tr>
+<tr><td class="k">Compat</td><td>fixture vaults</td><td>a vault written by v1 opens unchanged in every later minor — §04 is the contract</td></tr>
+<tr><td class="k">Visual fidelity</td><td>Playwright screenshot stories</td><td>each §02b screen rendered in light + dark, diffed against a committed baseline; layout drift fails CI, not review</td></tr>
+<tr><td class="k">Manual per release</td><td>checklist</td><td>keyboard-only session; OS theme switch; reduced motion; BYOF load/remove; Windows paths</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════ §10 ═══════════════ -->
+<section id="s10">
+<h2 class="sec"><span class="no">§10</span>Milestones &amp; acceptance</h2>
+<table>
+<tr><th>Milestone</th><th>Phases</th><th>Acceptance</th></tr>
+<tr><td class="k">M0 Skeleton</td><td>P0–P1</td><td>Frame renders from the binary; both themes correct; shell budget green.</td></tr>
+<tr><td class="k">M1 Usable notes</td><td>P2–P5</td><td>Daily-driver basics on real files, mouse optional, reload-safe, agent edits visible live.</td></tr>
+<tr><td class="k">M2 Second brain</td><td>P6–P8</td><td>Links, search, tasks — and the headline demo: Claude Code writing notes you watch appear.</td></tr>
+<tr><td class="k">M3 Ship</td><td>P9–P11</td><td>Binaries for 3 OSes + container + green CI = public v1.0 tag.</td></tr>
+<tr><td class="k">M4 Comfort</td><td>P12</td><td>Silent git history; secure remote/tailnet mode.</td></tr>
+<tr><td class="k">M5+ Expansion</td><td>§12</td><td>Features promoted from the roadmap via ADR — importers first, then queries/boards/graph as demand proves out.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════ §11 ═══════════════ -->
+<section id="s11">
+<h2 class="sec"><span class="no">§11</span>Risks &amp; decisions</h2>
+<table>
+<tr><th>Risk / decision</th><th>Position</th></tr>
+<tr><td class="k">Two languages (Rust + TS)</td><td>Accepted: the server is ~600 lines behind a 5-endpoint API; Claude Code is fluent in both; the payoff is a 10 MB dependency-free binary.</td></tr>
+<tr><td class="k">Dropped CRDTs → no realtime co-editing</td><td>Deliberate (ADR-001): single human + agents on one filesystem don't need CRDTs; git covers devices and history. Revisit only if true multi-writer becomes a goal.</td></tr>
+<tr><td class="k">Concurrent human+agent edit of one file</td><td>Etag + visible <code>*.conflict-*.md</code>, resolution documented in the vault CLAUDE.md. Honest beats magical.</td></tr>
+<tr><td class="k">Watcher edge cases (editor swap files, atomic renames, editors that truncate)</td><td>Debounce+coalesce, ignore dotfiles/.register, e2e fixtures for vim/VS Code save patterns.</td></tr>
+<tr><td class="k">Windows paths &amp; line endings</td><td>Normalize to <code>/</code> and LF internally; CI matrix includes Windows for cargo test.</td></tr>
+<tr><td class="k">Name availability</td><td>"REGISTER" is a common word: check GitHub org, crates.io (<code>register-notes</code>), and trademark basics before public launch. Alternates on file: LOGBOOK, FICHE, ARKIV.</td></tr>
+<tr><td class="k">Font licensing drift</td><td>Pin versions; OFL.txt travels with files; CI grep forbids font files outside app/public/fonts; BYOF dir gitignored by scaffold.</td></tr>
+<tr><td class="k">Scope management</td><td>V1 scope is fenced by §01; ideas beyond it are parked on the §12 roadmap via an ADR — promoted when they pass the three gates, never rejected as "out of scope forever." The only permanent fence is the §02 design system.</td></tr>
+</table>
+</section>
+
+<!-- ═══════════════ §12 ═══════════════ -->
+<section id="s12">
+<h2 class="sec"><span class="no">§12</span>Roadmap · post-v1 expansion</h2>
+<p>This section exists so that "not in v1" can never harden into "not ever." Any feature — including everything below and things not yet imagined — may be added when it passes three gates: <strong>(1)</strong> it can be expressed without breaking the §04 vault contract, or it bumps the major version with a documented migration; <strong>(2)</strong> it fits the §06 budgets or ships as lazy-loaded / optional code; <strong>(3)</strong> it obeys the §02 design system, the one permanent constraint. Process: roadmap entry in <code>docs/ROADMAP.md</code> → ADR → milestone. Deferred ≠ declined.</p>
+
+<table>
+<tr><th>Deferred feature</th><th>Designed landing path (contract-safe)</th><th>Prerequisite / trigger</th></tr>
+<tr><td class="k">Query &amp; table views ("databases")</td><td>Inline queries over frontmatter + tags, evaluated client-side and rendered as §02 tables — the Dataview pattern. Notes remain plain files; a query is just text in a note.</td><td>Query-grammar ADR; v1 corpus/store stable.</td></tr>
+<tr><td class="k">Kanban / boards</td><td>A view over existing tasks + tags (columns = tag or status). Pure derivation, zero new storage.</td><td>Query engine above.</td></tr>
+<tr><td class="k">Graph view</td><td>Pure derivation of the backlinks map into a monochrome, hairline-styled panel. No new data.</td><td>Demand-driven; lazy chunk within budget.</td></tr>
+<tr><td class="k">Plugin system</td><td>Versioned, capability-scoped extension points (commands, panels, decorations, query functions) once the core API freezes at v1.x. Plugins may never bypass vault.rs writes.</td><td>API-freeze + security-model ADR.</td></tr>
+<tr><td class="k">Richer editing surface</td><td>Deeper live-preview (tables, images, math rendered in place) — evolution of the P4 decoration layer, markdown stays the literal source. Anything that hides the source must still pass §02.</td><td>Decoration layer proven in the field.</td></tr>
+<tr><td class="k">Realtime co-editing</td><td>Optional CRDT transport (revisit ADR-001) layered on top; files remain canonical and every session flushes to plain markdown.</td><td>True multi-writer demand; ADR-001 reopened.</td></tr>
+<tr><td class="k">Built-in richer sync</td><td>From git checkpoints (P12) toward managed git remotes or an optional relay — always self-hostable, never required.</td><td>P12 shipped; user pull.</td></tr>
+<tr><td class="k">Importers</td><td>One-way converters (Obsidian, Notion export, Logseq) into the §04 format. Read-only, low risk, high adoption value.</td><td>None — good first post-v1 milestone.</td></tr>
+<tr><td class="k">Native shells / mobile ergonomics</td><td>Tauri wrapper around the same embedded UI; remote/tailnet mode already serves every device meanwhile.</td><td>PWA ergonomics measured insufficient.</td></tr>
+<tr><td class="k">E2E-encrypted remote</td><td>Token mode (P12) hardened with encrypted transport for vaults hosted off-device.</td><td>Remote mode adoption.</td></tr>
+</table>
+<p class="dim">docs/ROADMAP.md is the living mirror of this table; P11 seeds it. Community proposals are parked there with a rationale — never closed as "out of scope forever."</p>
+</section>
+
+<!-- ═══════════════ §13 ═══════════════ -->
+<section id="s13">
+<h2 class="sec"><span class="no">§13</span>Appendix · sources</h2>
+<ul class="plain">
+<li>Commit Mono — commitmono.com · github.com/eigilnikolajsen/commit-mono · SIL OFL 1.1.</li>
+<li>Departure Mono — departuremono.com · SIL OFL · pixel mono incl. box-drawing glyphs, 11 px grid.</li>
+<li>Server Mono — servermono.com · github.com/internet-development/www-server-mono · SIL OFL 1.1.</li>
+<li>TX-02 Berkeley Mono — usgraphics.com · commercial; OSS-incompatible license; BYOF only.</li>
+<li>Demo web-font delivery: Commit Mono + Departure Mono served from jsDelivr / Fontsource (OFL); production self-hosts the woff2s per §03. Departure renders on an 11&nbsp;px pixel grid — micro sizes must be multiples of 11&nbsp;px or it blurs.</li>
+<li>Claude Code setup — code.claude.com/docs/en/setup.</li>
+<li>Prior art studied for the files-as-truth pattern: Obsidian (vault model), SilverBullet (server+web UI on markdown).</li>
+</ul>
+</section>
+
+<div class="rule">§</div>
+<p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
+
+<div class="barcode"></div>
+<div class="eor">RG-SPEC-001 · REV D · End of record</div>
+
+</div>
+
+<script>
+document.querySelectorAll(".copy").forEach(btn => {
+  btn.addEventListener("click", async () => {
+    const pre = btn.closest(".code").querySelector("pre");
+    try {
+      await navigator.clipboard.writeText(pre.textContent);
+      btn.textContent = "Copied";
+    } catch { btn.textContent = "Select+copy"; }
+    setTimeout(() => (btn.textContent = "Copy"), 1400);
+  });
+});
+</script>
+</body>
+</html>

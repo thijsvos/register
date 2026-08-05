@@ -1,0 +1,19 @@
+[package]
+name = "register-notes"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "A file-native second brain: one binary serves a folder of markdown."
+readme = "README.md"
+
+[[bin]]
+name = "register"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
