@@ -106,6 +106,17 @@ export async function putNote(path: string, body: string, etag?: string): Promis
   return { ok: true, etag: written }
 }
 
+/**
+ * Ask the server to open the vault in the OS file manager (§08 P5).
+ *
+ * No parameters by design: the server reveals the vault it was launched with, so
+ * the client cannot aim it at anything.
+ */
+export async function revealVault(): Promise<void> {
+  const response = await fetch('/api/reveal', { method: 'POST' })
+  if (!response.ok) await refuse(response)
+}
+
 export async function deleteNote(path: string): Promise<void> {
   const response = await fetch(noteUrl(path), { method: 'DELETE' })
   if (!response.ok) await refuse(response)

@@ -458,9 +458,10 @@ shown the product.</pre></div>
 <tr><td class="k">GET /api/note/{path}</td><td>Raw markdown + etag.</td></tr>
 <tr><td class="k">PUT /api/note/{path}</td><td>Body + If-Match etag. Atomic tmp+rename. Stale etag ⇒ 409; client writes <code>*.conflict-&lt;ts&gt;.md</code> and surfaces it. Missing path ⇒ create.</td></tr>
 <tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
+<tr><td class="k">POST /api/reveal</td><td>Opens the vault in the OS file manager (§08 P5 — a browser cannot). Takes no parameters: the path is always the vault the server was launched with, so nothing a caller sends reaches a process. Refused with 403 unless the listener bound to loopback.</td></tr>
 <tr><td class="k">WS /api/events</td><td><code>{created|changed|removed, path, etag}</code>, debounced 50 ms, coalesced. Powers live reload of agent edits.</td></tr>
 </table>
-<p class="dim">That is the entire server surface. Refs, links, tasks, tags, search, templates — all client-side derivations of plain text, so the file format alone defines the product.</p>
+<p class="dim">That is the entire server surface. Refs, links, tasks, tags, search, templates — all client-side derivations of plain text, so the file format alone defines the product. <code>/api/reveal</code> is the one endpoint that is not about the vault's contents; it exists because opening a file manager is the single thing the UI genuinely cannot do for itself.</p>
 
 <h3 class="sub">Vault format — normative</h3>
 <div class="code"><div class="codebar"><span class="lbl">Spec · vault layout + note format</span><button class="copy">Copy</button></div>

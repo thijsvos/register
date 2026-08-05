@@ -52,6 +52,32 @@ export function newNote(options: {
   ].join('\n')
 }
 
+/** `daily/2026-08-05.md` — §04's dated-log shape. */
+export function dailyPath(now: Date): string {
+  return `daily/${now.toISOString().slice(0, 10)}.md`
+}
+
+/**
+ * A conforming daily log.
+ *
+ * No `ref`: §04 gives daily logs their own filename shape, and a date is not a
+ * ref — the server's allocator skips `daily/` for exactly that reason. P7 adds
+ * creation from `templates/daily.md`; this is the bare conforming note.
+ */
+export function newDaily(now: Date, id?: string): string {
+  const day = now.toISOString().slice(0, 10)
+  return [
+    '---',
+    `id: ${id ?? ulid(now.getTime())}`,
+    `title: ${day}`,
+    `created: ${day}`,
+    `modified: ${now.toISOString().slice(0, 19)}Z`,
+    'tags: [daily]',
+    '---',
+    '',
+  ].join('\n')
+}
+
 /** The tags a note declares, for callers that only hold its text. */
 export function tagsOf(source: string): string[] {
   return list(fields(source).get('tags'))

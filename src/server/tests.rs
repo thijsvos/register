@@ -354,3 +354,42 @@ async fn an_unmatched_api_path_is_404_not_the_spa_shell() {
     assert_eq!(reply.status, 404);
     assert!(!reply.body.contains("<!doctype html>"));
 }
+
+// --------------------------------------------------------------- reveal (P5)
+
+#[tokio::test]
+async fn reveal_is_refused_when_the_server_is_not_on_loopback() {
+    let tmp = TempVault::new();
+    let (events, _keep) = broadcast::channel(1);
+    // Exactly the shape a `--host 0.0.0.0` deployment produces (P12). The Origin
+    // and Host guards can both be satisfied by a forged header; what the
+    // listener bound to cannot.
+    let state =
+        AppState::new(Arc::new(tmp.open()), events).bound_to("0.0.0.0:7777".parse().expect("addr"));
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = serve(bound, state).await;
+    });
+
+    let reply = request(addr, "POST", "/api/reveal", &[], "").await;
+    assert_eq!(reply.status, 403);
+}
+
+#[test]
+fn reveal_defaults_to_available_and_follows_the_bind() {
+    let tmp = TempVault::new();
+    let (events, _keep) = broadcast::channel(1);
+    let state = AppState::new(Arc::new(tmp.open()), events);
+
+    // Constructed state is local until told otherwise, and `bound_to` is what
+    // decides — so the guard cannot be bypassed by forgetting to call it.
+    let loopback = state
+        .clone()
+        .bound_to("127.0.0.1:7777".parse().expect("addr"));
+    let public = state.bound_to("192.168.1.10:7777".parse().expect("addr"));
+
+    assert!(loopback.local);
+    assert!(!public.local);
+}

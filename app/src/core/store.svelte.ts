@@ -9,7 +9,7 @@ import {
   type VaultEvent,
 } from './api'
 import { touchModified, wordCount } from './frontmatter'
-import { newNote, notePath } from './refs'
+import { dailyPath, newDaily, newNote, notePath } from './refs'
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
 const SAVE_DEBOUNCE_MS = 500
@@ -108,6 +108,29 @@ class VaultStore {
       this.tree.find((entry) => (entry.title ?? '').toLowerCase() === lowered) ??
       null
     )
+  }
+
+  /** Open today's daily log, creating it if it is not there yet. */
+  async openDaily(now: Date = new Date()): Promise<void> {
+    const path = dailyPath(now)
+    await this.refresh()
+
+    if (!this.tree.some((entry) => entry.path === path)) {
+      // Idempotent by construction: the name is the date, so a second call the
+      // same day finds the note rather than making another.
+      if (!(await this.#isFree(path))) {
+        await this.open(path)
+        return
+      }
+      try {
+        await putNote(path, newDaily(now))
+      } catch (error) {
+        this.notice = describe(error)
+        return
+      }
+      await this.refresh()
+    }
+    await this.open(path)
   }
 
   /** Follow a wikilink, creating the note if it does not exist (§02b). */

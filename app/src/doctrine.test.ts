@@ -14,6 +14,7 @@ import { describe, expect, it } from 'vitest'
 import indexHtml from '../index.html?raw'
 import baseCss from './styles/base.css?raw'
 import tokensCss from './styles/tokens.css?raw'
+import viewState from './ui/view.svelte.ts?raw'
 
 const TOKENS = './styles/tokens.css'
 const BASE = './styles/base.css'
@@ -181,9 +182,10 @@ describe('boot & theme (§02)', () => {
   })
 
   it('keeps responding to the OS after boot', () => {
-    const app = sources['./ui/App.svelte'] ?? ''
-    expect(app).toMatch(/addEventListener\(\s*['"]change['"]/)
-    expect(app).toMatch(/removeEventListener\(\s*['"]change['"]/)
+    // Lives in the chrome state module, not the component: the palette's
+    // INVERT command needs the same toggle the header button uses.
+    expect(viewState).toMatch(/addEventListener\(\s*['"]change['"]/)
+    expect(viewState).toMatch(/removeEventListener\(\s*['"]change['"]/)
   })
 
   it('swaps rather than blocks on every face, and preloads the shell', () => {

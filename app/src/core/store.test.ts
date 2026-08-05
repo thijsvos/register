@@ -27,6 +27,9 @@ class FakeVault {
   }
 
   #remember(path: string): void {
+    // daily/YYYY-MM-DD.md carries a date, not a ref — mirroring
+    // src/vault.rs::ref_from_path, which skips daily/ for the same reason.
+    if (path.startsWith('daily/')) return
     const found = /(?:^|\/)(\d+)-/.exec(path)?.[1]
     if (found !== undefined) this.#everUsed.add(Number(found))
   }
@@ -414,6 +417,48 @@ describe('refusing to lose work', () => {
       0,
     )
     expect(vault.dirty).toBe(false)
+  })
+})
+
+describe('daily log', () => {
+  const day = new Date('2026-08-05T09:16:40Z')
+
+  it('creates it on first open, with no ref', async () => {
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+
+    const created = server.files.get('daily/2026-08-05.md')
+    expect(created).toBeDefined()
+    // §04 gives daily logs their own filename shape; a date is not a ref, and
+    // the server's allocator skips daily/ for exactly that reason.
+    expect(created?.body).not.toContain('ref:')
+    expect(fields(created?.body ?? '').get('title')).toBe('2026-08-05')
+    expect(vault.openPath).toBe('daily/2026-08-05.md')
+  })
+
+  it('is idempotent — a second call opens the same note', async () => {
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+    const first = server.files.get('daily/2026-08-05.md')?.body
+
+    await vault.openDaily(day)
+    await settle()
+
+    expect([...server.files.keys()].filter((p) => p.startsWith('daily/'))).toHaveLength(1)
+    expect(server.files.get('daily/2026-08-05.md')?.body).toBe(first)
+  })
+
+  it('does not consume a ref', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+
+    await vault.create('After the daily')
+    await settle()
+    expect(server.files.has('notes/004-after-the-daily.md')).toBe(true)
   })
 })
 

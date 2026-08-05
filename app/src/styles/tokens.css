@@ -61,13 +61,25 @@ html.dark {
   --cross-y: 3px;
   --focus-offset: 2px;  /* §02b state matrix: "dashed ring, offset 2px" */
   --focus-inset: -3px;  /* §02b nav row: the ring sits inside the row */
+  --rule-offset: 3px;   /* §02 emphasis: "border + offset outline" */
 
   /* Departure Mono is bitmap-derived on an 11px grid: half-leading must be a
      whole pixel or every micro baseline lands off-pixel and the face blurs.
      (17 - 11) / 2 = 3. The inherited --lh-body 1.6 gives 3.3 and does not. */
   --lh-micro: 17px;
 
+  --scrim: rgba(0,0,0,.28);   /* behind the ⌘K palette (§02b Screen 2) */
+  --pal-width: 600px;
+  --pal-top: 11vh;
+  --pal-max: 52vh;            /* result list before it scrolls */
+
   /* breakpoints are not custom properties (media queries cannot read them);
      they live in the components as literals: 1080px drops the inspector, 760px
      collapses to one column. */
+}
+
+html.dark {
+  /* The scrim carries more weight on a dark ground: at .28 the frame behind it
+     stays legible and the palette stops reading as a layer. */
+  --scrim: rgba(0,0,0,.64);
 }

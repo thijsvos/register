@@ -1,6 +1,8 @@
-//! HTTP + WebSocket surface. §04's API table is normative and complete: these
-//! five endpoints are the entire server. Refs, links, tasks, tags, search and
-//! templates are all client-side derivations of plain text.
+//! HTTP + WebSocket surface. §04's API table is normative: these six endpoints
+//! are the entire server. Refs, links, tasks, tags, search and templates are all
+//! client-side derivations of plain text — the sixth endpoint, `/api/reveal`,
+//! exists only because opening a file manager is something a browser cannot do
+//! for itself (§08 P5).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get};
+use axum::routing::{any, get, post};
 use rust_embed::Embed;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -38,11 +40,24 @@ const MAX_NOTE_BYTES: usize = 16 * 1024 * 1024;
 pub struct AppState {
     vault: Arc<Vault>,
     events: broadcast::Sender<Event>,
+    /// Whether the server is bound to a loopback interface. Gates `/api/reveal`,
+    /// which is the one endpoint that starts a process.
+    local: bool,
 }
 
 impl AppState {
     pub fn new(vault: Arc<Vault>, events: broadcast::Sender<Event>) -> Self {
-        Self { vault, events }
+        Self {
+            vault,
+            events,
+            local: true,
+        }
+    }
+
+    /// Record what the listener actually bound to.
+    pub fn bound_to(mut self, addr: SocketAddr) -> Self {
+        self.local = addr.ip().is_loopback();
+        self
     }
 }
 
@@ -57,6 +72,7 @@ pub fn router(state: AppState) -> Router {
             get(read_note).put(write_note).delete(delete_note),
         )
         .route("/api/events", any(events))
+        .route("/api/reveal", post(reveal))
         .fallback(asset)
         // Chosen deliberately. axum's default is 2 MiB, sized for web forms;
         // §04 puts no cap on a note, and a 2 MiB limit would reject a large
@@ -128,6 +144,57 @@ async fn delete_note(State(state): State<AppState>, Path(path): Path<String>) ->
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
     }
+}
+
+/// Open the vault in the OS file manager (§08 P5).
+///
+/// The one endpoint that starts a process, so it is deliberately the narrowest
+/// thing that satisfies the requirement: it takes **no parameters**. The path is
+/// always the vault root the server was launched with, so there is nothing a
+/// caller can influence and nothing to sanitise — no argument reaches a shell.
+///
+/// It is also refused unless the listener bound to loopback. The Origin and Host
+/// guards already keep a browser out, but a `--host 0.0.0.0` deployment (P12)
+/// would put a process-spawning endpoint on the network, and a forged `Host`
+/// header is cheap. Binding is not forgeable.
+async fn reveal(State(state): State<AppState>) -> Response {
+    if !state.local {
+        return (
+            StatusCode::FORBIDDEN,
+            "reveal is refused unless the server is bound to loopback\n",
+        )
+            .into_response();
+    }
+
+    let root = state.vault.root().to_path_buf();
+    let opened = tokio::task::spawn_blocking(move || open_in_file_manager(&root)).await;
+
+    match opened {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(error)) => {
+            eprintln!("reveal: {error}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "could not open the vault\n",
+            )
+                .into_response()
+        }
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "reveal task failed\n").into_response(),
+    }
+}
+
+fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
+    // No shell anywhere: the path is passed as a single argv entry, so spaces
+    // and metacharacters in a vault name cannot become syntax.
+    let program = if cfg!(target_os = "macos") {
+        "open"
+    } else if cfg!(target_os = "windows") {
+        "explorer"
+    } else {
+        "xdg-open"
+    };
+    std::process::Command::new(program).arg(path).spawn()?;
+    Ok(())
 }
 
 async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {

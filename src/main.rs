@@ -93,7 +93,8 @@ async fn serve(root: PathBuf, host: &str, port: u16) -> Result<(), String> {
         vault.root().display()
     );
 
-    let state = server::AppState::new(vault, events);
+    // The bound address decides whether /api/reveal is available at all.
+    let state = server::AppState::new(vault, events).bound_to(addr);
     server::serve(listener, state)
         .await
         .map_err(|error| error.to_string())
