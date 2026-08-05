@@ -1,0 +1,36 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Etc/UTC",
+  "schedule": ["before 5am on monday"],
+  "labels": ["dependencies"],
+  "prConcurrentLimit": 3,
+  "minimumReleaseAge": "7 days",
+  "packageRules": [
+    {
+      "description": "pnpm 11 refuses to resolve lockfile entries younger than its own minimumReleaseAge (1440 min) and CI installs --frozen-lockfile, so a fresh release would break the install. Seven days clears that window sevenfold. Note Renovate cannot read pnpm's setting itself (renovate#41652), so the two are kept in step by hand.",
+      "matchUpdateTypes": ["minor", "patch"],
+      "minimumReleaseAge": "7 days"
+    },
+    {
+      "description": "A major gets longer to settle before it is proposed.",
+      "matchUpdateTypes": ["major"],
+      "minimumReleaseAge": "30 days"
+    },
+    {
+      "description": "One pull request for the frontend.",
+      "matchManagers": ["npm"],
+      "groupName": "app dependencies"
+    },
+    {
+      "description": "One pull request for the server.",
+      "matchManagers": ["cargo"],
+      "groupName": "server dependencies"
+    },
+    {
+      "description": "The reason this repo runs Renovate rather than Dependabot. SPEC §06 states that every version pin lives in exactly one of .nvmrc, rust-toolchain.toml or the packageManager field, and Dependabot has no manager for any of the three — so the doctrine's own files were the only ones nothing watched. Grouped so a toolchain move arrives as one reviewable change.",
+      "matchManagers": ["nvm", "rust-toolchain"],
+      "groupName": "toolchain pins"
+    }
+  ]
+}

@@ -45,9 +45,9 @@ cd app && pnpm check && pnpm test && pnpm build && pnpm size
     `packageManager` only; `latest` is banned as an image or package version tag
     in Dockerfiles, workflows, and manifests. GitHub runner labels
     (`runs-on: ubuntu-latest`) are exempt — they name GitHub-managed
-    infrastructure rather than a dependency, no Dependabot ecosystem tracks them,
-    and pinning one would create a stale pin nothing owns. Dependabot owns drift
-    after P0.
+    infrastructure rather than a dependency, no update bot tracks them,
+    and pinning one would create a stale pin nothing owns. Renovate owns drift
+    after P0 — it is the only bot with a manager for all three pin files.
 
 ## How we work
 Build through §08 phase by phase, in order. I paste each phase prompt (P0, P1, …)

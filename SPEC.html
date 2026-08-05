@@ -171,6 +171,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 <div class="callout"><span class="chip">Rev C</span><div><strong>Changes from Rev B:</strong> all runtime and toolchain pins verified against current stable (2026-08) — Node 24 LTS, Rust 1.97, current Actions majors — and a <strong>version doctrine</strong> added (§06): pins live in one place each (.nvmrc, rust-toolchain.toml, packageManager), P0 re-verifies them against live sources at build time, and Dependabot keeps them current thereafter. No <code>latest</code> tags anywhere.</div></div>
 
+<div class="callout"><span class="chip">Rev F</span><div><strong>§06 amendment:</strong> drift is owned by <strong>Renovate</strong>, not Dependabot. Not because Dependabot failed — its pnpm 11 support landed 2026-07-29 — but because §06 declares that every pin lives in exactly one of <code>.nvmrc</code>, <code>rust-toolchain.toml</code> or <code>packageManager</code>, and Dependabot has a manager for none of the three. The doctrine's own files were the only ones nothing watched.</div></div>
+
 <div class="callout"><span class="chip">Rev D</span><div><strong>Changes from Rev C:</strong> scope language corrected from permanent to staged. §01 "non-goals" is now a <strong>v1 scope fence — deferred, not forbidden</strong>; a new <strong>§12 Roadmap</strong> gives every deferred feature an explicit landing path that preserves the vault contract; §10, §11, P11 and CONTRIBUTING guidance updated to a park-and-promote process (roadmap entry → ADR → milestone). The <strong>only permanent constraint is the §02 design system.</strong></div></div>
 
 <div class="callout warn"><span class="chip">Rev E</span><div><strong>Changes from Rev D — design review merged:</strong> a new <strong>§02b</strong> makes component states and all seven v1 screens (editor, search, first-run, conflict, TODAY, settings/BYOF, agent-edit-live) normative, so the builder stops improvising where §02 was silent. Type corrected — micro-label is <strong>11&nbsp;px</strong> on Departure Mono's pixel grid (was 9.5&nbsp;px, off-grid); body measure capped at ~68&nbsp;ch; note titles are sentence-case (uppercase reserved for chrome). Contrast fixed: <code>--dim</code> is now content-safe and <code>--faint</code> is decorative-only, retiring the false "AAA by construction" claim. Chrome shows <strong>only true state</strong> (watcher, vault, files, git, render) — the fabricated sync/store/activity gauges are gone. The reference prototype is now <strong>MK-II Rev E</strong> and implements this section.</div></div>
@@ -542,7 +544,8 @@ Everything else is ordinary markdown.
 <div class="code"><div class="codebar"><span class="lbl">Tree · target &lt; 5 MB total</span><button class="copy">Copy</button></div>
 <pre>register/
 ├── .github/workflows/         ci.yml · release.yml · pages.yml (demo)
-├── .github/dependabot.yml     npm · cargo · actions · docker, weekly
+├── renovate.json              npm · cargo · actions · docker · nvm ·
+│                              rust-toolchain, weekly
 ├── .nvmrc                     24            (Node pin — §06 manifest)
 ├── rust-toolchain.toml        channel 1.97  (Rust pin — §06 manifest)
 ├── deploy/                    Dockerfile · docker-compose.yml
@@ -574,33 +577,38 @@ Everything else is ordinary markdown.
 <h2 class="sec"><span class="no">§06</span>Budgets &amp; CI</h2>
 
 <h3 class="sub">Version doctrine</h3>
-<p>Every pin below was verified against current stable on 2026-08-04. Three rules keep it true forever: (1) each version lives in exactly <strong>one</strong> file, everything else references it; (2) phase P0 re-verifies this manifest against live sources (endoflife.date, official release pages) before scaffolding and bumps it if stable has moved; (3) Dependabot then owns drift. The literal string <code>latest</code> is banned from Dockerfiles, workflows, and manifests.</p>
+<p>Every pin below was verified against current stable on 2026-08-04. Three rules keep it true forever: (1) each version lives in exactly <strong>one</strong> file, everything else references it; (2) phase P0 re-verifies this manifest against live sources (endoflife.date, official release pages) before scaffolding and bumps it if stable has moved; (3) Renovate then owns drift. The literal string <code>latest</code> is banned from Dockerfiles, workflows, and manifests.</p>
 <table>
 <tr><th>Component</th><th>Pin (verified 2026-08)</th><th>Single source of truth</th><th>Note</th></tr>
 <tr><td class="k">Node.js</td><td>24 (Active LTS "Krypton")</td><td><code>.nvmrc</code> → CI + <code>engines</code>; <code>node:24-alpine</code> in Docker</td><td>26 is Current, LTS 2026-10; from 27 (Oct 2026) Node ships one all-LTS release per year — revisit at 24's maintenance date.</td></tr>
-<tr><td class="k">Rust</td><td>1.97 (stable)</td><td><code>rust-toolchain.toml</code>; <code>rust:1.97-alpine</code> in Docker</td><td>Six-week train; Dependabot bumps the toolchain file + image together.</td></tr>
+<tr><td class="k">Rust</td><td>1.97 (stable)</td><td><code>rust-toolchain.toml</code>; <code>rust:1.97-alpine</code> in Docker</td><td>Six-week train; Renovate's rust-toolchain manager bumps the toolchain file, and the docker manager the image.</td></tr>
 <tr><td class="k">pnpm</td><td>10.x</td><td><code>packageManager</code> field in app/package.json</td><td>Installed explicitly (<code>npm i -g pnpm@10</code>) — Corepack is removed from Node ≥ 25, so nothing may depend on it.</td></tr>
-<tr><td class="k">GitHub Actions</td><td>checkout@v5 · setup-node@v6 · pnpm/action-setup@v4 · dtolnay/rust-toolchain@stable</td><td>workflow files</td><td>Majors move fast in 2026 (runner Node migrations); Dependabot's <code>github-actions</code> ecosystem bumps them weekly.</td></tr>
+<tr><td class="k">GitHub Actions</td><td>checkout@v5 · setup-node@v6 · pnpm/action-setup@v4 · dtolnay/rust-toolchain@stable</td><td>workflow files</td><td>Majors move fast in 2026 (runner Node migrations); Renovate's <code>github-actions</code> manager bumps them weekly.</td></tr>
 <tr><td class="k">npm / crate deps</td><td>exact via lockfiles</td><td><code>pnpm-lock.yaml</code> · <code>Cargo.lock</code> (committed)</td><td>Both lockfiles are committed; CI always installs frozen.</td></tr>
 </table>
 
-<div class="code"><div class="codebar"><span class="lbl">File · .github/dependabot.yml</span><button class="copy">Copy</button></div>
-<pre>version: 2
-updates:
-  - package-ecosystem: npm
-    directory: /app
-    schedule: { interval: weekly }
-    groups: { app-deps: { patterns: ["*"] } }
-  - package-ecosystem: cargo
-    directory: /
-    schedule: { interval: weekly }
-    groups: { server-deps: { patterns: ["*"] } }
-  - package-ecosystem: github-actions
-    directory: /
-    schedule: { interval: weekly }
-  - package-ecosystem: docker
-    directory: /deploy
-    schedule: { interval: weekly }</pre></div>
+<div class="code"><div class="codebar"><span class="lbl">File · renovate.json</span><button class="copy">Copy</button></div>
+<pre>{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Etc/UTC",
+  "schedule": ["before 5am on monday"],
+  "minimumReleaseAge": "7 days",
+  "prConcurrentLimit": 3,
+  "packageRules": [
+    { "matchUpdateTypes": ["major"], "minimumReleaseAge": "30 days" },
+    { "matchManagers": ["npm"],   "groupName": "app dependencies" },
+    { "matchManagers": ["cargo"], "groupName": "server dependencies" },
+    { "matchManagers": ["nvm", "rust-toolchain"],
+      "groupName": "toolchain pins" }
+  ]
+}</pre></div>
+<p class="dim">Renovate rather than Dependabot for one decisive reason: this section
+says every pin lives in exactly one of <code>.nvmrc</code>,
+<code>rust-toolchain.toml</code> or <code>packageManager</code>, and Dependabot has no
+manager for any of the three — so the doctrine's own files were the only ones nothing
+watched. <code>minimumReleaseAge</code> also has to be kept in step with pnpm's own
+setting by hand; Renovate cannot read it (renovate#41652).</p>
 
 <h3 class="sub">Budgets</h3>
 <table>
@@ -762,7 +770,7 @@ cd app && pnpm check && pnpm test && pnpm build && pnpm size
     official release pages) and bump the manifest if stable has
     moved. Pins live in .nvmrc / rust-toolchain.toml /
     packageManager only; the string "latest" is banned in
-    Dockerfiles, workflows, and manifests; Dependabot owns
+    Dockerfiles, workflows, and manifests; Renovate owns
     drift after P0.
 
 ## Style
