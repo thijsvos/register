@@ -8,8 +8,7 @@
  * record there has ever been.
  */
 import type { Entry, Loaded } from './api'
-import { linkable } from './links'
-import { isTemplate } from './refs'
+import { derived } from './links'
 import { bodyLines } from './scan'
 
 export interface Task {
@@ -89,8 +88,7 @@ export function toggle(source: string, at: number): string | null {
 export function taskGroups(notes: Entry[], corpus: Record<string, Loaded>): TaskGroup[] {
   const groups: TaskGroup[] = []
 
-  for (const entry of linkable(notes)) {
-    if (isTemplate(entry.path)) continue
+  for (const entry of derived(notes)) {
     const held = corpus[entry.path]
     if (held === undefined) continue
 

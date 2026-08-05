@@ -1,10 +1,16 @@
 <script lang="ts">
+import { isListed } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
 import { go, traverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
+// Your notes, not the vault's own furniture. `CLAUDE.md` is the agent's brief
+// and `templates/` are stencils: both are still in ⌘K, and a stencil is also a
+// row under NEW FROM TEMPLATE, so this hides them from a list rather than from
+// the app.
+let notes = $derived(vault.tree.filter((entry) => isListed(entry.path)))
 let tags = $derived(tagCounts(vault.tree))
 // The meter is relative to the commonest tag, not to the note count: a vault
 // where nothing is tagged twice should read as a flat row of equals, not as
@@ -15,11 +21,11 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
 <aside class="side" aria-label="Index">
   <PaneLabel label="Index" meta="[{vault.files}]" />
 
-  {#if vault.tree.length === 0}
+  {#if notes.length === 0}
     <PaneEmpty text="No notes. [N] creates the first one." />
   {:else}
     <nav>
-      {#each vault.tree as entry (entry.path)}
+      {#each notes as entry (entry.path)}
         {@const words = vault.words(entry.path)}
         <button
           class="row"

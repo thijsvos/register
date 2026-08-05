@@ -11,7 +11,8 @@ import {
 } from './api'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
-import { DAILY_TEMPLATE, dailyFrom, dailyPath, noteFrom, notePath } from './refs'
+import { DAILY_TEMPLATE, isListed } from './paths'
+import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
@@ -94,8 +95,15 @@ class VaultStore {
    */
   #lookup = $derived(new NoteLookup(this.tree))
 
+  /**
+   * How many notes the vault holds, as the INDEX and the status bar count them.
+   *
+   * Not `tree.length`: the tree carries the agent contract and the stencils too,
+   * and a sidebar listing eight rows above a status bar claiming ten files is
+   * the app disagreeing with itself about what a note is.
+   */
   get files(): number {
-    return this.tree.length
+    return this.tree.filter((entry) => isListed(entry.path)).length
   }
 
   get active(): Entry | null {

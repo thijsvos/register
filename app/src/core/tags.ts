@@ -6,7 +6,7 @@
  * the tree, and they change when the files do.
  */
 import type { Entry } from './api'
-import { linkable } from './links'
+import { derived } from './links'
 
 export interface TagCount {
   name: string
@@ -21,7 +21,7 @@ export interface TagCount {
 export function tagCounts(notes: Entry[]): TagCount[] {
   const counts = new Map<string, number>()
 
-  for (const entry of linkable(notes)) {
+  for (const entry of derived(notes)) {
     // A note that lists the same tag twice carries it once.
     for (const tag of new Set(entry.tags)) {
       const name = tag.trim()

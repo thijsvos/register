@@ -48,6 +48,17 @@ describe('tagCounts', () => {
     expect(tagCounts([...NOTES, copy])).toEqual(tagCounts(NOTES))
   })
 
+  it('does not count a stencil’s tags or the agent contract as yours', () => {
+    // The vault Claude Code wrote showed #daily = 1 with no daily note in it:
+    // templates/daily.md carries `tags: [daily]`, and a meter for a tag no note
+    // of yours has is a gauge reporting something that is not there.
+    const furniture = [
+      entry('templates/daily.md', ['daily']),
+      entry('CLAUDE.md', ['design']),
+    ]
+    expect(tagCounts([...NOTES, ...furniture])).toEqual(tagCounts(NOTES))
+  })
+
   it('reads an untagged vault as no tags at all', () => {
     expect(tagCounts([entry('notes/009-g.md', [])])).toEqual([])
     expect(tagCounts([])).toEqual([])

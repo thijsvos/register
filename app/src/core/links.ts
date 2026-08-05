@@ -8,6 +8,7 @@
  * does not fit in §06's 16 ms interaction budget.
  */
 import type { Entry, Loaded } from './api'
+import { isDerived } from './paths'
 
 /**
  * `[[Title]]` or `[[003]]`, with an optional `|alias` the vault ignores.
@@ -18,22 +19,9 @@ import type { Entry, Loaded } from './api'
  */
 export const WIKILINK = /\[\[([^\][\n|]+)(?:\|[^\][\n]*)?\]\]/g
 
-/**
- * Whether a path is an unresolved conflict copy (§04: `*.conflict-<ts>.md`).
- *
- * One definition, because every derivation has to agree on it. A copy carries
- * the original's ref, title and tags verbatim, so counting it would double every
- * tag and resolving `[[…]]` to it would shadow the note it was copied from —
- * §04 calls it an artefact to merge and delete, not a note in its own right. It
- * stays visible in the index; it is simply not derived from.
- */
-export function isConflictCopy(path: string): boolean {
-  return path.includes('.conflict-')
-}
-
 /** The notes a `[[…]]` may resolve to, and the notes derivations count from. */
-export function linkable(notes: Entry[]): Entry[] {
-  return notes.filter((entry) => !isConflictCopy(entry.path))
+export function derived(notes: Entry[]): Entry[] {
+  return notes.filter((entry) => isDerived(entry.path))
 }
 
 /**
@@ -72,7 +60,7 @@ export class NoteLookup {
   readonly #byTitle = new Map<string, Entry>()
 
   constructor(notes: Entry[]) {
-    for (const entry of linkable(notes)) {
+    for (const entry of derived(notes)) {
       // First wins, so a lookup answers by the order `/api/tree` lists notes in
       // rather than by whichever duplicate happened to be scanned last.
       if (entry.ref !== null && !this.#byRef.has(entry.ref)) {
@@ -154,7 +142,7 @@ export class LinkGraph {
     const lookup = new NoteLookup(notes)
     const back = new Map<string, Entry[]>()
 
-    for (const entry of linkable(notes)) {
+    for (const entry of derived(notes)) {
       const parsed = this.#parsed.get(entry.path)
       if (parsed === undefined) continue
       // Distinct targets can name one note: `[[003]]` and `[[Terminal

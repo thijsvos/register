@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { fields, split } from './frontmatter'
-import { dailyFrom, isTemplate, newNote, noteFrom, notePath, slug } from './refs'
+import { isTemplate } from './paths'
+import { dailyFrom, newNote, noteFrom, notePath, slug } from './refs'
 
 // Ref allocation is the server's (src/vault.rs::next_ref) — it is the only side
 // that can see `.register/trash/` and therefore the only side that knows which

@@ -10,7 +10,7 @@
 import MiniSearch, { type SearchOptions } from 'minisearch'
 import type { Entry, Loaded } from './api'
 import { split } from './frontmatter'
-import { linkable } from './links'
+import { isConflictCopy } from './paths'
 
 /** One row of the ⌘K note list. */
 export interface Hit {
@@ -80,7 +80,8 @@ export class SearchIndex {
     let indexed = 0
     const live = new Set<string>()
 
-    for (const entry of linkable(notes)) {
+    for (const entry of notes) {
+      if (isConflictCopy(entry.path)) continue
       const held = corpus[entry.path]
       // Bodies arrive behind the tree. A note without one yet is indexed when it
       // lands, rather than indexed empty and left that way.

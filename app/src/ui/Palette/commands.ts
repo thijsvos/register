@@ -1,5 +1,5 @@
 import { revealVault } from '../../core/api'
-import { isTemplate } from '../../core/refs'
+import { isTemplate } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
 import { go } from '../nav'
 import { chrome } from '../view.svelte'

@@ -771,6 +771,19 @@ describe('new note', () => {
     expect(server.files.has('notes/001-after-a-deletion.md')).toBe(false)
   })
 
+  it('counts notes, not the vault’s furniture', async () => {
+    // The sidebar lists what this counts. A status bar claiming ten files above
+    // an index showing eight rows is the app disagreeing with itself.
+    server.seed('notes/003-a.md', NOTE)
+    server.seed('CLAUDE.md', '# agent contract\n')
+    server.seed('templates/daily.md', '---\ntitle: TEMPLATE\n---\n')
+    await vault.refresh()
+    await settle()
+
+    expect(vault.tree).toHaveLength(3)
+    expect(vault.files).toBe(1)
+  })
+
   it('reports the vault path for the status bar', async () => {
     await vault.refresh()
     expect(vault.vaultPath).toBe('/tmp/fake-vault')

@@ -160,6 +160,24 @@ describe('SearchIndex', () => {
     ])
   })
 
+  it('still finds the contract and the stencils the index hides', () => {
+    // They are out of the INDEX because they are not notes, not because they
+    // are secret. ⌘K is how you reach them, so it has to keep them.
+    const contract = note({ ref: '', title: '', body: 'Never touch .register/' })
+    contract.entry.path = 'CLAUDE.md'
+    const stencil = note({ ref: '', title: '', body: 'Log and tasks, per day' })
+    stencil.entry.path = 'templates/daily.md'
+
+    const index = new SearchIndex()
+    const { notes, corpus } = vault([...SAMPLE, contract, stencil])
+    index.sync(notes, corpus)
+
+    expect(index.find('register', 10).map((hit) => hit.entry.path)).toEqual(['CLAUDE.md'])
+    expect(
+      index.find('stencil OR day', 10).length + index.find('day', 10).length,
+    ).toBeGreaterThan(0)
+  })
+
   it('indexes only what changed, and nothing at all when nothing did', () => {
     const index = new SearchIndex()
     const { notes, corpus } = vault(SAMPLE)

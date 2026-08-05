@@ -80,20 +80,6 @@ export function tagsOf(source: string): string[] {
   return list(fields(source).get('tags'))
 }
 
-/** §04's daily stencil, scaffolded by `register init` (P8). */
-export const DAILY_TEMPLATE = 'templates/daily.md'
-
-/**
- * Whether a path is a stencil rather than a note (§04 layout: `templates/`).
- *
- * A template is a real file and stays visible in the index — files are the
- * truth — but it is not a note *about* anything, so it is left out of the
- * derivations that would put its placeholder content into your day.
- */
-export function isTemplate(path: string): boolean {
-  return path === 'templates' || path.startsWith('templates/')
-}
-
 /**
  * The per-note fields §04 requires, stamped into a template's frontmatter.
  *
