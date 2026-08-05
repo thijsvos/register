@@ -27,12 +27,25 @@ async fn request(
 ) -> Reply {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
 
+    // An explicit Host REPLACES the default rather than being appended. Sending
+    // two Host headers is a malformed request, and hyper answers from the first
+    // one — so a test that appended would silently exercise `localhost` while
+    // appearing to test a rebound name.
+    let host = extra
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("host"))
+        .map(|(_, value)| *value)
+        .unwrap_or("localhost");
+
     // `Connection: close` lets read_to_end terminate without parsing lengths.
     let mut head = format!(
-        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
+        "{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\n",
         body.len()
     );
     for (name, value) in extra {
+        if name.eq_ignore_ascii_case("host") {
+            continue;
+        }
         head.push_str(&format!("{name}: {value}\r\n"));
     }
     head.push_str("\r\n");
@@ -392,4 +405,40 @@ fn reveal_defaults_to_available_and_follows_the_bind() {
 
     assert!(loopback.local);
     assert!(!public.local);
+}
+
+#[tokio::test]
+async fn a_rebound_host_is_refused_even_with_no_origin() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start(&tmp).await;
+
+    // DNS rebinding is the case the Origin check cannot see: to the browser the
+    // page is same-origin, so it sends NO Origin header at all. The Host names
+    // the domain it actually dialled, which is why that is what gets checked.
+    for host in [
+        "rebind.evil.example",
+        "rebind.evil.example:7777",
+        "127.0.0.1.evil.example",
+        "localhost.evil.example",
+    ] {
+        let reply = request(addr, "GET", "/api/tree", &[("Host", host)], "").await;
+        assert_eq!(reply.status, 403, "{host} should be refused");
+    }
+}
+
+#[tokio::test]
+async fn genuine_loopback_hosts_are_allowed() {
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    for host in [
+        "localhost",
+        "localhost:7777",
+        "127.0.0.1:7777",
+        "[::1]:7777",
+    ] {
+        let reply = request(addr, "GET", "/api/tree", &[("Host", host)], "").await;
+        assert_eq!(reply.status, 200, "{host} should be allowed");
+    }
 }

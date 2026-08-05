@@ -27,6 +27,7 @@ $effect(() => {
       onRender: setRenderMs,
     })
     loaded = path
+    handle.focus()
   })
 
   return () => {
@@ -49,7 +50,14 @@ $effect(() => {
   if (path !== loaded) {
     editor.load(text)
     loaded = path
+    // Opening a note must put the caret in it. Without this the caret stays on
+    // <body>, `isTyping` reports false, and every letter typed goes to the
+    // global keymap instead — `n` creates a note, `i` inverts the theme. The
+    // only route back is Tab, which walks one stop per sidebar row.
+    editor.focus()
   } else {
+    // Deliberately not on sync: an agent's edit arriving must not steal the
+    // caret from whatever the user is doing elsewhere.
     editor.sync(text)
   }
 })

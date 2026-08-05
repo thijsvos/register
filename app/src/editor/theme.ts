@@ -88,7 +88,7 @@ const theme = EditorView.theme({
   '.cm-wiki': {
     textDecoration: 'underline',
     textDecorationStyle: 'dashed',
-    textUnderlineOffset: '3px',
+    textUnderlineOffset: 'var(--underline-gap)',
     cursor: 'pointer',
   },
   '.cm-wiki-missing': {

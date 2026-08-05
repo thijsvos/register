@@ -19,6 +19,8 @@ pub const APP_DIR: &str = ".register";
 const TRASH_DIR: &str = "trash";
 /// §04's dated-log directory. Its filenames are dates, not refs.
 const DAILY_DIR: &str = "daily/";
+/// Marks an unresolved conflict copy (§04).
+const CONFLICT_MARK: &str = ".conflict-";
 const NOTE_EXT: &str = "md";
 /// §04's examples are three digits (`003-…`).
 const MIN_REF_WIDTH: usize = 3;
@@ -680,6 +682,13 @@ fn ref_from_path(path: &str) -> Option<String> {
         return None;
     }
     let name = path.rsplit('/').next()?;
+    // §04 treats `*.conflict-<ts>.md` as an unresolved copy to be merged into
+    // the original and deleted — not a note in its own right. Giving it a ref
+    // would let it shadow the note it came from, so `[[003]]` could resolve to
+    // the copy, and would make it consume the next ref as well.
+    if name.contains(CONFLICT_MARK) {
+        return None;
+    }
     let digits: String = name.chars().take_while(char::is_ascii_digit).collect();
     if digits.is_empty() {
         return None;

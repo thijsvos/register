@@ -25,11 +25,30 @@ const components = import.meta.glob('./**/*.svelte', {
   eager: true,
 }) as Record<string, string>
 
+/**
+ * TypeScript sources too, not just components.
+ *
+ * The editor's whole theme lives in `editor/theme.ts` — every colour and every
+ * size CodeMirror draws — and for two phases these gates could not see it,
+ * because they only scanned `.svelte`. A rule that stops covering the code as
+ * the code grows is worse than no rule: it reads as enforcement.
+ */
+const modules = Object.fromEntries(
+  Object.entries(
+    import.meta.glob('./**/*.ts', {
+      query: '?raw',
+      import: 'default',
+      eager: true,
+    }) as Record<string, string>,
+  ).filter(([path]) => !path.endsWith('.test.ts') && !path.endsWith('.d.ts')),
+)
+
 /** Raw text of every stylesheet and component, keyed by path. */
 const sources: Record<string, string> = {
   [TOKENS]: tokensCss,
   [BASE]: baseCss,
   ...components,
+  ...modules,
 }
 
 const entries = Object.entries(sources)
@@ -62,6 +81,9 @@ describe('design tokens (rule 2)', () => {
       expect(text, `${path} read as empty`).not.toHaveLength(0)
     }
     expect(Object.keys(components).length).toBeGreaterThanOrEqual(6)
+    // The editor theme is a .ts file; if it is not here the colour and length
+    // gates are blind to every value CodeMirror draws.
+    expect(sources['./editor/theme.ts']).toContain('EditorView.theme')
     expect(sources[TOKENS]).toContain('--signal')
     expect(sources[BASE]).toContain('@font-face')
     expect(indexHtml).toContain('<html')
@@ -114,9 +136,20 @@ describe('motion doctrine (§02: zero animations except the status LED)', () => 
   })
 
   it('declares animation and keyframes only in the status bar', () => {
+    // `animation: none` is exempt: it REMOVES motion a dependency shipped,
+    // which is the doctrine being enforced rather than broken. Anything that
+    // names a duration, a keyframe or a shorthand is not.
+    // The quotes matter: a CodeMirror theme is a JS object literal, so the
+    // declaration reads `animation: 'none'`, not `animation: none`.
+    // The whitespace belongs INSIDE the lookahead. With `\s*` outside it, the
+    // engine backtracks it to zero, evaluates the lookahead against the space,
+    // trivially fails to see `none` there, and flags every declaration —
+    // including the exempt ones.
+    const adds =
+      /@keyframes\b|\banimation(?:-[a-z-]+)?\s*:(?!\s*['"`]?none['"`]?\s*[;},])/
     const offenders = entries
       .filter(([path]) => path !== LED)
-      .filter(([, text]) => /\banimation(?:-[a-z-]+)?\s*:|@keyframes\b/.test(code(text)))
+      .filter(([, text]) => adds.test(code(text)))
       .map(([path]) => path)
 
     expect(offenders).toEqual([])

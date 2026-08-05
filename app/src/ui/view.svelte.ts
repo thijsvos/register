@@ -7,14 +7,25 @@ import { measure } from '../lib/render.svelte'
  * of this belongs in a note — the OS owns the colour scheme, and pane visibility
  * is a property of this window, not of the knowledge base.
  */
+/** There is no `document` outside a browser, and this module is imported by
+ *  code that runs under Vitest in node. */
+const inBrowser = typeof document !== 'undefined'
+
 class ChromeState {
   /** Read back from the pre-paint boot script rather than asked again. */
-  dark = $state(document.documentElement.classList.contains('dark'))
+  dark = $state(inBrowser && document.documentElement.classList.contains('dark'))
   inspector = $state(true)
   index = $state(true)
   paletteOpen = $state(false)
 
-  #osScheme = matchMedia('(prefers-color-scheme: dark)')
+  /** Resolved on first use: constructing it eagerly would touch the DOM at
+   *  module scope, which is what made this module unimportable in a test. */
+  #scheme: MediaQueryList | null = null
+
+  get #osScheme(): MediaQueryList {
+    this.#scheme ??= matchMedia('(prefers-color-scheme: dark)')
+    return this.#scheme
+  }
 
   /**
    * INV means "inverted from the OS", not "dark is on" — otherwise a user whose

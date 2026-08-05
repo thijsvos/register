@@ -1,8 +1,8 @@
 <script lang="ts">
 import type { Entry } from '../../core/api'
-import { type Command, fuzzyScore, matchCommands } from '../../core/commands'
 import { vault } from '../../core/store.svelte'
 import { chrome } from '../view.svelte'
+import { type Command, fuzzyScore, matchCommands } from './commands'
 
 let query = $state('')
 let selected = $state(0)
@@ -36,8 +36,17 @@ $effect(() => {
   if (selected >= total) selected = Math.max(0, total - 1)
 })
 
+// Focus goes into the palette on open and back where it came from on close.
+// Without the restore, the first command ends with focus on <body> and every
+// subsequent key goes nowhere — which breaks §01's mouse-free promise on the
+// second action rather than the first, so it is easy to miss.
 $effect(() => {
+  const before = document.activeElement
   input?.focus()
+  return () => {
+    if (navigated) return
+    if (before instanceof HTMLElement && before.isConnected) before.focus()
+  }
 })
 
 // §02b: "selection follows ↑↓, scrolls into view".
@@ -56,9 +65,14 @@ function bestScore(entry: Entry, text: string): number | null {
   return best
 }
 
+/** Set when the palette navigated, so its focus-restore stands down and the
+ *  editor gets the caret instead. */
+let navigated = false
+
 function choose(index: number) {
   const note = notes[index]
   if (note !== undefined) {
+    navigated = true
     chrome.closePalette()
     void vault.open(note.path)
     return
@@ -76,12 +90,18 @@ function onKey(event: KeyboardEvent) {
     chrome.closePalette()
     return
   }
-  if (event.key === 'ArrowDown') {
+  // Tab moves the selection rather than escaping the dialog. aria-modal says
+  // focus is trapped; nothing enforces that by itself, and a Tab that walked
+  // out would leave an open modal with focus behind it.
+  const forward = event.key === 'ArrowDown' || (event.key === 'Tab' && !event.shiftKey)
+  const back = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey)
+
+  if (forward) {
     event.preventDefault()
     selected = total === 0 ? 0 : (selected + 1) % total
     return
   }
-  if (event.key === 'ArrowUp') {
+  if (back) {
     event.preventDefault()
     selected = total === 0 ? 0 : (selected - 1 + total) % total
     return

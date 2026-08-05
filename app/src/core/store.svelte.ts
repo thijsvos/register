@@ -103,9 +103,14 @@ class VaultStore {
   resolve(target: string): Entry | null {
     const wanted = target.trim()
     const lowered = wanted.toLowerCase()
+    // A conflict copy carries the original's title verbatim, so it would answer
+    // to the same wikilink and shadow the note it was copied from. §04 treats it
+    // as an artefact to merge and delete, not a link target — it stays visible
+    // in the index, just not reachable by [[…]].
+    const notes = this.tree.filter((entry) => !entry.path.includes('.conflict-'))
     return (
-      this.tree.find((entry) => entry.ref === wanted) ??
-      this.tree.find((entry) => (entry.title ?? '').toLowerCase() === lowered) ??
+      notes.find((entry) => entry.ref === wanted) ??
+      notes.find((entry) => (entry.title ?? '').toLowerCase() === lowered) ??
       null
     )
   }

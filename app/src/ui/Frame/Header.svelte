@@ -5,10 +5,12 @@ let {
   crumb = 'INDEX',
   pressed = false,
   oninvert,
+  onpalette,
 }: {
   crumb?: string
   pressed?: boolean
   oninvert: () => void
+  onpalette: () => void
 } = $props()
 
 let clock = $state(utcStamp())
@@ -39,6 +41,8 @@ $effect(() => {
     <button class="key" aria-pressed={pressed} title="Invert display" onclick={oninvert}>
       INV
     </button>
+    <!-- §01: every control shows its key, and §02b Screen 1 draws it here. -->
+    <button class="key" title="Command and search" onclick={onpalette}>⌘K</button>
   </div>
 </header>
 

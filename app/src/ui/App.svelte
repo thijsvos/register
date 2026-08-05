@@ -29,7 +29,9 @@ $effect(() => installKeymap())
 <Crosses />
 
 <div class="app" class:no-index={!chrome.index} class:no-inspector={!chrome.inspector}>
-  <Header {crumb} pressed={chrome.inverted} oninvert={() => chrome.invert()} />
+  <Header {crumb} pressed={chrome.inverted} oninvert={() => chrome.invert()}
+    onpalette={() => chrome.openPalette()}
+  />
   <div class="mid">
     {#if chrome.index}
       <Sidebar />

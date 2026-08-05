@@ -420,6 +420,25 @@ describe('refusing to lose work', () => {
   })
 })
 
+describe('wikilink resolution', () => {
+  it('does not let a conflict copy shadow the note it came from', async () => {
+    server.seed(
+      'notes/003-a.md',
+      '---\nref: 003\ntitle: Terminal aesthetics\n---\nmine\n',
+    )
+    server.seed(
+      'notes/003-a.conflict-20260805T091640123Z.md',
+      '---\nref: 003\ntitle: Terminal aesthetics\n---\ntheirs\n',
+    )
+    await vault.refresh()
+
+    // The copy carries the same title verbatim, so without the guard it is a
+    // coin flip which one [[Terminal aesthetics]] opens.
+    expect(vault.resolve('Terminal aesthetics')?.path).toBe('notes/003-a.md')
+    expect(vault.resolve('003')?.path).toBe('notes/003-a.md')
+  })
+})
+
 describe('daily log', () => {
   const day = new Date('2026-08-05T09:16:40Z')
 

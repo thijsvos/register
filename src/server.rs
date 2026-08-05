@@ -193,7 +193,14 @@ fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
     } else {
         "xdg-open"
     };
-    std::process::Command::new(program).arg(path).spawn()?;
+    let mut child = std::process::Command::new(program).arg(path).spawn()?;
+    // Rust never waits on a dropped Child, so every reveal would leave a zombie
+    // holding a PID slot — in a process designed to run for days, against a
+    // command a user can hold down. Reaped on a detached thread so a file
+    // manager that lingers cannot block the response.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
     Ok(())
 }
 

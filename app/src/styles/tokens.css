@@ -62,6 +62,7 @@ html.dark {
   --focus-offset: 2px;  /* §02b state matrix: "dashed ring, offset 2px" */
   --focus-inset: -3px;  /* §02b nav row: the ring sits inside the row */
   --rule-offset: 3px;   /* §02 emphasis: "border + offset outline" */
+  --underline-gap: 3px; /* dashed wikilink underline, clear of the descenders */
 
   /* Departure Mono is bitmap-derived on an 11px grid: half-leading must be a
      whole pixel or every micro baseline lands off-pixel and the face blurs.

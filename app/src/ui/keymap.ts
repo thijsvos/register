@@ -5,6 +5,20 @@ import { chrome } from './view.svelte'
 const CHORD_MS = 1500
 
 /**
+ * ⌘ on macOS, Ctrl everywhere else — resolved per platform rather than
+ * accepting either.
+ *
+ * Ctrl-K on macOS is kill-to-end-of-line: it is in AppKit and it is in
+ * CodeMirror's own defaultKeymap, which calls preventDefault but not
+ * stopPropagation. Treating Ctrl as an alias for ⌘ therefore truncates the line
+ * *and* opens the palette on top of the note it just cut.
+ */
+const platform =
+  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ??
+  navigator.platform
+const isMac = /mac/i.test(platform)
+
+/**
  * Is the event coming from somewhere that owns its own keys?
  *
  * This is what "when not editing" means, and getting it wrong makes the app
@@ -36,7 +50,10 @@ export function installKeymap(): () => void {
 
   const onKey = (event: KeyboardEvent) => {
     // ⌘K is the front door and works from anywhere, including mid-sentence.
-    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    const palette = isMac
+      ? event.metaKey && !event.ctrlKey
+      : event.ctrlKey && !event.metaKey
+    if (palette && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
       event.preventDefault()
       disarm()
       if (chrome.paletteOpen) chrome.closePalette()
@@ -44,14 +61,25 @@ export function installKeymap(): () => void {
       return
     }
 
-    // The palette owns every other key while it is open; it closes on Escape
-    // itself, so nothing here needs to reach past it.
-    if (chrome.paletteOpen) return
-
+    // Escape closes the palette from anywhere, not only from its input. The
+    // input handles it too, but relying on that alone means a stray focus makes
+    // an open modal unclosable without a mouse.
     if (event.key === 'Escape') {
       disarm()
+      if (chrome.paletteOpen) {
+        event.preventDefault()
+        chrome.closePalette()
+      }
       return
     }
+
+    // The palette owns every other key while it is open.
+    if (chrome.paletteOpen) return
+
+    // A modifier pressed on its own still fires a keydown. Falling through
+    // would land in the chord branch and disarm a `g` the user had just armed,
+    // so holding Shift to type a capital would silently cancel `g d`.
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(event.key)) return
     if (isTyping(event.target) || event.metaKey || event.ctrlKey || event.altKey) return
 
     if (chord === 'g') {

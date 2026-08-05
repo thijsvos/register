@@ -1,6 +1,6 @@
-import { chrome } from '../ui/view.svelte'
-import { revealVault } from './api'
-import { vault } from './store.svelte'
+import { revealVault } from '../../core/api'
+import { vault } from '../../core/store.svelte'
+import { chrome } from '../view.svelte'
 
 /**
  * One palette entry. §01: "every control shows its key" — so `keys` is not

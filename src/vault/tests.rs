@@ -648,3 +648,23 @@ fn visibility_agrees_with_the_tree() {
     assert!(!vault.is_visible(&root.join("notes/image.png")));
     assert!(!vault.is_visible(std::path::Path::new("/elsewhere/003-a.md")));
 }
+
+#[test]
+fn a_conflict_copy_takes_no_ref_and_does_not_consume_one() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    // Exactly what the client writes on a 409.
+    tmp.put("notes/003-a.conflict-20260805T091640123Z.md", NOTE);
+    let vault = tmp.open();
+
+    let tree = vault.list().expect("list");
+    let copy = tree
+        .iter()
+        .find(|entry| entry.path.contains(".conflict-"))
+        .expect("the copy is still listed");
+
+    // Visible in the index — you have to find it to merge it — but it must not
+    // answer to [[003]] alongside the note it was copied from.
+    assert_eq!(copy.reference, None);
+    assert_eq!(vault.next_ref().expect("next ref"), "004");
+}
