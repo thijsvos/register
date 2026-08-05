@@ -1,4 +1,5 @@
 <script lang="ts">
+import { bodyOffset } from '../core/frontmatter'
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
 import { setRenderMs } from '../lib/render.svelte'
@@ -24,6 +25,7 @@ $effect(() => {
     handle = createEditor({
       parent: target,
       doc: vault.buffer,
+      caret: bodyOffset(vault.buffer),
       host: wikiHost(),
       onEdit: (doc) => vault.edit(doc),
       onRender: setRenderMs,
@@ -50,7 +52,9 @@ $effect(() => {
   if (editor === null || path === null) return
 
   if (path !== loaded) {
-    editor.load(text)
+    // Past the frontmatter: at offset 0 the first keystroke lands above the
+    // opening fence and the note stops being a note.
+    editor.load(text, bodyOffset(text))
     loaded = path
     // Opening a note must put the caret in it. Without this the caret stays on
     // <body>, `isTyping` reports false, and every letter typed goes to the

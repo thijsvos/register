@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bodyOffset,
   fields,
   hasFrontmatter,
   join,
@@ -146,5 +147,35 @@ describe('wordCount', () => {
 
   it('is zero for an empty body', () => {
     expect(wordCount('---\ntitle: A\n---\n')).toBe(0)
+  })
+})
+
+describe('bodyOffset', () => {
+  it('points just past the closing fence', () => {
+    const note = '---\nref: 003\ntitle: A\n---\n# Heading\n'
+    expect(note.slice(bodyOffset(note))).toBe('# Heading\n')
+  })
+
+  it('is zero for a file with no frontmatter, which is where its prose starts', () => {
+    expect(bodyOffset('Just prose.\n')).toBe(0)
+  })
+
+  it('counts the byte-order mark, so the caret is not one short', () => {
+    const note = '\ufeff---\nref: 003\n---\nbody\n'
+    expect(note.slice(bodyOffset(note))).toBe('body\n')
+  })
+
+  it('treats an unterminated fence as prose rather than guessing', () => {
+    // `split` already refuses to call it frontmatter; the caret must agree.
+    expect(bodyOffset('---\nref: 003\nno closing fence\n')).toBe(0)
+  })
+
+  it('is where a keystroke can land without unmaking the note', () => {
+    // The bug this exists for: typing at 0 pushes the opening fence off byte
+    // zero, and the file stops parsing as a note at all.
+    const note = '---\nref: 003\ntitle: A\n---\nbody\n'
+    const typed = note.slice(0, bodyOffset(note)) + 'x' + note.slice(bodyOffset(note))
+    expect(hasFrontmatter(typed)).toBe(true)
+    expect(hasFrontmatter(`x${note}`)).toBe(false)
   })
 })

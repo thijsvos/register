@@ -34,8 +34,17 @@ const SAVE_DEBOUNCE_MS = 500
  */
 const SAVE_MAX_WAIT_MS = SAVE_DEBOUNCE_MS
 
-/** Parallel body fetches when filling the corpus. */
-const CORPUS_CONCURRENCY = 8
+/**
+ * Parallel body fetches when filling the corpus.
+ *
+ * Three, not eight. A browser opens at most six connections per origin, so a
+ * fill that takes eight leaves none — and every request the *user* makes queues
+ * behind a thousand background reads. Measured on a 1k-note vault: it put start
+ * → editable at 566 ms against §06's 500, a document switch at 272 ms, and an
+ * agent edit at 158 ms against a 100 ms budget, all while the app's own RENDER
+ * readout stayed under 16 ms. Nothing was slow; everything was waiting.
+ */
+const CORPUS_CONCURRENCY = 3
 
 /**
  * Coalesce tree refreshes across one burst of events without adding latency.
@@ -466,12 +475,19 @@ class VaultStore {
 
   /** Fold one vault event into the open note and the tree. */
   apply(event: VaultEvent): void {
-    this.#scheduleRefresh()
-
-    if (event.path !== this.openPath) return
+    // The open note first, the tree second. Both are wanted, but only one is on
+    // screen — and issuing the tree fetch first puts a walk of the whole vault
+    // ahead of the single note the reader is looking at.
+    if (event.path !== this.openPath) {
+      this.#scheduleRefresh()
+      return
+    }
 
     // Our own save echoing back: the server reports the etag we already hold.
-    if (event.etag !== null && event.etag === this.etag) return
+    if (event.etag !== null && event.etag === this.etag) {
+      this.#scheduleRefresh()
+      return
+    }
 
     if (event.type === 'removed') {
       // The file is gone; the words are not. A watcher event is something the
@@ -485,6 +501,7 @@ class VaultStore {
       this.openPath = null
       this.buffer = ''
       this.etag = null
+      this.#scheduleRefresh()
       return
     }
 
@@ -493,9 +510,11 @@ class VaultStore {
       // state stays visible until the user resolves it — by saving, which takes
       // the §04 conflict path, or by reloading from disk.
       this.externalEdit = true
+      this.#scheduleRefresh()
       return
     }
     void this.#reload(event.path)
+    this.#scheduleRefresh()
   }
 
   /**

@@ -95,11 +95,18 @@ export function syncDoc(view: EditorView, next: string): void {
   })
 }
 
-/** Replace the whole document, discarding the selection. Used when switching notes. */
-export function loadDoc(view: EditorView, text: string): void {
+/**
+ * Replace the whole document, discarding the selection. Used when switching
+ * notes.
+ *
+ * `caret` is where to leave it — the start of the prose, not of the file. The
+ * editor is told the offset rather than working it out, so `core/frontmatter`
+ * stays out of the lazy chunk.
+ */
+export function loadDoc(view: EditorView, text: string, caret = 0): void {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
-    selection: EditorSelection.single(0),
+    selection: EditorSelection.single(Math.min(Math.max(caret, 0), text.length)),
     annotations: Remote.of(true),
     scrollIntoView: false,
   })

@@ -59,6 +59,19 @@ export function join(parts: Split): string {
   return parts.bom + parts.open + parts.yaml + parts.close + parts.body
 }
 
+/**
+ * Where the prose starts — the offset just past the closing fence.
+ *
+ * The caret lands here when a note is opened. At offset 0 it sits *before* the
+ * opening `---`, and the first thing anyone types pushes the fence off byte
+ * zero: `split` then finds no frontmatter, `touchModified` becomes a no-op, and
+ * the server can no longer read the note's title, ref or tags. A note loses its
+ * identity because someone opened it and started typing.
+ */
+export function bodyOffset(source: string): number {
+  return source.length - split(source).body.length
+}
+
 /** Whether the source carries a frontmatter block at all. */
 export function hasFrontmatter(source: string): boolean {
   return split(source).open !== ''

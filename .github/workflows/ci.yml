@@ -34,3 +34,30 @@ jobs:
       - run: |
           KB=$(git count-objects -v | awk '/size-pack/ {print $2}')
           echo "pack ${KB} KB"; test "$KB" -lt 5120
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: app/package.json }
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      # The UI is embedded in the binary, so it is built before the binary is.
+      - run: pnpm build
+        working-directory: app
+      - run: cargo build --release --locked
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: app
+      # §06's browser budgets: agent-edit ≤ 100 ms, doc switch < 16 ms, start →
+      # editable < 500 ms, idle RSS ≤ 50 MB, plus the keyboard and motion audit.
+      - run: pnpm e2e
+        working-directory: app
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with: { name: playwright-traces, path: app/test-results, retention-days: 7 }

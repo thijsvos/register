@@ -13,10 +13,12 @@
     "check": "biome check --config-path=.. . && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "size": "size-limit"
+    "size": "size-limit",
+    "e2e": "playwright test"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",
+    "@playwright/test": "^1.62.1",
     "@size-limit/file": "^13.0.3",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "size-limit": "^13.0.3",

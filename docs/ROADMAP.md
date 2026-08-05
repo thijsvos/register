@@ -5,9 +5,28 @@ it fits the §04 vault contract (or bumps the major version with a documented
 migration), it fits the §06 budgets or ships lazily, and it obeys §02. Process
 is roadmap entry → ADR → milestone.
 
-P11 seeds this file from §12's table. Until then it carries risks and ideas
-parked during earlier phases, so they are recorded somewhere other than a commit
-message.
+Two kinds of entry live here. The **§12 table** below is the designed expansion
+path — features deliberately left out of v1, each with the landing path that
+keeps it contract-safe. Everything after it is a risk or a decision **parked
+during a phase**, recorded here rather than in a commit message nobody will
+re-read.
+
+Every entry names a trigger. An entry without one is a wish.
+
+## Post-v1 expansion (§12, seeded by P11)
+
+| Deferred feature | Designed landing path (contract-safe) | Prerequisite / trigger |
+|---|---|---|
+| **Query & table views ("databases")** | Inline queries over frontmatter + tags, evaluated client-side and rendered as §02 tables — the Dataview pattern. Notes stay plain files; a query is just text in a note. | Query-grammar ADR; v1 corpus/store stable. |
+| **Kanban / boards** | A view over existing tasks + tags, columns keyed by tag or status. Pure derivation, zero new storage. | The query engine above. |
+| **Graph view** | Pure derivation of the backlinks map into a monochrome, hairline-styled panel. No new data — `core/links.ts` already computes it. | Demand-driven; lazy chunk within budget. |
+| **Plugin system** | Versioned, capability-scoped extension points (commands, panels, decorations, query functions) once the core API freezes at v1.x. A plugin may never bypass `vault.rs` writes. | API freeze + a security-model ADR. |
+| **Richer editing surface** | Deeper live preview — tables, images, math rendered in place — as an evolution of P4's decoration layer. Markdown stays the literal source, and anything that hides the source still answers to §02. | The decoration layer proven in the field. |
+| **Realtime co-editing** | Optional CRDT transport layered on top (reopening ADR-001). Files stay canonical; every session flushes to plain markdown. | True multi-writer demand. |
+| **Built-in richer sync** | From git checkpoints (P12) toward managed git remotes or an optional relay — always self-hostable, never required. | P12 shipped; user pull. |
+| **Importers** | One-way converters (Obsidian, Notion export, Logseq) into the §04 format. Read-only, low risk, high adoption value. | None — the best first post-v1 milestone. |
+| **Native shells / mobile ergonomics** | A Tauri wrapper around the same embedded UI. Remote/tailnet mode already serves every device meanwhile. | PWA ergonomics measured insufficient. |
+| **E2E-encrypted remote** | Token mode (P12) hardened with encrypted transport, for vaults hosted off-device. | Remote mode adoption. |
 
 ## Parked during P2 (server core)
 
@@ -76,3 +95,12 @@ validated at the boundary instead of cast. What remains:
 | **The image is amd64 only** | `deploy/Dockerfile` builds for the host architecture, and the release workflow pushes what the runner produced. §07's own remote pattern is a home server behind Tailscale, which is as likely to be an arm64 Pi as an x86 box. Building both under QEMU means a Rust release build through emulation; the fast route is a second Dockerfile that `COPY`s the binaries the matrix already cross-built. | Anyone pulling the image on arm64. |
 | **No `latest` image tag is published** | Rule 11 bans consuming a floating tag, and publishing one is how a floating tag comes to exist. So the image is addressable only as `:v1.2.3` / `:1.2.3`, and `docker pull ghcr.io/OWNER/register` with no tag will fail. Documented in the README; it is a real friction, traded for a real hazard. | A decision that the convenience outweighs the doctrine — which is a spec change, not a code change. |
 | **The release workflow has never run** | It cannot: it fires on a `v*` tag against a GitHub remote this repo still does not have. Every checkable property — the five targets, the 10 MB gate, the tag trigger, the ghcr push, no floating tags — is asserted in `tests/release.rs`, and all four mutations of those were verified to fail. What remains untested is GitHub itself. | The first `git push --tags`. |
+
+## Parked during P11 (QA hardening)
+
+| Item | Why it is parked | Trigger |
+|---|---|---|
+| **No §02b screenshot baselines** | §02b asks for "a Playwright screenshot story per screen, light and dark, diffed against a committed baseline". Playwright is now here and one screenshot is committed for the README, but per-screen visual diffing is a separate discipline: baselines are platform-specific, and a suite that fails on a font-rendering difference between macOS and CI teaches people to ignore it. | A decision about where baselines are generated — almost certainly a container, so one platform owns them. |
+| **The e2e budgets are measured on one machine** | The numbers are real but they are this laptop's. §06 says the RAM budget is "an e2e measurement on CI profile", and CI has not run. A GitHub runner is slower and the thresholds may need to be honest about that rather than generous. | The first CI run of the `e2e` job. |
+| **Frontmatter is shown in the editor** | Markdown stays the literal source (§02), so every note opens with six lines of YAML above the prose. Correct by doctrine, and the caret now lands below it — but it is the first thing anyone sees, and folding it is the obvious next question. | A §02 ruling on whether folding counts as hiding the source. |
+| **`register serve` has no `--open`** | Every run prints a URL you then click. Trivial to add, and one more thing between clone and running. | The "stranger goes clone → running in two commands" claim being tested on an actual stranger. |

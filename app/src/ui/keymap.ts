@@ -13,10 +13,26 @@ const CHORD_MS = 1500
  * stopPropagation. Treating Ctrl as an alias for ⌘ therefore truncates the line
  * *and* opens the palette on top of the note it just cut.
  */
-const platform =
-  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform ??
-  navigator.platform
-const isMac = /mac/i.test(platform)
+/**
+ * Both signals, and either one is enough.
+ *
+ * `userAgentData.platform` is the modern API and `navigator.platform` is the
+ * deprecated one, but the deprecated one is the honest one: it reports the real
+ * OS, while the modern one is derived from the User-Agent string and therefore
+ * lies whenever the UA is overridden — by a privacy extension, a device
+ * emulator, or an automated browser. Trusting it alone leaves ⌘K dead on a Mac
+ * whose browser claims to be Windows, which is a real configuration and was how
+ * this was found.
+ *
+ * The asymmetry is deliberate: a false "not a Mac" costs the user every command
+ * key, while a false "is a Mac" costs a Windows user one shortcut they can still
+ * reach from the header button.
+ */
+const reported = [
+  (navigator as { userAgentData?: { platform?: string } }).userAgentData?.platform,
+  navigator.platform,
+]
+const isMac = reported.some((value) => /mac/i.test(value ?? ''))
 
 /**
  * Is the event coming from somewhere that owns its own keys?

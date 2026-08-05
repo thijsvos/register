@@ -18,6 +18,43 @@ within 100 ms.
 V1 ships five things to instrument grade — notes, links, tags, tasks, search —
 and stages everything else (§12). The full contract is in **`SPEC.html`**.
 
+![The editor, with the index, tag meters, outline and backlinks](docs/screenshot.png)
+
+## The thesis
+
+Every note-taking app eventually asks you to trust its database. REGISTER does
+not have one. Your notes are the files; everything else — backlinks, tags, the
+task list, the search index — is computed on read and thrown away.
+
+That is not asceticism, it is what makes an agent a first-class editor. Claude
+Code does not need an API, a plugin or a sync protocol to work with your vault;
+it needs a folder and a contract, and `register init` writes the contract into
+the folder. A human edits through the UI, an agent edits the files, and a
+watcher keeps both views identical inside 100 ms. Neither side is a guest.
+
+The design follows from the same idea. If files are the truth, the interface is
+an instrument for reading them, not a place things live — so it is monochrome,
+hairlined, keyboard-first, and free of animation that would cost latency for
+decoration.
+
+## Budgets
+
+Not aspirations. Every one is asserted in CI, and the measured figure is what
+the last commit actually produced.
+
+| Budget | Limit | Measured | Enforced by |
+|---|---|---|---|
+| Release binary | ≤ 10 MB | 2.96 MB | `release.yml` per platform |
+| Shell JS (initial) | ≤ 60 kB gz | 37.3 kB | `size-limit` |
+| Editor chunk (lazy) | ≤ 150 kB gz | 101.3 kB | `size-limit` |
+| Idle RAM, 1k notes | ≤ 50 MB | asserted | Playwright + `ps` |
+| Agent edit → visible | ≤ 100 ms | asserted | Playwright, real file write |
+| Document switch | < 16 ms | asserted | status-bar RENDER + Playwright |
+| Server start → editable | < 500 ms | asserted | Playwright |
+| Repository size | < 5 MB | asserted | CI `git count-objects` |
+
+If a change breaks a budget, the change shrinks. Not the budget.
+
 ## Running it
 
 Two modes. Native is the primary one; the container exists for a home server or
@@ -92,6 +129,28 @@ cargo run -- health                # server toolchain
 cd app && pnpm install && pnpm dev # UI toolchain
 ```
 
+## Contributing
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the v1 scope fence, the
+park-and-promote process, and what "green" means.
+
+## Fonts and licensing
+
+Three faces ship in this repository, all **SIL OFL 1.1**, each with its
+`OFL.txt` beside it:
+
+| Face | Role |
+|---|---|
+| **Commit Mono** | default UI and body |
+| **Departure Mono** | the micro layer — labels, status bar, on an 11px pixel grid |
+| **Server Mono** | the alternate "teletype" body theme |
+
+**Berkeley Mono / TX-02 is commercial and is never bundled.** U.S. Graphics
+states its licences are not compatible with open-source apps and generally
+disallows embedding in editors. It sits first in the font stack and resolves to
+nothing unless *you* own it — Settings → BYOF loads your licensed file from your
+own disk into your own vault, under `.register/fonts/`, which `register init
+--git` puts in `.gitignore`. The bytes never leave your machine and are never
+committed. (Not legal advice; read the licences.)
+
 ## License
-MIT (code) · SIL OFL 1.1 (bundled fonts). Berkeley Mono / TX-02 is commercial and
-is never bundled — load your own via Settings → BYOF.
+MIT (code) · SIL OFL 1.1 (bundled fonts).

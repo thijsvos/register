@@ -9,6 +9,8 @@ export type { WikiLinkHost }
 export interface EditorOptions {
   parent: HTMLElement
   doc: string
+  /** Where to leave the caret — past the frontmatter, never at byte zero. */
+  caret?: number
   host: WikiLinkHost
   /** A real keystroke, never a programmatic sync. */
   onEdit: (doc: string) => void
@@ -19,8 +21,8 @@ export interface EditorOptions {
 export interface EditorHandle {
   /** Adopt an external change, preserving the cursor. */
   sync: (doc: string) => void
-  /** Switch to a different note. */
-  load: (doc: string) => void
+  /** Switch to a different note, leaving the caret at `caret`. */
+  load: (doc: string, caret?: number) => void
   /** Put the caret at an offset and scroll it to the top — the OUTLINE pane. */
   reveal: (position: number) => void
   focus: () => void
@@ -36,6 +38,11 @@ export function createEditor(options: EditorOptions): EditorHandle {
     parent: options.parent,
     state: EditorState.create({
       doc: options.doc,
+      // The first note of a session never goes through `load`, so without this
+      // it would be the one note whose caret still starts above the fence.
+      selection: {
+        anchor: Math.min(Math.max(options.caret ?? 0, 0), options.doc.length),
+      },
       extensions: [
         editorExtensions(),
         hostSlot.of(wikiLinkHost.of(options.host)),
@@ -60,7 +67,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
 
   return {
     sync: (doc) => syncDoc(view, doc),
-    load: (doc) => loadDoc(view, doc),
+    load: (doc, caret) => loadDoc(view, doc, caret),
     reveal: (position) => {
       // The pane derives its offsets from the store's buffer, which reaches the
       // editor a tick later; clamping means a click during that tick lands at
