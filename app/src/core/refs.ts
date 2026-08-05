@@ -1,35 +1,10 @@
 import { ulid } from '../lib/ulid'
 import { fields, list } from './frontmatter'
 
-/** Minimum ref width. §04's examples are three digits (`003-…`). */
-const MIN_WIDTH = 3
-
-/**
- * The next ref: §04's invariant is "highest existing + 1".
- *
- * Highest, not count, so a gap in the middle stays a gap — 001, 002, 004 yields
- * 005 and never re-issues 003.
- *
- * Deleting the highest note does free its ref, because §04 says "existing" and a
- * trashed note no longer exists — so refs are not monotonic across deletions,
- * and a later note can take a ref a wikilink already points at. That is
- * deliberate fidelity to the contract, not an oversight; the hazard is recorded
- * in docs/ROADMAP.md.
- */
-export function nextRef(refs: readonly (string | null)[]): string {
-  let highest = -1
-  let width = MIN_WIDTH
-
-  for (const ref of refs) {
-    if (!ref) continue
-    const value = Number.parseInt(ref, 10)
-    if (!Number.isFinite(value)) continue
-    highest = Math.max(highest, value)
-    width = Math.max(width, ref.length)
-  }
-
-  return String(highest + 1).padStart(width, '0')
-}
+// Ref allocation lives on the server, not here. Only the server can see
+// `.register/trash/`, so only the server knows which refs have ever been handed
+// out — and §04 now requires that a ref, once allocated, is never reissued.
+// `/api/tree` reports it as `nextRef`.
 
 /** `Terminal aesthetics!` → `terminal-aesthetics`. */
 export function slug(title: string): string {

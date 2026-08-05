@@ -206,14 +206,111 @@ fn delete_moves_to_trash_and_never_removes() {
     vault.trash("notes/003-a.md").expect("trash");
 
     assert!(!tmp.path().join("notes/003-a.md").exists());
-    let trashed: Vec<_> = fs::read_dir(tmp.path().join(APP_DIR).join("trash"))
-        .expect("read trash")
-        .filter_map(|e| e.ok())
-        .collect();
-    assert_eq!(trashed.len(), 1);
+    assert_eq!(trashed_bodies(tmp.path()), [NOTE]);
+}
 
-    let kept = fs::read_to_string(trashed[0].path()).expect("read trashed note");
-    assert_eq!(kept, NOTE);
+/// Every trashed note body, whatever bucket it landed in.
+fn trashed_bodies(root: &std::path::Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.join(APP_DIR).join("trash")];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(body) = fs::read_to_string(&path) {
+                out.push(body);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn trash_keeps_a_note_at_its_original_path() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    vault.trash("notes/003-a.md").expect("trash");
+
+    // The original path is what lets next_ref recover the ref this note used.
+    let mut found = Vec::new();
+    let mut stack = vec![tmp.path().join(APP_DIR).join("trash")];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).expect("read").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    assert_eq!(found.len(), 1);
+    assert!(
+        found[0].to_string_lossy().ends_with("notes/003-a.md"),
+        "{found:?}"
+    );
+}
+
+// ------------------------------------------------------------------ next ref
+
+#[test]
+fn next_ref_is_one_above_the_highest_note() {
+    let tmp = TempVault::new();
+    tmp.put("notes/001-a.md", NOTE);
+    tmp.put("notes/004-b.md", NOTE);
+    let vault = tmp.open();
+
+    // Highest, not first free: the gap at 002 stays a gap.
+    assert_eq!(vault.next_ref().expect("next ref"), "005");
+}
+
+#[test]
+fn next_ref_starts_at_000_for_an_empty_vault() {
+    let tmp = TempVault::new();
+    assert_eq!(tmp.open().next_ref().expect("next ref"), "000");
+}
+
+#[test]
+fn next_ref_never_reissues_a_deleted_ref() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/000-a.md", NOTE, None).expect("write");
+    vault.write("notes/003-b.md", NOTE, None).expect("write");
+
+    vault.trash("notes/003-b.md").expect("trash");
+
+    // Under §04's original "highest EXISTING + 1" this returned 001, handing
+    // a live ref to a second note and silently re-pointing any [[001]] link.
+    assert_eq!(vault.next_ref().expect("next ref"), "004");
+}
+
+#[test]
+fn next_ref_ignores_daily_logs() {
+    let tmp = TempVault::new();
+    tmp.put("daily/2026-08-04.md", NOTE);
+    tmp.put("notes/002-a.md", NOTE);
+    let vault = tmp.open();
+
+    // A daily filename is a date; treating 2026 as a ref would jump the counter.
+    assert_eq!(vault.next_ref().expect("next ref"), "003");
+}
+
+#[test]
+fn tree_reports_the_vault_and_the_next_ref() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let vault = tmp.open();
+
+    let tree = vault.tree().expect("tree");
+    assert_eq!(tree.vault, tmp.path().display().to_string());
+    assert_eq!(tree.next_ref, "004");
+    assert_eq!(tree.notes.len(), 1);
 }
 
 #[test]
@@ -379,12 +476,7 @@ fn concurrent_deletions_never_destroy_a_note() {
         thread.join().expect("thread").expect("trash");
     }
 
-    let mut kept: Vec<String> = fs::read_dir(tmp.path().join(APP_DIR).join(TRASH_DIR))
-        .expect("read trash")
-        .filter_map(|entry| entry.ok())
-        .filter_map(|entry| fs::read_to_string(entry.path()).ok())
-        .collect();
-    kept.sort();
+    let kept = trashed_bodies(tmp.path());
 
     let mut expected: Vec<String> = folders
         .iter()

@@ -78,8 +78,8 @@ pub async fn serve(listener: TcpListener, state: AppState) -> std::io::Result<()
 
 async fn tree(State(state): State<AppState>) -> Response {
     let vault = state.vault.clone();
-    match blocking(move || vault.list()).await {
-        Ok(entries) => Json(entries).into_response(),
+    match blocking(move || vault.tree()).await {
+        Ok(tree) => Json(tree).into_response(),
         Err(response) => response,
     }
 }

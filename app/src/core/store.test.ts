@@ -17,8 +17,23 @@ class FakeVault {
   #version = 0
   #sockets: FakeSocket[] = []
 
+  /** Every ref ever seen. Never forgotten, matching src/vault.rs::next_ref,
+   *  which counts `.register/trash/` so a ref is issued at most once. */
+  #everUsed = new Set<number>()
+
   seed(path: string, body: string): void {
     this.files.set(path, { body, etag: `etag-${++this.#version}` })
+    this.#remember(path)
+  }
+
+  #remember(path: string): void {
+    const found = /(?:^|\/)(\d+)-/.exec(path)?.[1]
+    if (found !== undefined) this.#everUsed.add(Number(found))
+  }
+
+  #nextRef(): string {
+    const highest = this.#everUsed.size === 0 ? -1 : Math.max(...this.#everUsed)
+    return String(highest + 1).padStart(3, '0')
   }
 
   /** Push a frame as the watcher would. */
@@ -63,7 +78,7 @@ class FakeVault {
           etag: held.etag,
         }))
         .sort((a, b) => a.path.localeCompare(b.path))
-      return json(tree)
+      return json({ vault: '/tmp/fake-vault', nextRef: this.#nextRef(), notes: tree })
     }
 
     const notePath = decodeURIComponent(path.replace('/api/note/', ''))
@@ -84,6 +99,7 @@ class FakeVault {
       }
       const etag = `etag-${++this.#version}`
       this.files.set(notePath, { body: String(init?.body ?? ''), etag })
+      this.#remember(notePath)
       return new Response('', { headers: { etag: `"${etag}"` } })
     }
     if (method === 'DELETE') {
@@ -501,7 +517,7 @@ describe('new note', () => {
     expect(server.files.has('notes/005-next.md')).toBe(true)
   })
 
-  it('falls back to the highest survivor after a deletion, as §04 specifies', async () => {
+  it('never reissues a ref, even after the highest note is deleted', async () => {
     server.seed('notes/000-a.md', '---\nref: 000\n---\n')
     server.seed('notes/003-highest.md', '---\nref: 003\n---\n')
     await vault.refresh()
@@ -511,11 +527,16 @@ describe('new note', () => {
     await vault.create('After a deletion')
     await settle()
 
-    // §04 says "highest EXISTING + 1", and a trashed note no longer exists — so
-    // with 003 gone the highest survivor is 000 and the next ref is 001, not
-    // 004. Refs are therefore NOT monotonic across deletions, and a wikilink
-    // written as [[001]] can later resolve to a different note. Faithful to the
-    // contract; the hazard is parked in docs/ROADMAP.md rather than papered over.
-    expect(server.files.has('notes/001-after-a-deletion.md')).toBe(true)
+    // The server counts `.register/trash/` when allocating, so deleting 003
+    // does not hand its ref back out. Under §04's original "highest EXISTING
+    // + 1" this produced 001 — a live ref for a second note, silently
+    // re-pointing any [[001]] wikilink at different prose.
+    expect(server.files.has('notes/004-after-a-deletion.md')).toBe(true)
+    expect(server.files.has('notes/001-after-a-deletion.md')).toBe(false)
+  })
+
+  it('reports the vault path for the status bar', async () => {
+    await vault.refresh()
+    expect(vault.vaultPath).toBe('/tmp/fake-vault')
   })
 })

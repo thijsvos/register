@@ -9,7 +9,7 @@ import {
   type VaultEvent,
 } from './api'
 import { touchModified, wordCount } from './frontmatter'
-import { newNote, nextRef, notePath } from './refs'
+import { newNote, notePath } from './refs'
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
 const SAVE_DEBOUNCE_MS = 500
@@ -57,6 +57,11 @@ class VaultStore {
   etag = $state<string | null>(null)
   dirty = $state(false)
 
+  /** Where the vault lives, for the status bar. Reported by the server (§04). */
+  vaultPath = $state<string | null>(null)
+  /** The ref a new note must take. The server owns it: only it sees the trash. */
+  nextRef = $state<string | null>(null)
+
   /** One line of instrument-voiced status, or nothing. */
   notice = $state<string | null>(null)
   connected = $state(false)
@@ -65,6 +70,8 @@ class VaultStore {
   #parked = new Set<string>()
   #saving: Promise<boolean> | null = null
   #dirtySince = 0
+  #refreshTicket = 0
+  #stopped = false
   #saveTimer: ReturnType<typeof setTimeout> | undefined
   #refreshTimer: ReturnType<typeof setTimeout> | undefined
   #disconnect: (() => void) | undefined
@@ -86,7 +93,11 @@ class VaultStore {
   }
 
   async start(): Promise<void> {
+    this.#stopped = false
     await this.refresh()
+    // A stop() arriving during that first fetch would have found #disconnect
+    // still undefined and left the socket running for the process's lifetime.
+    if (this.#stopped) return
     this.#disconnect = openEvents({
       onEvent: (event) => this.apply(event),
       // Every reconnect re-syncs: whatever happened while the socket was down
@@ -100,14 +111,23 @@ class VaultStore {
   }
 
   stop(): void {
+    this.#stopped = true
     this.#disconnect?.()
+    this.#disconnect = undefined
     clearTimeout(this.#saveTimer)
     clearTimeout(this.#refreshTimer)
   }
 
   async refresh(): Promise<void> {
+    // Two overlapping refreshes complete in any order, so the older one must not
+    // be allowed to install the staler tree.
+    const ticket = ++this.#refreshTicket
     try {
-      this.tree = await getTree()
+      const tree = await getTree()
+      if (ticket !== this.#refreshTicket) return
+      this.tree = tree.notes
+      this.vaultPath = tree.vault
+      this.nextRef = tree.nextRef
     } catch (error) {
       this.notice = describe(error)
       return
@@ -216,18 +236,18 @@ class VaultStore {
 
   /** §04: ref = highest existing + 1; fresh ULID; `notes/NNN-kebab-slug.md`. */
   async create(title: string): Promise<void> {
-    // Refresh first so the ref is computed against the vault as it is now, not
-    // as it was when the tab was opened. Refs must be monotonic.
+    // Refresh first so the ref is the vault's current one, not the one it had
+    // when this tab was opened.
     await this.refresh()
 
-    const taken = new Set(this.tree.map((entry) => entry.path))
-    const refs = this.tree.map((entry) => entry.ref)
-    let ref = nextRef(refs)
-    let path = notePath(ref, title)
-    while (taken.has(path)) {
-      ref = nextRef([...refs, ref])
-      path = notePath(ref, title)
+    // The server allocates it: only the server can see `.register/trash/`, and
+    // therefore only the server knows which refs have ever been handed out.
+    const ref = this.nextRef
+    if (ref === null) {
+      this.notice = 'Vault not loaded.'
+      return
     }
+    const path = notePath(ref, title)
 
     // §04's PUT has no create-if-absent mode — without If-Match it writes
     // unconditionally — so the name has to be confirmed free before writing,

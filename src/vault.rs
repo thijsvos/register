@@ -20,6 +20,8 @@ const TRASH_DIR: &str = "trash";
 /// §04's dated-log directory. Its filenames are dates, not refs.
 const DAILY_DIR: &str = "daily/";
 const NOTE_EXT: &str = "md";
+/// §04's examples are three digits (`003-…`).
+const MIN_REF_WIDTH: usize = 3;
 /// How many same-millisecond, same-basename deletions to disambiguate before
 /// giving up. Reaching this means something pathological is happening.
 const MAX_TRASH_COLLISIONS: u32 = 1024;
@@ -68,6 +70,21 @@ impl From<io::Error> for Error {
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// The body of `GET /api/tree` (§04).
+///
+/// An envelope rather than a bare array, because two things the UI needs are
+/// properties of the vault and not of any one note: where the vault lives, and
+/// which ref a new note should take.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tree {
+    /// Absolute path of the vault, for the status bar (§02b Screen 1).
+    pub vault: String,
+    /// The ref a new note must take.
+    pub next_ref: String,
+    pub notes: Vec<Entry>,
+}
 
 /// One row of `GET /api/tree` (§04). Everything except `path` is derived, and
 /// every derived field is optional: the tree must survive a note an agent is
@@ -247,6 +264,63 @@ impl Vault {
         Ok(out)
     }
 
+    /// The whole `GET /api/tree` body.
+    pub fn tree(&self) -> Result<Tree> {
+        Ok(Tree {
+            vault: self.root.display().to_string(),
+            next_ref: self.next_ref()?,
+            notes: self.list()?,
+        })
+    }
+
+    /// The ref a new note must take: one above the highest ever allocated.
+    ///
+    /// Trashed notes count. §04 originally said "highest *existing* + 1", which
+    /// meant deleting the highest note handed its ref straight back out and a
+    /// `[[NNN]]` wikilink silently re-pointed at a different note. Trash keeps
+    /// each note at its original path precisely so the ref it used is still
+    /// recoverable here.
+    pub fn next_ref(&self) -> Result<String> {
+        let mut highest: i64 = -1;
+        let mut width = MIN_REF_WIDTH;
+
+        let mut consider = |rel: &str| {
+            let Some(found) = ref_from_path(rel) else {
+                return;
+            };
+            let Ok(value) = found.parse::<i64>() else {
+                return;
+            };
+            highest = highest.max(value);
+            width = width.max(found.len());
+        };
+
+        for rel in self.paths()? {
+            consider(&rel);
+        }
+        for rel in self.trashed_paths() {
+            consider(&rel);
+        }
+
+        Ok(format!("{:0width$}", highest + 1, width = width))
+    }
+
+    /// Vault-relative paths of trashed notes, as they were before deletion.
+    fn trashed_paths(&self) -> Vec<String> {
+        let root = self.root.join(APP_DIR).join(TRASH_DIR);
+        let mut out = Vec::new();
+        let Ok(buckets) = fs::read_dir(&root) else {
+            return out;
+        };
+        for bucket in buckets.flatten() {
+            let base = bucket.path();
+            if base.is_dir() {
+                collect_notes(&base, &base, &mut out);
+            }
+        }
+        out
+    }
+
     /// Every note in the vault, sorted by path.
     pub fn list(&self) -> Result<Vec<Entry>> {
         let mut out = Vec::new();
@@ -403,30 +477,34 @@ impl Vault {
             return Err(Error::NotFound);
         }
         let dir = self.root.join(APP_DIR).join(TRASH_DIR);
-        fs::create_dir_all(&dir)?;
 
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or(Error::InvalidPath)?;
         let stamp = now_millis();
 
-        // The free name is *claimed*, not merely observed to be free. Probing
-        // with `exists()` and then renaming is a check-then-act race, and
-        // `rename` silently replaces its destination: two notes with the same
-        // basename deleted at the same moment both resolve to `<stamp>-<name>`
-        // and one is destroyed. §04 promises deletion never destroys anything.
-        let mut target = dir.join(format!("{stamp}-{name}"));
-        for nth in 1..=MAX_TRASH_COLLISIONS {
+        // One bucket per deletion, holding the note at its original vault path.
+        // Preserving the path is what lets `next_ref` recover the ref a trashed
+        // note used, so a ref is never handed out twice — a flat
+        // `<stamp>-<basename>` name destroys exactly that information.
+        //
+        // The destination is *claimed* with create_new rather than probed with
+        // exists(): probing then renaming is a check-then-act race, and rename
+        // silently replaces its destination.
+        for nth in 0..MAX_TRASH_COLLISIONS {
+            let bucket = if nth == 0 {
+                dir.join(stamp.to_string())
+            } else {
+                dir.join(format!("{stamp}-{nth}"))
+            };
+            let target = bucket.join(rel);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
             match File::create_new(&target) {
                 Ok(_) => {
                     // Reserved. The rename replaces this empty placeholder.
                     fs::rename(&path, &target)?;
                     return Ok(());
                 }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    target = dir.join(format!("{stamp}-{nth}-{name}"));
-                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) => return Err(Error::Io(e)),
             }
         }
@@ -569,6 +647,29 @@ fn parse_frontmatter(yaml: &str) -> Option<Frontmatter> {
 /// The filename is the source of truth for the ref, not the frontmatter field:
 /// §04's invariant is `filename = ref-slug`, and a filename cannot be mistyped
 /// into a different YAML scalar type the way an unquoted `ref: 003` can.
+/// Collect `.md` files under `dir`, reported relative to `base`.
+fn collect_notes(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            collect_notes(base, &path, out);
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some(NOTE_EXT) {
+            continue;
+        }
+        if let Ok(rel) = path.strip_prefix(base)
+            && let Some(text) = rel.to_str()
+        {
+            out.push(text.replace('\\', "/"));
+        }
+    }
+}
+
 fn ref_from_path(path: &str) -> Option<String> {
     // §04 defines two dated shapes and only one of them carries a ref:
     // `notes/NNN-slug.md` and the root `000-inbox.md` do, `daily/YYYY-MM-DD.md`

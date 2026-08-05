@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev E</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev F</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -153,14 +153,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="mast">
   <div class="mast-top">
     <span class="co">Register Project · Engineering Document</span>
-    <span class="no">RG-SPEC-001 · REV E <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+    <span class="no">RG-SPEC-001 · REV F <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
   </div>
   <div class="mast-mid">
     <h1>Register RG-1<br>Build Specification</h1>
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-05 · Rev E</span></div>
+    <div><label>Issued</label><span>2026-08-05 · Rev F</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -174,6 +174,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="callout"><span class="chip">Rev D</span><div><strong>Changes from Rev C:</strong> scope language corrected from permanent to staged. §01 "non-goals" is now a <strong>v1 scope fence — deferred, not forbidden</strong>; a new <strong>§12 Roadmap</strong> gives every deferred feature an explicit landing path that preserves the vault contract; §10, §11, P11 and CONTRIBUTING guidance updated to a park-and-promote process (roadmap entry → ADR → milestone). The <strong>only permanent constraint is the §02 design system.</strong></div></div>
 
 <div class="callout warn"><span class="chip">Rev E</span><div><strong>Changes from Rev D — design review merged:</strong> a new <strong>§02b</strong> makes component states and all seven v1 screens (editor, search, first-run, conflict, TODAY, settings/BYOF, agent-edit-live) normative, so the builder stops improvising where §02 was silent. Type corrected — micro-label is <strong>11&nbsp;px</strong> on Departure Mono's pixel grid (was 9.5&nbsp;px, off-grid); body measure capped at ~68&nbsp;ch; note titles are sentence-case (uppercase reserved for chrome). Contrast fixed: <code>--dim</code> is now content-safe and <code>--faint</code> is decorative-only, retiring the false "AAA by construction" claim. Chrome shows <strong>only true state</strong> (watcher, vault, files, git, render) — the fabricated sync/store/activity gauges are gone. The reference prototype is now <strong>MK-II Rev E</strong> and implements this section.</div></div>
+
+<div class="callout warn"><span class="chip">Rev F</span><div><strong>Changes from Rev E — §04 amended, major version.</strong> Two normative changes, both approved before implementation. <strong>(1) Refs are allocated once and never reissued.</strong> Rev E said "ref = highest <em>existing</em> + 1", which meant deleting the highest note handed its ref straight back out and a <code>[[NNN]]</code> wikilink silently re-pointed at different prose — a correctness hole in the product's defining interaction. The rule is now "one above the highest ever allocated", with <code>.register/trash/</code> counted; trash therefore keeps each note at its original vault path so the ref it used stays recoverable. <strong>(2) <code>GET /api/tree</code> returns an envelope</strong> <code>{vault, nextRef, notes[]}</code> rather than a bare array. <code>nextRef</code> is the server's to allocate, since only the server can see the trash; <code>vault</code> fills the status-bar field §02b Screen 1 shows and Rev E's API could not supply. Everything else — the note format, the other four endpoints, §02 and §02b — is unchanged.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
 <div class="toc">
@@ -450,7 +452,7 @@ shown the product.</pre></div>
 <h3 class="sub">HTTP/WS API (complete)</h3>
 <table>
 <tr><th>Endpoint</th><th>Semantics</th></tr>
-<tr><td class="k">GET /api/tree</td><td>All files: path, ref, title, tags, mtime, size, etag. UI builds sidebar + search corpus from this plus bodies.</td></tr>
+<tr><td class="k">GET /api/tree</td><td><code>{vault, nextRef, notes[]}</code>. Each note: path, ref, title, tags, mtime, size, etag. UI builds sidebar + search corpus from this plus bodies. <code>vault</code> is the vault's absolute path (§02b status bar); <code>nextRef</code> is the ref a new note must take — the server allocates it because only the server can see <code>.register/trash/</code>.</td></tr>
 <tr><td class="k">GET /api/note/{path}</td><td>Raw markdown + etag.</td></tr>
 <tr><td class="k">PUT /api/note/{path}</td><td>Body + If-Match etag. Atomic tmp+rename. Stale etag ⇒ 409; client writes <code>*.conflict-&lt;ts&gt;.md</code> and surfaces it. Missing path ⇒ create.</td></tr>
 <tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
@@ -483,7 +485,9 @@ tags: [design, research]
 Body is plain markdown. [[Wikilinks]] resolve by title or ref.
 - [ ] tasks are plain text. Nothing else is special.
 
-Invariants: filename = ref-slug; ref = highest existing + 1;
+Invariants: filename = ref-slug; ref = one above the highest ever
+allocated — trashed notes count, so a ref is issued at most once and
+a [[NNN]] link can never be re-pointed by a delete-then-create;
 round-trip through the UI is byte-lossless outside frontmatter
 `modified`. This section is the compatibility contract — breaking
 it is a major version.</pre></div>
@@ -518,7 +522,9 @@ tags: [lowercase, words]
 Everything else is ordinary markdown.
 
 ## Creating a note
-1. ref  = highest NNN in notes/ + 1
+1. ref  = the `nextRef` from GET /api/tree, or if you are working
+   the files directly: one above the highest NNN ever used, counting
+   .register/trash/ — never reuse a deleted ref
 2. id   = fresh ULID
 3. file = notes/NNN-kebab-slug.md with full frontmatter
 
@@ -1025,7 +1031,7 @@ Tailscale pattern from §07. No accounts, no telemetry. Commit
 <p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
 
 <div class="barcode"></div>
-<div class="eor">RG-SPEC-001 · REV D · End of record</div>
+<div class="eor">RG-SPEC-001 · REV F · End of record</div>
 
 </div>
 

@@ -1,8 +1,8 @@
 <script lang="ts">
 // §02b: "Chrome shows only derivable truth. No gauge may display a number the
-// system cannot measure." Watcher, render and files are measured. Vault and git
-// are not: §04's API table is complete and exposes neither, so they stay dashed
-// rather than inventing a value.
+// system cannot measure." Watcher, render, files and vault are all reported by
+// the server. Git is not — it arrives with P12 — so it stays dashed rather than
+// inventing a value.
 let {
   renderMs = null,
   watcherLive = false,

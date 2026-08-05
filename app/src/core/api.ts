@@ -3,6 +3,20 @@
  * tasks, tags and search are all client-side derivations of plain text.
  */
 
+/**
+ * The body of `GET /api/tree` (§04).
+ *
+ * An envelope, not a bare array: where the vault lives and which ref a new note
+ * must take are properties of the vault, not of any one note. `nextRef` is the
+ * server's, not the client's, because only the server can see `.register/trash/`
+ * and therefore only the server knows which refs have ever been used.
+ */
+export interface Tree {
+  vault: string
+  nextRef: string
+  notes: Entry[]
+}
+
 /** One row of `GET /api/tree`. */
 export interface Entry {
   path: string
@@ -62,29 +76,34 @@ async function refuse(response: Response): Promise<never> {
   )
 }
 
-export async function getTree(): Promise<Entry[]> {
+export async function getTree(): Promise<Tree> {
   const response = await fetch('/api/tree')
   if (!response.ok) await refuse(response)
-  return (await response.json()) as Entry[]
+  return asTree(await response.json())
 }
 
 export async function getNote(path: string): Promise<Loaded> {
   const response = await fetch(noteUrl(path))
   if (!response.ok) await refuse(response)
-  return { body: await response.text(), etag: etagOf(response) }
+  const etag = etagOf(response)
+  if (etag === null) throw new ApiError(response.status, 'note came back with no etag')
+  return { body: await response.text(), etag }
 }
 
 export async function putNote(path: string, body: string, etag?: string): Promise<Saved> {
   const response = await fetch(noteUrl(path), {
     method: 'PUT',
-    headers: etag ? { 'If-Match': etag } : {},
+    headers: etag === undefined ? {} : { 'If-Match': etag },
     body,
   })
   if (response.status === 409) {
-    return { ok: false, conflict: true, etag: etagOf(response) || null }
+    return { ok: false, conflict: true, etag: etagOf(response) }
   }
   if (!response.ok) await refuse(response)
-  return { ok: true, etag: etagOf(response) }
+
+  const written = etagOf(response)
+  if (written === null) throw new ApiError(response.status, 'write returned no etag')
+  return { ok: true, etag: written }
 }
 
 export async function deleteNote(path: string): Promise<void> {
@@ -121,12 +140,16 @@ export function openEvents(handlers: {
       handlers.onResync()
     }
     socket.onmessage = (message) => {
+      let event: VaultEvent | null = null
       try {
-        handlers.onEvent(JSON.parse(String(message.data)) as VaultEvent)
+        event = asEvent(JSON.parse(String(message.data)))
       } catch {
-        // A frame we cannot read means our picture may be stale.
-        handlers.onResync()
+        event = null
       }
+      // A frame we cannot read means our picture may be stale, so fall back to
+      // re-reading the tree rather than letting `undefined` travel inward.
+      if (event === null) handlers.onResync()
+      else handlers.onEvent(event)
     }
     socket.onclose = () => {
       handlers.onConnected(false)
@@ -146,6 +169,71 @@ export function openEvents(handlers: {
 
 const RECONNECT_MS = 1000
 
-function etagOf(response: Response): string {
-  return (response.headers.get('etag') ?? '').replace(/^W\//, '').replace(/^"|"$/g, '')
+/**
+ * The response's etag, or null when it carries none.
+ *
+ * Null rather than the empty string on purpose: an empty etag would flow into
+ * `putNote`'s optional parameter, and a falsy check there would quietly drop the
+ * `If-Match` header — downgrading a guarded write to an unconditional one at
+ * exactly the moment the guard matters.
+ */
+function etagOf(response: Response): string | null {
+  const raw = response.headers.get('etag')
+  return raw === null ? null : raw.replace(/^W\//, '').replace(/^"|"$/g, '')
+}
+
+// Both ends of this API are ours, so a shape mismatch is a build-time bug —
+// but validating at the boundary turns it into a clear error instead of an
+// `undefined` surfacing three layers inside the store.
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function asTree(value: unknown): Tree {
+  if (
+    !isRecord(value) ||
+    typeof value.vault !== 'string' ||
+    typeof value.nextRef !== 'string' ||
+    !Array.isArray(value.notes)
+  ) {
+    throw new ApiError(0, 'the vault tree came back in a shape this client cannot read')
+  }
+  return {
+    vault: value.vault,
+    nextRef: value.nextRef,
+    notes: value.notes.map(asEntry).filter((entry): entry is Entry => entry !== null),
+  }
+}
+
+function asEntry(value: unknown): Entry | null {
+  if (
+    !isRecord(value) ||
+    typeof value.path !== 'string' ||
+    typeof value.etag !== 'string'
+  ) {
+    return null
+  }
+  return {
+    path: value.path,
+    ref: typeof value.ref === 'string' ? value.ref : null,
+    title: typeof value.title === 'string' ? value.title : null,
+    tags: Array.isArray(value.tags)
+      ? value.tags.filter((tag): tag is string => typeof tag === 'string')
+      : [],
+    mtime: typeof value.mtime === 'number' ? value.mtime : 0,
+    size: typeof value.size === 'number' ? value.size : 0,
+    etag: value.etag,
+  }
+}
+
+function asEvent(value: unknown): VaultEvent | null {
+  if (!isRecord(value) || typeof value.path !== 'string') return null
+  const kind = value.type
+  if (kind !== 'created' && kind !== 'changed' && kind !== 'removed') return null
+  return {
+    type: kind,
+    path: value.path,
+    etag: typeof value.etag === 'string' ? value.etag : null,
+  }
 }

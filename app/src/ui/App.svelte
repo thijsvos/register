@@ -94,6 +94,7 @@ function invert() {
   <StatusBar
     renderMs={render.ms}
     watcherLive={vault.connected}
+    vault={vault.vaultPath}
     files={vault.files}
     notice={vault.notice}
     dirty={vault.dirty}

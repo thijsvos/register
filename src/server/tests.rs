@@ -115,6 +115,11 @@ async fn the_tree_reports_derived_metadata() {
 
     let reply = request(addr, "GET", "/api/tree", &[], "").await;
     assert_eq!(reply.status, 200);
+    // The §04 envelope: where the vault lives and which ref comes next are
+    // properties of the vault, not of any one note.
+    assert!(reply.body.contains("\"vault\":"), "{}", reply.body);
+    assert!(reply.body.contains("\"nextRef\":\"004\""), "{}", reply.body);
+    assert!(reply.body.contains("\"notes\":["), "{}", reply.body);
     assert!(
         reply
             .body

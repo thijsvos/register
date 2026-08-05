@@ -1,38 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { fields } from './frontmatter'
-import { newNote, nextRef, notePath, slug } from './refs'
+import { newNote, notePath, slug } from './refs'
 
-describe('nextRef', () => {
-  it('is highest plus one, not count plus one', () => {
-    // §04 makes a ref immutable, so a deleted 004 must never be reissued.
-    expect(nextRef(['001', '002', '004'])).toBe('005')
-  })
-
-  it('starts at 000 for an empty vault', () => {
-    expect(nextRef([])).toBe('000')
-  })
-
-  it('keeps zero padding and widens when the vault does', () => {
-    expect(nextRef(['001'])).toBe('002')
-    expect(nextRef(['0999'])).toBe('1000')
-    expect(nextRef(['999'])).toBe('1000')
-  })
-
-  it('ignores notes with no ref', () => {
-    expect(nextRef([null, '003', null])).toBe('004')
-  })
-
-  it('ignores refs that are not numbers', () => {
-    expect(nextRef(['003', 'draft'])).toBe('004')
-  })
-
-  it('is monotonic across repeated allocation', () => {
-    const refs: string[] = []
-    for (let i = 0; i < 25; i++) refs.push(nextRef(refs))
-    expect(refs).toEqual([...refs].sort())
-    expect(new Set(refs).size).toBe(refs.length)
-  })
-})
+// Ref allocation is the server's (src/vault.rs::next_ref) — it is the only side
+// that can see `.register/trash/` and therefore the only side that knows which
+// refs have ever been used. Its tests live in src/vault/tests.rs.
 
 describe('slug', () => {
   it.each([
