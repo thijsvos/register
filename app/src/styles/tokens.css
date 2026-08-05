@@ -1,0 +1,71 @@
+/* SPEC §02 — verbatim. Do not edit without editing the spec first. */
+:root {
+  /* color — monochrome + one signal */
+  --bg: #ffffff;  --fg: #000000;  --line: #000000;
+  --dim: #454545;                    /* content-safe ≈9.7:1 on white (AAA) */
+  --faint: #8a8a8a;                  /* DECORATIVE ONLY — crosses, meters, rules; never content */
+  --hover: rgba(0,0,0,.055);
+  --signal: #ff2a00;                 /* status LED only */
+  --sel-bg: #000000; --sel-fg: #ffffff;
+  --hi: var(--fg);                   /* brightest ink; on dark it is lighter than body */
+
+  /* type */
+  --font-ui: "TX-02", "Berkeley Mono", "Commit Mono",
+             ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-micro: "Departure Mono", var(--font-ui);
+  --text-micro: 11px;   --track-micro: .16em;   /* Departure Mono renders on an 11px pixel grid */
+  --text-ui: 11px;      --track-ui: .06em;
+  --text-body: 13px;    --lh-body: 1.6;
+  --text-title: 22px;
+  --measure: 68ch;      /* body line-length cap — never full-bleed prose */
+
+  /* space (4px grid) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+}
+html.dark {
+  /* soft dark: warm near-black, demoted body ink, dimmed hairlines */
+  --bg: oklch(0.17 0.006 74);        /* not #000 — cuts halation */
+  --hi: oklch(0.94 0.004 85);        /* titles, active, emphasis */
+  --fg: oklch(0.855 0.004 82);       /* body ink, demoted from full white */
+  --line: oklch(0.80 0.004 82);
+  --dim: oklch(0.66 0.004 82);
+  --faint: oklch(0.46 0.004 82);
+  --hover: rgba(255,255,255,.08);
+  --sel-bg: oklch(0.94 0.004 85); --sel-fg: oklch(0.17 0.006 74);
+}
+
+/* ---------------------------------------------------------------------------
+   Frame addendum. Every value below is normative §02 that happens to be stated
+   in prose rather than in the §02 code block, lifted here so that hard rule 2
+   ("never hardcode a size; everything derives from tokens.css") is satisfiable.
+   Source: §02 Component doctrine — "header rail (44px) / sidebar (250px) /
+   editor / inspector (268px) / status bar (30px), separated by 1px hairlines."
+   --------------------------------------------------------------------------- */
+:root {
+  /* --- normative: §02 component doctrine, stated in prose --- */
+  --frame-header: 44px;
+  --frame-side: 250px;
+  --frame-insp: 268px;
+  --frame-foot: 30px;
+  --hairline: 1px;
+
+  /* --- derived from the MK-II mock; NOT stated in §02 --- */
+  --text-mark: 14px;    /* wordmark — a fifth type role the §02 scale does not define */
+  --track-mark: .08em;
+  --pane-x: 14px;       /* pane gutter: aligns every label and row across side + inspector */
+  --pane-y: 6px;        /* pane label lead */
+  --key-pad-y: 2px;     /* keeps a key box inside the 44px header rail */
+  --scroll-w: 10px;
+  --cross-x: 5px;
+  --cross-y: 3px;
+  --focus-offset: 2px;  /* §02b state matrix: "dashed ring, offset 2px" */
+
+  /* Departure Mono is bitmap-derived on an 11px grid: half-leading must be a
+     whole pixel or every micro baseline lands off-pixel and the face blurs.
+     (17 - 11) / 2 = 3. The inherited --lh-body 1.6 gives 3.3 and does not. */
+  --lh-micro: 17px;
+
+  /* breakpoints are not custom properties (media queries cannot read them);
+     they live in the components as literals: 1080px drops the inspector, 760px
+     collapses to one column. */
+}

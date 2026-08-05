@@ -1,0 +1,114 @@
+/* Faces are OFL only and self-hosted (§03). TX-02 / Berkeley Mono is commercial
+   and never ships here — it sits first in --font-ui and resolves only if the
+   user already owns it, or later via the BYOF loader (P9). */
+@font-face {
+  font-family: "Commit Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/commit-mono/commit-mono-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Commit Mono";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/commit-mono/commit-mono-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Departure Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/departure-mono/departure-mono-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Server Mono";
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url("/fonts/server-mono/server-mono-400-normal.woff2") format("woff2");
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  background: var(--bg);
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-body);
+  line-height: var(--lh-body);
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Selection is inverse video — §02. */
+::selection {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+
+/* A11y floor: the focus ring is always visible and never animated — §02. */
+:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+/* Scrollbars — chunky, terminal-grade. The standard properties come first so
+   Firefox gets a squared, tokenised bar instead of a rounded, shaded, animated
+   OS widget inside a frame whose doctrine is no radius, no shadow, no motion.
+   The thumb is --line, the hairline ink: it is chrome, not content, and at
+   --fg it would be the brightest object on screen in dark mode. */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) var(--bg);
+}
+
+::-webkit-scrollbar {
+  width: var(--scroll-w);
+  height: var(--scroll-w);
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-track:vertical {
+  border-left: var(--hairline) solid var(--line);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+}
+
+/* Zero transitions is kept by not writing any, and enforced by doctrine.test.ts
+   rather than by a blanket !important override. The status LED is the single
+   permitted animation and declares it locally (§02). */

@@ -11,7 +11,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "biome check --config-path=.. . && svelte-check --tsconfig ./tsconfig.json",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run",
     "test:watch": "vitest",
     "size": "size-limit"
   },

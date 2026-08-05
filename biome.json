@@ -15,5 +15,22 @@
   },
   "javascript": {
     "formatter": { "quoteStyle": "single", "semicolons": "asNeeded" }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["**/styles/tokens.css"],
+      "formatter": { "enabled": false }
+    },
+    {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedImports": "off",
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    }
+  ]
 }

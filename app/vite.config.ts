@@ -25,5 +25,8 @@ export default defineConfig({
   test: {
     // Tests live under src/ so svelte-check type-checks them too.
     include: ['src/**/*.test.ts'],
+    // Vitest stubs stylesheets out by default. doctrine.test.ts asserts against
+    // the real CSS text, and a stubbed import would make it pass vacuously.
+    css: true,
   },
 })
