@@ -2,18 +2,3 @@
 # minutes. Pinned here so a pnpm upgrade cannot silently change what CI enforces;
 # pnpm's own default is the same 1440 but is not part of any manifest.
 minimumReleaseAge: 1440
-
-# Dated exemption, not policy: the @biomejs/* 2.5.7 artefacts were published
-# between 2026-08-04T13:22Z and 13:24Z, so the window clears at 2026-08-05T13:24Z.
-# After that, delete this block and re-run `pnpm install` — verified at 12:41Z that
-# it had not yet cleared, so do check rather than assume.
-minimumReleaseAgeExclude:
-  - '@biomejs/biome@2.5.7'
-  - '@biomejs/cli-darwin-arm64@2.5.7'
-  - '@biomejs/cli-darwin-x64@2.5.7'
-  - '@biomejs/cli-linux-arm64-musl@2.5.7'
-  - '@biomejs/cli-linux-arm64@2.5.7'
-  - '@biomejs/cli-linux-x64-musl@2.5.7'
-  - '@biomejs/cli-linux-x64@2.5.7'
-  - '@biomejs/cli-win32-arm64@2.5.7'
-  - '@biomejs/cli-win32-x64@2.5.7'
