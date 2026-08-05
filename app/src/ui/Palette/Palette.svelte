@@ -1,8 +1,9 @@
 <script lang="ts">
 import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
+import { go } from '../nav'
 import { chrome } from '../view.svelte'
-import { type Command, matchCommands } from './commands'
+import { type Command, matchCommands, templateChoices } from './commands'
 
 /** What the list can show before it scrolls past being useful. */
 const LIMIT = 20
@@ -26,7 +27,8 @@ let notes = $derived.by(() => {
 })
 
 let commands = $derived(matchCommands(query))
-let total = $derived(notes.length + commands.length)
+let templates = $derived(templateChoices(query))
+let total = $derived(notes.length + commands.length + templates.length)
 
 // The selection must never point past the end when the query narrows.
 $effect(() => {
@@ -67,13 +69,23 @@ function choose(index: number) {
   if (note !== undefined) {
     navigated = true
     chrome.closePalette()
-    void vault.open(note.entry.path)
+    go.note(note.entry.path)
     return
   }
+
   const command: Command | undefined = commands[index - notes.length]
   if (command !== undefined) {
     chrome.closePalette()
     void command.run()
+    return
+  }
+
+  const template = templates[index - notes.length - commands.length]
+  if (template !== undefined) {
+    // Lands the caret in the new note, like every other route into one.
+    navigated = true
+    chrome.closePalette()
+    go.create(template.title, template.path)
   }
 }
 
@@ -217,6 +229,28 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
               {/each}
             </span>
             <span class="hint">{command.keys}</span>
+          </button>
+        {/each}
+      {/if}
+
+      {#if templates.length > 0}
+        <div class="section">New from template · {templates.length}</div>
+        {#each templates as template, index (template.path)}
+          {@const position = notes.length + commands.length + index}
+          <button
+            class="row"
+            role="option"
+            id="pal-row-{position}"
+            class:sel={selected === position}
+            aria-selected={selected === position}
+            onmousemove={() => {
+              selected = position
+            }}
+            onclick={() => choose(position)}
+          >
+            <span class="ref"></span>
+            <span class="name">{template.name}</span>
+            <span class="hint">{template.title}</span>
           </button>
         {/each}
       {/if}

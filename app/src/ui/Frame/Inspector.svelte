@@ -5,7 +5,7 @@ import { outline } from '../../core/outline'
 import { tagsOf } from '../../core/refs'
 import { vault } from '../../core/store.svelte'
 import { countsFor } from '../../core/tags'
-import { traverse } from '../nav'
+import { go, traverse } from '../nav'
 import { chrome } from '../view.svelte'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
@@ -76,7 +76,7 @@ function meta(count: number): string {
   {:else}
     <nav aria-label="Backlinks">
       {#each backlinks as entry (entry.path)}
-        <button class="row" onclick={() => vault.open(entry.path)} onkeydown={traverse}>
+        <button class="row" onclick={() => go.note(entry.path)} onkeydown={traverse}>
           <span class="ref">{entry.ref ?? dash}</span>
           <span class="name">{entry.title ?? entry.path}</span>
         </button>

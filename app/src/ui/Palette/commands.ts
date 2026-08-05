@@ -1,5 +1,7 @@
 import { revealVault } from '../../core/api'
+import { isTemplate } from '../../core/refs'
 import { vault } from '../../core/store.svelte'
+import { go } from '../nav'
 import { chrome } from '../view.svelte'
 
 /**
@@ -22,19 +24,26 @@ export function allCommands(): Command[] {
       id: 'new',
       label: 'NEW · NOTE',
       keys: 'N',
-      run: () => vault.create('Untitled note'),
+      run: () => go.create('Untitled note'),
+    },
+    // §02b Screen 2 draws this row with [⌘D] against it.
+    {
+      id: 'today',
+      label: 'GO · TODAY / TASKS',
+      keys: '⌘D',
+      run: () => go.today(),
     },
     {
       id: 'daily',
       label: 'GO · DAILY LOG',
       keys: 'G D',
-      run: () => vault.openDaily(),
+      run: () => go.daily(),
     },
     {
       id: 'inbox',
       label: 'GO · INBOX',
       keys: 'G I',
-      run: () => vault.follow('000'),
+      run: () => go.follow('000'),
     },
     {
       id: 'invert',
@@ -86,6 +95,39 @@ export function allCommands(): Command[] {
       },
     },
   ]
+}
+
+/** A stencil in `templates/`, offered as an action rather than as a note. */
+export interface TemplateChoice {
+  path: string
+  /** What to call it in the list: its title, or its filename. */
+  name: string
+  /** The title the new note will take if it is chosen now. */
+  title: string
+}
+
+/**
+ * The templates a new note can be cut from (§08 P7: "notes in templates/ appear
+ * under NEW FROM TEMPLATE").
+ *
+ * Deliberately not filtered by the query, unlike notes and commands: the query
+ * IS the new note's title, so filtering would hide every template the moment you
+ * typed a name for the thing you wanted to create. When the box is empty the
+ * template's own title is used instead.
+ */
+export function templateChoices(query: string): TemplateChoice[] {
+  const wanted = query.trim()
+
+  return vault.tree
+    .filter((entry) => isTemplate(entry.path))
+    .map((entry) => {
+      const name = entry.title ?? basename(entry.path)
+      return { path: entry.path, name, title: wanted === '' ? name : wanted }
+    })
+}
+
+function basename(path: string): string {
+  return (path.split('/').pop() ?? path).replace(/\.md$/, '')
 }
 
 export interface Match {

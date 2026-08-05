@@ -1,5 +1,5 @@
 import { ulid } from '../lib/ulid'
-import { fields, list } from './frontmatter'
+import { fields, list, setField, split } from './frontmatter'
 
 // Ref allocation lives on the server, not here. Only the server can see
 // `.register/trash/`, so only the server knows which refs have ever been handed
@@ -36,16 +36,14 @@ export function newNote(options: {
   id?: string
 }): string {
   const { ref, title, now } = options
-  const created = now.toISOString().slice(0, 10)
-  const modified = `${now.toISOString().slice(0, 19)}Z`
 
   return [
     '---',
     `id: ${options.id ?? ulid(now.getTime())}`,
     `ref: ${ref}`,
     `title: ${title}`,
-    `created: ${created}`,
-    `modified: ${modified}`,
+    `created: ${day(now)}`,
+    `modified: ${isoSeconds(now)}`,
     'tags: []',
     '---',
     '',
@@ -65,13 +63,12 @@ export function dailyPath(now: Date): string {
  * creation from `templates/daily.md`; this is the bare conforming note.
  */
 export function newDaily(now: Date, id?: string): string {
-  const day = now.toISOString().slice(0, 10)
   return [
     '---',
     `id: ${id ?? ulid(now.getTime())}`,
-    `title: ${day}`,
-    `created: ${day}`,
-    `modified: ${now.toISOString().slice(0, 19)}Z`,
+    `title: ${day(now)}`,
+    `created: ${day(now)}`,
+    `modified: ${isoSeconds(now)}`,
     'tags: [daily]',
     '---',
     '',
@@ -81,4 +78,82 @@ export function newDaily(now: Date, id?: string): string {
 /** The tags a note declares, for callers that only hold its text. */
 export function tagsOf(source: string): string[] {
   return list(fields(source).get('tags'))
+}
+
+/** §04's daily stencil, scaffolded by `register init` (P8). */
+export const DAILY_TEMPLATE = 'templates/daily.md'
+
+/**
+ * Whether a path is a stencil rather than a note (§04 layout: `templates/`).
+ *
+ * A template is a real file and stays visible in the index — files are the
+ * truth — but it is not a note *about* anything, so it is left out of the
+ * derivations that would put its placeholder content into your day.
+ */
+export function isTemplate(path: string): boolean {
+  return path === 'templates' || path.startsWith('templates/')
+}
+
+/**
+ * The per-note fields §04 requires, stamped into a template's frontmatter.
+ *
+ * Everything else the template author wrote — extra fields, key order,
+ * comments, the body — is left byte for byte, because a template is someone's
+ * decision about what a note of this kind looks like and the app has no opinion
+ * beyond the five fields that must be right.
+ */
+function stamp(template: string, values: [string, string][]): string {
+  let out = template
+  for (const [key, value] of values) out = setField(out, key, value)
+  return out
+}
+
+/** A conforming note built from `template`, or a bare one when there is none. */
+export function noteFrom(
+  template: string | null,
+  options: { ref: string; title: string; now: Date; id?: string },
+): string {
+  const settled = { ...options, id: options.id ?? ulid(options.now.getTime()) }
+  if (template === null) return newNote(settled)
+
+  // A template with no frontmatter is a body, not a note. It gets a conforming
+  // header rather than being written to disk as something §04 cannot read.
+  const parts = split(template)
+  if (parts.open === '') return newNote(settled) + parts.body
+
+  const stamped = stamp(template, [
+    ['id', settled.id],
+    ['ref', settled.ref],
+    ['title', settled.title],
+    ['created', day(settled.now)],
+    ['modified', isoSeconds(settled.now)],
+  ])
+  return fields(stamped).has('tags') ? stamped : setField(stamped, 'tags', '[]')
+}
+
+/** Today's daily log built from `template`, or a bare one when there is none. */
+export function dailyFrom(template: string | null, now: Date, id?: string): string {
+  const settled = id ?? ulid(now.getTime())
+  if (template === null) return newDaily(now, settled)
+
+  const parts = split(template)
+  if (parts.open === '') return newDaily(now, settled) + parts.body
+
+  // No ref: §04 gives daily logs their own filename shape, and a date is not a
+  // ref — the server's allocator skips `daily/` for exactly that reason.
+  const stamped = stamp(template, [
+    ['id', settled],
+    ['title', day(now)],
+    ['created', day(now)],
+    ['modified', isoSeconds(now)],
+  ])
+  return fields(stamped).has('tags') ? stamped : setField(stamped, 'tags', '[daily]')
+}
+
+function day(now: Date): string {
+  return now.toISOString().slice(0, 10)
+}
+
+function isoSeconds(now: Date): string {
+  return `${now.toISOString().slice(0, 19)}Z`
 }

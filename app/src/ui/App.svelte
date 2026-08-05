@@ -10,12 +10,15 @@ import Sidebar from './Frame/Sidebar.svelte'
 import StatusBar from './Frame/StatusBar.svelte'
 import { installKeymap } from './keymap'
 import Palette from './Palette/Palette.svelte'
+import Today from './Today.svelte'
 import { chrome } from './view.svelte'
 
 let crumb = $derived(
-  vault.active
-    ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
-    : 'INDEX',
+  chrome.today
+    ? 'AGGREGATE / TODAY'
+    : vault.active
+      ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
+      : 'INDEX',
 )
 
 $effect(() => {
@@ -46,7 +49,9 @@ $effect(() => {
       <Sidebar />
     {/if}
     <main>
-      {#if vault.openPath === null}
+      {#if chrome.today}
+        <Today />
+      {:else if vault.openPath === null}
         <p class="empty">
           {vault.files === 0
             ? 'No notes yet. [N] creates the first one. ⌘K opens the console.'

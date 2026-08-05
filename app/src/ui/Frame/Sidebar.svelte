@@ -1,7 +1,7 @@
 <script lang="ts">
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
-import { traverse } from '../nav'
+import { go, traverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
@@ -25,7 +25,7 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
           class="row"
           class:active={entry.path === vault.openPath}
           aria-current={entry.path === vault.openPath ? 'page' : undefined}
-          onclick={() => vault.open(entry.path)}
+          onclick={() => go.note(entry.path)}
           onkeydown={traverse}
         >
           <span class="ref">{entry.ref ?? '—'}</span>

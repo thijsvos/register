@@ -18,6 +18,16 @@ class ChromeState {
   index = $state(true)
   paletteOpen = $state(false)
 
+  /**
+   * TODAY is showing instead of the note (§02b Screen 5).
+   *
+   * A property of this window, not of the vault: the aggregate stores nothing,
+   * and which pane you last looked at is not knowledge. The open note stays
+   * open underneath — the inspector keeps describing it — so leaving TODAY puts
+   * you back exactly where you were.
+   */
+  today = $state(false)
+
   /** Resolved on first use: constructing it eagerly would touch the DOM at
    *  module scope, which is what made this module unimportable in a test. */
   #scheme: MediaQueryList | null = null
@@ -70,6 +80,14 @@ class ChromeState {
 
   reveal(position: number): void {
     this.revealAt = { position, nonce: ++this.#nonce }
+  }
+
+  showToday(): void {
+    this.today = true
+  }
+
+  showNotes(): void {
+    this.today = false
   }
 
   toggleInspector(): void {

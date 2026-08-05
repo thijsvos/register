@@ -65,30 +65,49 @@ export function hasFrontmatter(source: string): boolean {
 }
 
 /**
- * Replace the `modified:` value, or add the field if it is missing.
+ * Replace one frontmatter value, or append the field if it is missing.
  *
- * The only field the UI is allowed to rewrite (§04). Everything else — key
- * order, indentation, quoting style, comments, the body — survives byte for
- * byte, which is what lets an agent and a human edit the same file without
- * churning each other's formatting.
+ * A splice, so key order, indentation, quoting style, comments and the body all
+ * survive byte for byte — which is what lets an agent and a human edit the same
+ * file without churning each other's formatting. A note without frontmatter is
+ * returned untouched: §04 says what a note looks like, and inventing a header
+ * for a file that has none is a bigger decision than setting a field.
  */
-export function touchModified(source: string, iso: string): string {
+export function setField(source: string, key: string, value: string): string {
   const parts = split(source)
   if (parts.open === '') return source
 
   // Anchored to column zero on purpose. Allowing leading whitespace would also
-  // match `modified:` nested inside another mapping, or a line of prose inside a
-  // block scalar — and since the replace is first-match-wins it would rewrite
-  // that one and leave the real field stale. Both are §04 byte-losslessness
-  // breaches, and both destroy data an agent wrote.
-  const pattern = /^(modified[ \t]*:[ \t]*)(.*)$/m
+  // match a key nested inside another mapping, or a line of prose inside a block
+  // scalar — and since the replace is first-match-wins it would rewrite that one
+  // and leave the real field stale. Both are §04 byte-losslessness breaches, and
+  // both destroy data an agent wrote.
+  const pattern = new RegExp(`^(${literal(key)}[ \\t]*:[ \\t]*)(.*)$`, 'm')
   if (pattern.test(parts.yaml)) {
-    return join({ ...parts, yaml: parts.yaml.replace(pattern, `$1${iso}`) })
+    // A function replacement, not a `$1${value}` string: in a replacement string
+    // `$` is syntax, so a title like "Cost in $1 terms" would splice the matched
+    // key back into its own value.
+    return join({
+      ...parts,
+      yaml: parts.yaml.replace(pattern, (_match, head: string) => head + value),
+    })
   }
 
   const eol = parts.yaml.endsWith('\r\n') ? '\r\n' : '\n'
   const separator = parts.yaml === '' || parts.yaml.endsWith('\n') ? '' : eol
-  return join({ ...parts, yaml: `${parts.yaml}${separator}modified: ${iso}${eol}` })
+  return join({ ...parts, yaml: `${parts.yaml}${separator}${key}: ${value}${eol}` })
+}
+
+/**
+ * Stamp `modified:` — the one field the UI rewrites on an ordinary save (§04).
+ */
+export function touchModified(source: string, iso: string): string {
+  return setField(source, 'modified', iso)
+}
+
+/** A key matched as text, not as a pattern. */
+function literal(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
 /**

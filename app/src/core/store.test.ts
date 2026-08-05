@@ -21,9 +21,17 @@ class FakeVault {
    *  which counts `.register/trash/` so a ref is issued at most once. */
   #everUsed = new Set<number>()
 
+  /** Paths that answer with a status instead of their content. */
+  #broken = new Map<string, number>()
+
   seed(path: string, body: string): void {
     this.files.set(path, { body, etag: `etag-${++this.#version}` })
     this.#remember(path)
+  }
+
+  /** Make a read fail with something other than 404 — present but unreadable. */
+  fail(path: string, status: number): void {
+    this.#broken.set(path, status)
   }
 
   #remember(path: string): void {
@@ -88,6 +96,8 @@ class FakeVault {
     const held = this.files.get(notePath)
 
     if (method === 'GET') {
+      const broken = this.#broken.get(notePath)
+      if (broken !== undefined) return new Response('unreadable', { status: broken })
       return held
         ? new Response(held.body, { headers: { etag: `"${held.etag}"` } })
         : new Response('no such note', { status: 404 })
@@ -478,6 +488,140 @@ describe('daily log', () => {
     await vault.create('After the daily')
     await settle()
     expect(server.files.has('notes/004-after-the-daily.md')).toBe(true)
+  })
+
+  it('cuts it from templates/daily.md when there is one (§08 P7)', async () => {
+    server.seed(
+      'templates/daily.md',
+      '---\nid: T\ntitle: T\ncreated: T\nmodified: T\ntags: [log]\n---\n## Log\n\n- [ ] \n',
+    )
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+
+    const created = server.files.get('daily/2026-08-05.md')?.body ?? ''
+    expect(created).toContain('## Log')
+    expect(fields(created).get('title')).toBe('2026-08-05')
+    expect(fields(created).get('tags')).toBe('[log]')
+    expect(fields(created).get('id')).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/)
+  })
+
+  it('stays idempotent with a template — the second call writes nothing', async () => {
+    server.seed('templates/daily.md', '---\ntitle: T\n---\nfrom the stencil\n')
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+
+    const first = server.files.get('daily/2026-08-05.md')?.body
+    server.requests.length = 0
+    await vault.openDaily(day)
+    await settle()
+
+    expect(server.files.get('daily/2026-08-05.md')?.body).toBe(first)
+    expect(server.requests.filter((r) => r.startsWith('PUT'))).toEqual([])
+  })
+
+  it('refuses to write the day from the wrong stencil', async () => {
+    // The template is in the tree but unreadable. Creating the note anyway would
+    // produce a day the user cannot get back by pressing the key again — it
+    // would already exist, and idempotency would return the wrong note forever.
+    server.seed('templates/daily.md', 'ignored')
+    server.fail('templates/daily.md', 500)
+    await vault.refresh()
+    await vault.openDaily(day)
+    await settle()
+
+    expect(server.files.has('daily/2026-08-05.md')).toBe(false)
+    expect(vault.notice).not.toBeNull()
+  })
+})
+
+describe('tasks', () => {
+  const WITH_TASKS =
+    '---\nref: 007\ntitle: Chores\nmodified: 2026-08-04T13:47:00Z\n---\n- [ ] one\n- [x] two\n'
+  /** Offset of the first `[` in WITH_TASKS. */
+  const FIRST = WITH_TASKS.indexOf('[ ]')
+
+  it('writes a toggle through to the file it lives in (§08 P7)', async () => {
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await settle()
+
+    expect(await vault.toggleTask('notes/007-chores.md', FIRST)).toBe(true)
+
+    const written = server.files.get('notes/007-chores.md')?.body ?? ''
+    expect(written).toContain('- [x] one')
+    expect(written).toContain('- [x] two')
+    // §04: `modified` is the one field the UI rewrites.
+    expect(fields(written).get('modified')).not.toBe('2026-08-04T13:47:00Z')
+  })
+
+  it('unticks as readily as it ticks', async () => {
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await settle()
+
+    const second = WITH_TASKS.indexOf('[x]')
+    await vault.toggleTask('notes/007-chores.md', second)
+    expect(server.files.get('notes/007-chores.md')?.body).toContain('- [ ] two')
+  })
+
+  it('edits the buffer, not the file, when the note is the open one', async () => {
+    // The buffer may hold unsaved text. A write underneath it would either be
+    // overwritten by the next debounced save or conflict the note with itself.
+    vi.useFakeTimers()
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await vault.open('notes/007-chores.md')
+
+    await vault.toggleTask('notes/007-chores.md', FIRST)
+    expect(vault.buffer).toContain('- [x] one')
+    expect(vault.dirty).toBe(true)
+    // Nothing has reached disk yet; the ordinary save pipeline owns that.
+    expect(server.files.get('notes/007-chores.md')?.body).toContain('- [ ] one')
+
+    await vi.advanceTimersByTimeAsync(600)
+    expect(server.files.get('notes/007-chores.md')?.body).toContain('- [x] one')
+  })
+
+  it('refuses when the line has moved, rather than rewriting prose', async () => {
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await settle()
+
+    expect(await vault.toggleTask('notes/007-chores.md', FIRST + 1)).toBe(false)
+    expect(server.files.get('notes/007-chores.md')?.body).toBe(WITH_TASKS)
+    expect(vault.notice).toContain('Nothing toggled')
+  })
+
+  it('refuses when the note changed on disk, and loses nothing by it', async () => {
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await settle()
+
+    // An agent rewrites the file; our etag is now stale.
+    server.seed('notes/007-chores.md', `${WITH_TASKS}- [ ] three\n`)
+
+    expect(await vault.toggleTask('notes/007-chores.md', FIRST)).toBe(false)
+    expect(server.files.get('notes/007-chores.md')?.body).toContain('- [ ] three')
+    expect(vault.notice).toContain('changed on disk')
+  })
+
+  it('serialises two toggles so the second is not a conflict with the first', async () => {
+    server.seed('notes/007-chores.md', WITH_TASKS)
+    await vault.refresh()
+    await settle()
+
+    const second = WITH_TASKS.indexOf('[x]')
+    const [a, b] = await Promise.all([
+      vault.toggleTask('notes/007-chores.md', FIRST),
+      vault.toggleTask('notes/007-chores.md', second),
+    ])
+
+    expect([a, b]).toEqual([true, true])
+    const written = server.files.get('notes/007-chores.md')?.body ?? ''
+    expect(written).toContain('- [x] one')
+    expect(written).toContain('- [ ] two')
   })
 })
 

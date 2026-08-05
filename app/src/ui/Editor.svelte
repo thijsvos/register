@@ -2,6 +2,7 @@
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
 import { setRenderMs } from '../lib/render.svelte'
+import { go } from './nav'
 import { chrome } from './view.svelte'
 
 let parent: HTMLDivElement | null = $state(null)
@@ -87,7 +88,7 @@ $effect(() => {
 function wikiHost() {
   return {
     exists: (target: string) => vault.resolve(target) !== null,
-    open: (target: string) => void vault.follow(target),
+    open: (target: string) => go.follow(target),
   }
 }
 </script>

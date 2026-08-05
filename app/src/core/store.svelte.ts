@@ -11,7 +11,8 @@ import {
 } from './api'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
-import { dailyPath, newDaily, newNote, notePath } from './refs'
+import { DAILY_TEMPLATE, dailyFrom, dailyPath, noteFrom, notePath } from './refs'
+import { toggle } from './tasks'
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
 const SAVE_DEBOUNCE_MS = 500
@@ -75,6 +76,7 @@ class VaultStore {
   /** Conflict copies written this session. The tree lags a refresh behind. */
   #parked = new Set<string>()
   #saving: Promise<boolean> | null = null
+  #toggling: Promise<boolean> | null = null
   #dirtySince = 0
   #refreshTicket = 0
   #stopped = false
@@ -110,20 +112,32 @@ class VaultStore {
     return this.#lookup.find(target)
   }
 
-  /** Open today's daily log, creating it if it is not there yet. */
+  /**
+   * Open today's daily log, creating it from `templates/daily.md` if there is
+   * one (§08 P7).
+   *
+   * Idempotent twice over: the name is the date, so a second call the same day
+   * finds the note rather than making another — and the name is confirmed free
+   * on disk before writing, because the tree can be a refresh behind an agent.
+   */
   async openDaily(now: Date = new Date()): Promise<void> {
     const path = dailyPath(now)
     await this.refresh()
 
     if (!this.tree.some((entry) => entry.path === path)) {
-      // Idempotent by construction: the name is the date, so a second call the
-      // same day finds the note rather than making another.
       if (!(await this.#isFree(path))) {
         await this.open(path)
         return
       }
+
+      const template = await this.#template(DAILY_TEMPLATE)
+      // A template that exists but cannot be read stops the creation. Writing
+      // the day's note from the wrong stencil is not something the user can
+      // undo by pressing the key again — the note would already be there.
+      if (!template.ok) return
+
       try {
-        await putNote(path, newDaily(now))
+        await putNote(path, dailyFrom(template.body, now))
       } catch (error) {
         this.notice = describe(error)
         return
@@ -131,6 +145,27 @@ class VaultStore {
       await this.refresh()
     }
     await this.open(path)
+  }
+
+  /**
+   * A template's text, `null` when there is none.
+   *
+   * Read from disk rather than from the corpus: this runs once a day, and a
+   * stencil the user just edited should be the one the note is cut from.
+   */
+  async #template(
+    path: string,
+  ): Promise<{ ok: true; body: string | null } | { ok: false }> {
+    try {
+      return { ok: true, body: (await getNote(path)).body }
+    } catch (error) {
+      // Absent is not a failure — §04 makes templates optional.
+      if (error instanceof ApiError && error.status === 404) {
+        return { ok: true, body: null }
+      }
+      this.notice = describe(error)
+      return { ok: false }
+    }
   }
 
   /** Follow a wikilink, creating the note if it does not exist (§02b). */
@@ -296,8 +331,14 @@ class VaultStore {
     return await this.#writeConflictCopy(path, outgoing)
   }
 
-  /** §04: ref = highest existing + 1; fresh ULID; `notes/NNN-kebab-slug.md`. */
-  async create(title: string): Promise<void> {
+  /**
+   * §04: ref allocated by the server; fresh ULID; `notes/NNN-kebab-slug.md`.
+   *
+   * `from` names a note under `templates/` to cut it from (§08 P7). One creation
+   * path either way, so the free-name guard and the ref allocation cannot drift
+   * between a blank note and a templated one.
+   */
+  async create(title: string, from?: string): Promise<void> {
     // Refresh first so the ref is the vault's current one, not the one it had
     // when this tab was opened.
     await this.refresh()
@@ -320,8 +361,20 @@ class VaultStore {
       return
     }
 
+    let template: string | null = null
+    if (from !== undefined) {
+      const read = await this.#template(from)
+      if (!read.ok) return
+      if (read.body === null) {
+        this.notice = `${from} is gone.`
+        return
+      }
+      template = read.body
+    }
+
     try {
-      const result = await putNote(path, newNote({ ref, title, now: new Date() }))
+      const body = noteFrom(template, { ref, title, now: new Date() })
+      const result = await putNote(path, body)
       if (!result.ok) {
         this.notice = 'That note already exists on disk.'
         return
@@ -333,6 +386,74 @@ class VaultStore {
 
     await this.refresh()
     await this.open(path)
+  }
+
+  /**
+   * Flip one task's box, writing through to the file it lives in (§08 P7).
+   *
+   * Returns whether the vault now holds the change.
+   */
+  async toggleTask(path: string, at: number): Promise<boolean> {
+    // Serialised, because two clicks in a row both read the same corpus body and
+    // the second would send an etag the first has already superseded — a 409 for
+    // an edit that was never in conflict with anything but itself.
+    while (this.#toggling !== null) await this.#toggling
+
+    this.#toggling = this.#toggleOnce(path, at)
+    try {
+      return await this.#toggling
+    } finally {
+      this.#toggling = null
+    }
+  }
+
+  async #toggleOnce(path: string, at: number): Promise<boolean> {
+    // The open note is edited through the buffer, never through the file. It may
+    // hold unsaved text, and a write underneath it would either be overwritten
+    // by the next debounced save or manufacture a conflict copy of the note
+    // against itself.
+    if (path === this.openPath) {
+      const next = toggle(this.buffer, at)
+      if (next === null) {
+        this.notice = 'That task moved. Nothing toggled.'
+        return false
+      }
+      this.edit(next)
+      return true
+    }
+
+    const held = this.corpus[path]
+    if (held === undefined) {
+      this.notice = `${path} is not loaded.`
+      return false
+    }
+
+    const next = toggle(held.body, at)
+    if (next === null) {
+      this.notice = `${basename(path)} changed. Nothing toggled.`
+      this.#scheduleRefresh()
+      return false
+    }
+
+    const outgoing = touchModified(next, isoStamp())
+    let result: Awaited<ReturnType<typeof putNote>>
+    try {
+      result = await putNote(path, outgoing, held.etag)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+
+    if (!result.ok) {
+      // No conflict copy, and nothing to park: the user typed nothing here, so
+      // the whole cost of refusing is that a box stayed as it was.
+      this.notice = `${basename(path)} changed on disk. Nothing toggled.`
+      this.#scheduleRefresh()
+      return false
+    }
+
+    this.corpus[path] = { body: outgoing, etag: result.etag }
+    return true
   }
 
   /** Fold one vault event into the open note and the tree. */

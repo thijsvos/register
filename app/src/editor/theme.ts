@@ -104,7 +104,9 @@ const theme = EditorView.theme({
     lineHeight: 'var(--s4)',
     textAlign: 'center',
     border: 'var(--hairline) solid var(--line)',
-    cursor: 'pointer',
+    // §02b state matrix, Task / todo, hover: "box cursor". Not a pointer — the
+    // same control in the TODAY aggregate has to feel like the same control.
+    cursor: 'cell',
     userSelect: 'none',
     verticalAlign: 'text-bottom',
   },

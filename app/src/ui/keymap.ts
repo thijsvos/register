@@ -1,4 +1,4 @@
-import { vault } from '../core/store.svelte'
+import { go } from './nav'
 import { chrome } from './view.svelte'
 
 /** How long a `G` stays armed waiting for the second key of a chord. */
@@ -49,15 +49,27 @@ export function installKeymap(): () => void {
   }
 
   const onKey = (event: KeyboardEvent) => {
-    // ⌘K is the front door and works from anywhere, including mid-sentence.
-    const palette = isMac
+    // ⌘K and ⌘D are the two keys that work from anywhere, mid-sentence included.
+    const command = isMac
       ? event.metaKey && !event.ctrlKey
       : event.ctrlKey && !event.metaKey
-    if (palette && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+    const bare = command && !event.altKey && !event.shiftKey
+
+    if (bare && event.key.toLowerCase() === 'k') {
       event.preventDefault()
       disarm()
       if (chrome.paletteOpen) chrome.closePalette()
       else chrome.openPalette()
+      return
+    }
+
+    // §02b Screen 2 draws this key against "GO · TODAY / TASKS", so that is what
+    // it does. The daily log keeps G D, which is what §08 P7 calls GO DAILY.
+    if (bare && event.key.toLowerCase() === 'd') {
+      event.preventDefault()
+      disarm()
+      chrome.closePalette()
+      go.today()
       return
     }
 
@@ -87,10 +99,13 @@ export function installKeymap(): () => void {
       disarm()
       if (second === 'd') {
         event.preventDefault()
-        void vault.openDaily()
+        go.daily()
       } else if (second === 'i') {
         event.preventDefault()
-        void vault.follow('000')
+        go.follow('000')
+      } else if (second === 't') {
+        event.preventDefault()
+        go.today()
       }
       return
     }
@@ -105,7 +120,7 @@ export function installKeymap(): () => void {
         return
       case 'n':
         event.preventDefault()
-        void vault.create('Untitled note')
+        go.create('Untitled note')
         return
       case 'i':
         event.preventDefault()
