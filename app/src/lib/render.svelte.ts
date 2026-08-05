@@ -23,6 +23,11 @@ export const render = {
  * fabricated-gauge anti-pattern §02b retired. This reports only work we can
  * actually attribute to ourselves.
  */
+/** Report a cost measured elsewhere — the editor times its own updates. */
+export function setRenderMs(ms: number): void {
+  lastMs = ms
+}
+
 export function measure<T>(work: () => T): T {
   const t0 = performance.now()
   const result = work()

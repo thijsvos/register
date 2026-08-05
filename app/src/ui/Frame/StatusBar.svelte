@@ -11,6 +11,8 @@ let {
   git = null,
   notice = null,
   dirty = false,
+  externalEdit = false,
+  words = null,
 }: {
   renderMs?: number | null
   watcherLive?: boolean
@@ -19,6 +21,8 @@ let {
   git?: string | null
   notice?: string | null
   dirty?: boolean
+  externalEdit?: boolean
+  words?: number | null
 } = $props()
 
 const dash = '—'
@@ -35,12 +39,19 @@ const dash = '—'
     <b>{renderMs === null ? dash : `${renderMs.toFixed(2)}ms`}</b>
   </div>
   <div class="cell grow" role="status">
-    {#if notice}
+    {#if externalEdit}
+      <!-- Latched, and in the signal colour: the note moved under an unsaved
+           buffer, and nothing else in the chrome carries that weight. -->
+      <b class="alert">External edit</b>
+    {:else if notice}
       <b class="notice">{notice}</b>
     {:else if dirty}
       <span class="lab">Saving</span>
     {/if}
   </div>
+  {#if words !== null}
+    <div class="cell"><b>{words}</b> <span class="lab">words</span></div>
+  {/if}
   <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
   <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
 </footer>
@@ -77,6 +88,9 @@ footer {
 .notice {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.alert {
+  color: var(--signal);
 }
 
 /* Label demoted, readout in full ink — otherwise the bar is a flat wall of

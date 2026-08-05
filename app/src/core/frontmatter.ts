@@ -119,9 +119,28 @@ export function list(value: string | undefined): string[] {
     .filter((item) => item !== '')
 }
 
-/** Words in the body, ignoring frontmatter. */
+/**
+ * Words in the body, ignoring frontmatter.
+ *
+ * Scanned rather than split: this runs on every keystroke to feed the status
+ * bar, and `split(/\s+/)` would allocate an array of every word in the note each
+ * time — five thousand strings per character typed on a long note.
+ */
 export function wordCount(source: string): number {
-  return split(source).body.trim().split(/\s+/).filter(Boolean).length
+  const body = split(source).body
+  let words = 0
+  let inside = false
+  for (let i = 0; i < body.length; i++) {
+    const code = body.charCodeAt(i)
+    const space = code === 32 || (code >= 9 && code <= 13) || code === 0xa0
+    if (space) {
+      inside = false
+    } else if (!inside) {
+      inside = true
+      words++
+    }
+  }
+  return words
 }
 
 function unquote(value: string): string {

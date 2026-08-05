@@ -6,10 +6,20 @@ export default defineConfig({
   plugins: [svelte()],
   build: {
     rollupOptions: {
-      // Name the entry chunk so size-limit can hold the §06 shell budget on its
-      // own. Lazy chunks land beside it under their own names and get their own
-      // budget entries in the phase that introduces them.
-      output: { entryFileNames: 'assets/shell-[hash].js' },
+      output: {
+        // Named chunks so §06's two JS budgets stay separately enforceable:
+        // the shell at 60 kB gz and the lazy editor at 150 kB gz. Without the
+        // manual grouping, CodeMirror would be spread across anonymous chunks
+        // and neither budget could be measured.
+        entryFileNames: 'assets/shell-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        manualChunks: (id) =>
+          id.includes('/src/editor/') ||
+          id.includes('@codemirror') ||
+          id.includes('@lezer')
+            ? 'editor'
+            : undefined,
+      },
     },
   },
   server: {

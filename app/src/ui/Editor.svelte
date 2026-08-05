@@ -1,68 +1,80 @@
 <script lang="ts">
 import { vault } from '../core/store.svelte'
+import type { EditorHandle } from '../editor'
+import { setRenderMs } from '../lib/render.svelte'
 
-// A plain textarea is the interim editing surface. P4 replaces it with
-// CodeMirror 6 as a lazy chunk; until then this is enough to exercise the save
-// pipeline, and markdown stays the literal source either way.
-let element: HTMLTextAreaElement | null = $state(null)
+let parent: HTMLDivElement | null = $state(null)
+let handle = $state<EditorHandle | null>(null)
+/** The path the editor currently holds, so a note switch is distinguishable
+ *  from an external edit to the same note. */
+let loaded: string | null = null
 
-// An IME — Chinese, Japanese, Korean, and macOS accent entry — fires `input`
-// for every intermediate candidate. Treating those as edits would write
-// half-formed words to disk, and rewriting the textarea mid-composition
-// cancels the composition outright.
-let composing = $state(false)
-
-// The store rewrites the buffer twice behind the user's back: on save, to stamp
-// `modified`, and on an external change to a clean note. Assigning through
-// `value` would drop the caret to the end each time, so it is restored here.
+// CodeMirror is a lazy chunk (§04). The shell paints, the frame is usable, and
+// ~98 kB gz of editor arrives only when a note is actually opened.
 $effect(() => {
-  const text = vault.buffer
-  if (element === null || composing || element.value === text) return
+  const target = parent
+  const path = vault.openPath
+  if (target === null || path === null) return
 
-  const { selectionStart, selectionEnd } = element
-  element.value = text
-  element.setSelectionRange(
-    Math.min(selectionStart, text.length),
-    Math.min(selectionEnd, text.length),
-  )
+  let live = true
+  void import('../editor').then(({ createEditor }) => {
+    if (!live || handle !== null) return
+    handle = createEditor({
+      parent: target,
+      doc: vault.buffer,
+      host: wikiHost(),
+      onEdit: (doc) => vault.edit(doc),
+      onRender: setRenderMs,
+    })
+    loaded = path
+  })
+
+  return () => {
+    live = false
+    handle?.destroy()
+    handle = null
+    loaded = null
+  }
 })
+
+// Two different operations, and conflating them is the bug this guards against.
+// A different note is a full load with the caret at the top; the same note
+// changing underneath is a minimal diff that keeps the caret where it was.
+$effect(() => {
+  const editor = handle
+  const path = vault.openPath
+  const text = vault.buffer
+  if (editor === null || path === null) return
+
+  if (path !== loaded) {
+    editor.load(text)
+    loaded = path
+  } else {
+    editor.sync(text)
+  }
+})
+
+// The vault index changes under a still document — an agent can create the note
+// a dotted wikilink points at — so the callbacks are swapped rather than baked
+// in, and the decorations rebuild when they change.
+$effect(() => {
+  void vault.tree
+  handle?.setHost(wikiHost())
+})
+
+function wikiHost() {
+  return {
+    exists: (target: string) => vault.resolve(target) !== null,
+    open: (target: string) => void vault.follow(target),
+  }
+}
 </script>
 
-<textarea
-  bind:this={element}
-  aria-label={vault.active?.title ?? 'Note'}
-  spellcheck="false"
-  autocomplete="off"
-  autocapitalize="off"
-  oncompositionstart={() => {
-    composing = true
-  }}
-  oncompositionend={(event) => {
-    composing = false
-    vault.edit(event.currentTarget.value)
-  }}
-  oninput={(event) => {
-    if (!composing) vault.edit(event.currentTarget.value)
-  }}
-></textarea>
+<div class="editor" bind:this={parent}></div>
 
 <style>
-textarea {
-  display: block;
-  width: 100%;
-  max-width: var(--measure);
-  min-height: 100%;
-  margin: 0 auto;
-  padding: var(--s6) var(--s5);
-  border: none;
-  outline: none;
-  resize: none;
-  background: none;
-  color: var(--fg);
-  font-family: var(--font-ui);
-  font-size: var(--text-body);
-  line-height: var(--lh-body);
-  /* §02b Input: "signal caret, no box" — the frame is the label. */
-  caret-color: var(--signal);
+.editor {
+  height: 100%;
+  min-height: 0;
 }
 </style>

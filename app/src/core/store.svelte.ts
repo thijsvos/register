@@ -62,6 +62,15 @@ class VaultStore {
   /** The ref a new note must take. The server owns it: only it sees the trash. */
   nextRef = $state<string | null>(null)
 
+  /**
+   * The note changed on disk while the buffer was dirty (P4).
+   *
+   * Distinct from `notice`, which is transient prose: this is a latched state
+   * the status bar shows until it is resolved, either by saving — which takes
+   * the §04 conflict path — or by reloading from disk.
+   */
+  externalEdit = $state(false)
+
   /** One line of instrument-voiced status, or nothing. */
   notice = $state<string | null>(null)
   connected = $state(false)
@@ -84,6 +93,36 @@ class VaultStore {
 
   get active(): Entry | null {
     return this.tree.find((entry) => entry.path === this.openPath) ?? null
+  }
+
+  /**
+   * Resolve a `[[wikilink]]` by title or ref — §04 allows either.
+   *
+   * Ref first: a ref is immutable and unique, a title is neither.
+   */
+  resolve(target: string): Entry | null {
+    const wanted = target.trim()
+    const lowered = wanted.toLowerCase()
+    return (
+      this.tree.find((entry) => entry.ref === wanted) ??
+      this.tree.find((entry) => (entry.title ?? '').toLowerCase() === lowered) ??
+      null
+    )
+  }
+
+  /** Follow a wikilink, creating the note if it does not exist (§02b). */
+  async follow(target: string): Promise<void> {
+    const found = this.resolve(target)
+    if (found !== null) {
+      await this.open(found.path)
+      return
+    }
+    await this.create(target.trim())
+  }
+
+  /** Live word count of the open buffer, for the status bar. */
+  get openWords(): number | null {
+    return this.openPath === null ? null : wordCount(this.buffer)
   }
 
   /** Words in a note, or null until its body has loaded. */
@@ -298,18 +337,49 @@ class VaultStore {
     }
 
     if (this.dirty) {
-      // Do not clobber unsaved work. P4 offers "reload from disk" in the
-      // palette; until then the next save resolves it through the 409 path.
-      this.notice = 'Changed on disk while you were editing.'
+      // Do not clobber unsaved work. Latched rather than announced once, so the
+      // state stays visible until the user resolves it — by saving, which takes
+      // the §04 conflict path, or by reloading from disk.
+      this.externalEdit = true
       return
     }
     void this.#reload(event.path)
+  }
+
+  /**
+   * Discard the buffer and take what is on disk (P4's "reload from disk").
+   *
+   * The buffer is parked as a `*.conflict-<ts>.md` copy first. The user asked to
+   * discard, but §04's doctrine is that no revision is destroyed — and the cost
+   * of being wrong here is somebody's unsaved writing, against the cost of one
+   * extra file they can delete.
+   */
+  async reloadFromDisk(): Promise<void> {
+    const path = this.openPath
+    if (path === null) return
+
+    if (this.dirty) {
+      const copy = await this.#park(path, this.buffer)
+      if (copy === null) return
+      this.notice = `Reloaded. Your version: ${basename(copy)}`
+    }
+
+    const generation = ++this.#generation
+    try {
+      const disk = await getNote(path)
+      if (generation !== this.#generation) return
+      this.#adopt(path, disk)
+    } catch (error) {
+      this.notice = describe(error)
+    }
+    this.#scheduleRefresh()
   }
 
   #adopt(path: string, loaded: Held): void {
     this.buffer = loaded.body
     this.etag = loaded.etag
     this.dirty = false
+    this.externalEdit = false
     this.corpus[path] = loaded
   }
 

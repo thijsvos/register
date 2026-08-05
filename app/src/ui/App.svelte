@@ -96,8 +96,10 @@ function invert() {
     watcherLive={vault.connected}
     vault={vault.vaultPath}
     files={vault.files}
+    words={vault.openWords}
     notice={vault.notice}
     dirty={vault.dirty}
+    externalEdit={vault.externalEdit}
   />
 </div>
 

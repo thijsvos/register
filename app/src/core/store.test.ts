@@ -155,6 +155,7 @@ beforeEach(() => {
   vault.buffer = ''
   vault.etag = null
   vault.dirty = false
+  vault.externalEdit = false
   vault.notice = null
 })
 
@@ -442,7 +443,34 @@ describe('external changes', () => {
 
     expect(vault.buffer).toContain('my unsaved sentence')
     expect(vault.dirty).toBe(true)
-    expect(vault.notice).toContain('Changed on disk')
+    // Latched, not announced once: the status bar keeps showing EXTERNAL EDIT
+    // until the user resolves it (P4).
+    expect(vault.externalEdit).toBe(true)
+  })
+
+  it('reload from disk keeps the discarded buffer as a conflict copy', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+
+    vault.edit(`${NOTE}work the user chose to discard`)
+    server.seed('notes/003-a.md', `${NOTE}the agent's version\n`)
+    vault.apply({ type: 'changed', path: 'notes/003-a.md', etag: 'etag-elsewhere' })
+    await settle()
+    expect(vault.externalEdit).toBe(true)
+
+    await vault.reloadFromDisk()
+    await settle()
+
+    // The user asked to discard, but §04's doctrine is that no revision is
+    // destroyed — one extra file beats somebody's lost writing.
+    const copies = [...server.files.keys()].filter((path) => path.includes('.conflict-'))
+    expect(copies).toHaveLength(1)
+    expect(server.files.get(copies[0] ?? '')?.body).toContain('chose to discard')
+
+    expect(vault.buffer).toContain("the agent's version")
+    expect(vault.dirty).toBe(false)
+    expect(vault.externalEdit).toBe(false)
   })
 
   it('ignores the echo of our own save', async () => {
