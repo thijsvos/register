@@ -11,14 +11,29 @@ export default defineConfig({
         // the shell at 60 kB gz and the lazy editor at 150 kB gz. Without the
         // manual grouping, CodeMirror would be spread across anonymous chunks
         // and neither budget could be measured.
+        //
+        // `core` is named for a second reason. The editor reads the vault's own
+        // definitions — what a wikilink is, in P6 — so those modules are
+        // reachable from both the entry and the lazy chunk. Left unassigned, the
+        // bundler resolves that by putting them in the lazy chunk and making the
+        // entry import it statically, which loads all of CodeMirror at boot and
+        // measures as no change at all against a budget that only weighs
+        // `shell-*.js`. Naming the chunk keeps the shared code on the shell side
+        // of the boundary, where both can reach it without dragging the editor in.
         entryFileNames: 'assets/shell-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
-        manualChunks: (id) =>
-          id.includes('/src/editor/') ||
-          id.includes('@codemirror') ||
-          id.includes('@lezer')
-            ? 'editor'
-            : undefined,
+        manualChunks: (id) => {
+          if (
+            id.includes('/src/editor/') ||
+            id.includes('@codemirror') ||
+            id.includes('@lezer')
+          ) {
+            return 'editor'
+          }
+          return id.includes('/src/core/') || id.includes('/src/lib/')
+            ? 'core'
+            : undefined
+        },
       },
     },
   },

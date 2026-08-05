@@ -1,4 +1,5 @@
 <script lang="ts">
+import { search } from '../core/search'
 import { vault } from '../core/store.svelte'
 import { render } from '../lib/render.svelte'
 import Editor from './Editor.svelte'
@@ -24,6 +25,14 @@ $effect(() => {
 
 $effect(() => chrome.followOsScheme())
 $effect(() => installKeymap())
+
+// The search index is kept warm from boot rather than built when ⌘K first opens.
+// P5 budgets the palette at 16 ms to open; indexing a 1k-note vault is two orders
+// of magnitude past that, so it is paid one arriving body at a time instead —
+// each corpus fetch costs a single incremental add.
+$effect(() => {
+  search.sync(vault.tree, vault.corpus)
+})
 </script>
 
 <Crosses />

@@ -1,27 +1,15 @@
 <script lang="ts">
 import { vault } from '../../core/store.svelte'
+import { tagCounts } from '../../core/tags'
+import { traverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
-// Distinct tags, so the pane states what the vault actually holds. Counts and
-// meters are P6; claiming "no tags" while notes carry them would not be.
-let tags = $derived([...new Set(vault.tree.flatMap((entry) => entry.tags))].sort())
-
-/** §02b nav row: arrow or j/k traversal, without a global keymap (that is P5). */
-function traverse(event: KeyboardEvent) {
-  const forward = event.key === 'ArrowDown' || event.key === 'j'
-  const back = event.key === 'ArrowUp' || event.key === 'k'
-  if (!forward && !back) return
-
-  const sibling = forward
-    ? event.currentTarget instanceof HTMLElement && event.currentTarget.nextElementSibling
-    : event.currentTarget instanceof HTMLElement &&
-      event.currentTarget.previousElementSibling
-  if (sibling instanceof HTMLElement) {
-    event.preventDefault()
-    sibling.focus()
-  }
-}
+let tags = $derived(tagCounts(vault.tree))
+// The meter is relative to the commonest tag, not to the note count: a vault
+// where nothing is tagged twice should read as a flat row of equals, not as
+// twenty bars all one pixel wide.
+let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
 </script>
 
 <aside class="side" aria-label="Index">
@@ -53,8 +41,15 @@ function traverse(event: KeyboardEvent) {
     <PaneEmpty text="No tags." />
   {:else}
     <ul class="tags">
-      {#each tags as tag (tag)}
-        <li>#{tag}</li>
+      {#each tags as tag (tag.name)}
+        <li>
+          <span class="tag">#{tag.name}</span>
+          <!-- Decorative: the number beside it is the content (§02, --faint). -->
+          <span class="meter" aria-hidden="true">
+            <i style:width="{(tag.count / busiest) * 100}%"></i>
+          </span>
+          <span class="count">{tag.count}</span>
+        </li>
       {/each}
     </ul>
   {/if}
@@ -126,6 +121,34 @@ nav {
   font-size: var(--text-ui);
   letter-spacing: var(--track-ui);
   color: var(--dim);
+}
+.tags li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--meter-w) auto;
+  gap: var(--s2);
+  align-items: center;
+  padding: var(--s1) 0;
+}
+.tag {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* §02: --faint is decorative only — crosses, meters, rules. A meter is the one
+   place it is allowed to carry a value, and the count beside it is the content
+   for anyone who cannot resolve six pixels of grey. */
+.meter {
+  height: var(--meter-h);
+  border: var(--hairline) solid var(--faint);
+}
+.meter i {
+  display: block;
+  height: 100%;
+  background: var(--faint);
 }
 
 /* Below 760px the frame collapses to a single column. The index returns as a

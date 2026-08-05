@@ -4,11 +4,13 @@ import {
   type Entry,
   getNote,
   getTree,
+  type Loaded,
   openEvents,
   putNote,
   type VaultEvent,
 } from './api'
 import { touchModified, wordCount } from './frontmatter'
+import { NoteLookup } from './links'
 import { dailyPath, newDaily, newNote, notePath } from './refs'
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
@@ -41,16 +43,11 @@ const CORPUS_CONCURRENCY = 8
  */
 const REFRESH_COALESCE_MS = 0
 
-interface Held {
-  body: string
-  etag: string
-}
-
 class VaultStore {
   /** Every note, from `/api/tree`. The sidebar's only source. */
   tree = $state<Entry[]>([])
   /** Note bodies, filled in behind the tree so the sidebar paints first. */
-  corpus = $state<Record<string, Held>>({})
+  corpus = $state<Record<string, Loaded>>({})
 
   openPath = $state<string | null>(null)
   buffer = $state('')
@@ -87,6 +84,14 @@ class VaultStore {
   /** Guards against a slow fetch landing after the user moved on. */
   #generation = 0
 
+  /**
+   * Link resolution, rebuilt only when the tree is replaced.
+   *
+   * The editor asks `exists()` for every visible wikilink on every keystroke, so
+   * a linear scan per link is a per-keystroke cost proportional to the corpus.
+   */
+  #lookup = $derived(new NoteLookup(this.tree))
+
   get files(): number {
     return this.tree.length
   }
@@ -98,21 +103,11 @@ class VaultStore {
   /**
    * Resolve a `[[wikilink]]` by title or ref — §04 allows either.
    *
-   * Ref first: a ref is immutable and unique, a title is neither.
+   * One definition, in `links.ts`, shared with the backlink graph: a link the
+   * editor follows and a link the inspector counts must mean the same thing.
    */
   resolve(target: string): Entry | null {
-    const wanted = target.trim()
-    const lowered = wanted.toLowerCase()
-    // A conflict copy carries the original's title verbatim, so it would answer
-    // to the same wikilink and shadow the note it was copied from. §04 treats it
-    // as an artefact to merge and delete, not a link target — it stays visible
-    // in the index, just not reachable by [[…]].
-    const notes = this.tree.filter((entry) => !entry.path.includes('.conflict-'))
-    return (
-      notes.find((entry) => entry.ref === wanted) ??
-      notes.find((entry) => (entry.title ?? '').toLowerCase() === lowered) ??
-      null
-    )
+    return this.#lookup.find(target)
   }
 
   /** Open today's daily log, creating it if it is not there yet. */
@@ -208,7 +203,7 @@ class VaultStore {
     if (this.dirty && !(await this.save())) return
 
     const generation = ++this.#generation
-    let loaded: Held
+    let loaded: Loaded
     try {
       loaded = await getNote(path)
     } catch (error) {
@@ -403,7 +398,7 @@ class VaultStore {
     this.#scheduleRefresh()
   }
 
-  #adopt(path: string, loaded: Held): void {
+  #adopt(path: string, loaded: Loaded): void {
     this.buffer = loaded.body
     this.etag = loaded.etag
     this.dirty = false
@@ -435,7 +430,7 @@ class VaultStore {
     const copy = await this.#park(path, mine)
     if (copy === null) return false
 
-    let disk: Held
+    let disk: Loaded
     try {
       disk = await getNote(path)
     } catch (error) {

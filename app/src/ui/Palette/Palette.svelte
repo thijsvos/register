@@ -1,8 +1,11 @@
 <script lang="ts">
-import type { Entry } from '../../core/api'
+import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
 import { chrome } from '../view.svelte'
-import { type Command, fuzzyScore, matchCommands } from './commands'
+import { type Command, matchCommands } from './commands'
+
+/** What the list can show before it scrolls past being useful. */
+const LIMIT = 20
 
 let query = $state('')
 let selected = $state(0)
@@ -10,23 +13,17 @@ let input: HTMLInputElement | null = $state(null)
 let list: HTMLDivElement | null = $state(null)
 
 /**
- * Notes matched on title, ref and path.
+ * Real full-text search over the corpus (§02b: "⌘K must run real full-text
+ * search over the corpus, not filter a fixed command list").
  *
- * §02b Screen 2 promises full text over the corpus; that arrives in P6 with
- * MiniSearch (§04). Until then this matches what the tree already holds rather
- * than pretending to search bodies it has not indexed.
+ * Syncing here as well as at boot keeps the list live while the palette is open,
+ * so an agent's write appears in the results — and because the sync reads the
+ * tree and the corpus, this derived re-runs when either moves.
  */
-let notes = $derived(
-  vault.tree
-    .map((entry) => ({
-      entry,
-      score: bestScore(entry, query),
-    }))
-    .filter((row): row is { entry: Entry; score: number } => row.score !== null)
-    .sort((a, b) => a.score - b.score)
-    .slice(0, 20)
-    .map((row) => row.entry),
-)
+let notes = $derived.by(() => {
+  search.sync(vault.tree, vault.corpus)
+  return search.find(query, LIMIT)
+})
 
 let commands = $derived(matchCommands(query))
 let total = $derived(notes.length + commands.length)
@@ -55,14 +52,10 @@ $effect(() => {
   list?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' })
 })
 
-function bestScore(entry: Entry, text: string): number | null {
-  const candidates = [entry.title ?? '', entry.ref ?? '', entry.path]
-  let best: number | null = null
-  for (const candidate of candidates) {
-    const score = fuzzyScore(candidate, text)
-    if (score !== null && (best === null || score < best)) best = score
-  }
-  return best
+/** The body excerpt §02b Screen 2 draws beside the title, or '' if none. */
+function excerpt(hit: Hit): string {
+  const held = vault.corpus[hit.entry.path]
+  return held === undefined ? '' : snippet(held.body, hit.terms)
 }
 
 /** Set when the palette navigated, so its focus-restore stands down and the
@@ -74,7 +67,7 @@ function choose(index: number) {
   if (note !== undefined) {
     navigated = true
     chrome.closePalette()
-    void vault.open(note.path)
+    void vault.open(note.entry.path)
     return
   }
   const command: Command | undefined = commands[index - notes.length]
@@ -112,7 +105,13 @@ function onKey(event: KeyboardEvent) {
   }
 }
 
-/** Split a label so the matched run can carry the signal colour (§02b). */
+/**
+ * Split a command label so the matched run carries the signal colour (§02b).
+ *
+ * Subsequence, unlike the note rows: commands are a fixed list matched the way a
+ * palette is expected to behave (`tgi` finds TOGGLE INSPECTOR), while notes come
+ * back from the index with the whole terms they actually matched.
+ */
 function segments(text: string, needle: string): { text: string; hit: boolean }[] {
   if (needle === '') return [{ text, hit: false }]
   const lower = text.toLowerCase()
@@ -164,9 +163,10 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
     <div class="list" bind:this={list} role="listbox" aria-label="Results" id="pal-results">
       {#if notes.length > 0}
         <div class="section">Notes · {notes.length}</div>
-        {#each notes as note, index (note.path)}
+        {#each notes as note, index (note.entry.path)}
+          {@const snip = excerpt(note)}
           <button
-            class="row"
+            class="row note"
             role="option"
             id="pal-row-{index}"
             class:sel={selected === index}
@@ -176,13 +176,21 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
             }}
             onclick={() => choose(index)}
           >
-            <span class="ref">{note.ref ?? '—'}</span>
+            <span class="ref">{note.entry.ref ?? '—'}</span>
             <span class="name">
-              {#each segments(note.title ?? note.path, query) as part, n (n)}
+              {#each highlight(note.entry.title ?? note.entry.path, note.terms) as part, n (n)}
                 <span class:hit={part.hit}>{part.text}</span>
               {/each}
             </span>
-            <span class="hint">{vault.words(note.path) ?? '—'}</span>
+            {#if snip === ''}
+              <span class="hint">{vault.words(note.entry.path) ?? '—'}</span>
+            {:else}
+              <span class="snip">
+                {#each highlight(snip, note.terms) as part, n (n)}
+                  <span class:hit={part.hit}>{part.text}</span>
+                {/each}
+              </span>
+            {/if}
           </button>
         {/each}
       {/if}
@@ -318,6 +326,12 @@ input::placeholder {
   text-align: left;
   font-size: var(--text-body);
 }
+/* §02b Screen 2 draws a note row as ref · title · excerpt, so the title takes
+   the space it needs and the excerpt takes what is left. A command row keeps the
+   right column at its natural width — a key hint must never be elided. */
+.row.note {
+  grid-template-columns: var(--nav-ref) minmax(0, auto) minmax(0, 1fr);
+}
 .row:hover {
   background: var(--hover);
 }
@@ -333,13 +347,18 @@ input::placeholder {
   font-variant-numeric: tabular-nums;
 }
 .row.sel .ref,
-.row.sel .hint {
+.row.sel .hint,
+.row.sel .snip {
   color: var(--sel-fg);
 }
-.name {
+.name,
+.snip {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.snip {
+  color: var(--dim);
 }
 
 /* §02b: "Match is highlighted with the signal color." */

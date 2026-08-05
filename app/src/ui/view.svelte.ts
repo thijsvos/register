@@ -58,6 +58,20 @@ class ChromeState {
     return () => this.#osScheme.removeEventListener('change', onChange)
   }
 
+  /**
+   * Where a pane has asked the editor to scroll (the OUTLINE rows).
+   *
+   * A nonce rather than a bare offset, because clicking the same heading twice
+   * has to move the caret twice — and the editor is a sibling of the pane that
+   * asks, so the request travels as state rather than as a call.
+   */
+  revealAt = $state<{ position: number; nonce: number } | null>(null)
+  #nonce = 0
+
+  reveal(position: number): void {
+    this.revealAt = { position, nonce: ++this.#nonce }
+  }
+
   toggleInspector(): void {
     this.inspector = !this.inspector
   }

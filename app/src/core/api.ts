@@ -1,5 +1,5 @@
 /**
- * The whole server surface (§04). Five endpoints, nothing else — refs, links,
+ * The whole server surface (§04). Six endpoints, nothing else — refs, links,
  * tasks, tags and search are all client-side derivations of plain text.
  */
 

@@ -21,6 +21,8 @@ export interface EditorHandle {
   sync: (doc: string) => void
   /** Switch to a different note. */
   load: (doc: string) => void
+  /** Put the caret at an offset and scroll it to the top — the OUTLINE pane. */
+  reveal: (position: number) => void
   focus: () => void
   destroy: () => void
   /** Swap the vault callbacks without tearing the editor down. */
@@ -59,6 +61,20 @@ export function createEditor(options: EditorOptions): EditorHandle {
   return {
     sync: (doc) => syncDoc(view, doc),
     load: (doc) => loadDoc(view, doc),
+    reveal: (position) => {
+      // The pane derives its offsets from the store's buffer, which reaches the
+      // editor a tick later; clamping means a click during that tick lands at
+      // the end of the document instead of throwing out of a click handler.
+      const at = Math.min(Math.max(position, 0), view.state.doc.length)
+      view.dispatch({
+        selection: { anchor: at },
+        effects: EditorView.scrollIntoView(at, { y: 'start' }),
+      })
+      // No doc change, so `isUserEdit` is false and this never reports itself
+      // back to the store as an edit. Focus follows the caret: the point of the
+      // outline is to get you into the note, not to point at it.
+      view.focus()
+    },
     focus: () => view.focus(),
     destroy: () => view.destroy(),
     setHost: (host) => {

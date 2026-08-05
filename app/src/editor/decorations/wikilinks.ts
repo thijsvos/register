@@ -1,5 +1,10 @@
 import { Facet } from '@codemirror/state'
 
+// One definition of what a wikilink is, shared with the backlink graph. Two
+// regexes would drift, and the first symptom would be a link the editor
+// underlines and follows that no BACKLINKS pane ever lists.
+export { WIKILINK } from '../../core/links'
+
 /** What the editor needs to know about the vault, without owning any of it. */
 export interface WikiLinkHost {
   /** Does a note with this title or ref exist? */
@@ -25,6 +30,3 @@ export const wikiLinkHost = Facet.define<WikiLinkHost, WikiLinkHost>({
   combine: (values) => values[0] ?? inert,
   compare: (a, b) => a === b,
 })
-
-/** `[[Title]]` or `[[003]]`, with an optional `|alias` the vault ignores. */
-export const WIKILINK = /\[\[([^\][\n|]+)(?:\|[^\][\n]*)?\]\]/g

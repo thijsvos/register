@@ -229,6 +229,41 @@ describe('boot & theme (§02)', () => {
   })
 })
 
+describe('the editor stays lazy (§04: "lazy chunk")', () => {
+  // ~103 kB gzipped of CodeMirror arrives when a note is opened, not at boot.
+  // One static value-import from the shell side collapses that, and it does so
+  // silently: the bundler folds the editor into the entry's static graph, the
+  // shell chunk on disk barely moves, and size-limit — which weighs files —
+  // reports the budget as met. The rule is greppable, so it is enforced here
+  // rather than discovered in a waterfall.
+  const shellSide = entries.filter(
+    ([path]) =>
+      path.startsWith('./ui/') || path.startsWith('./core/') || path.startsWith('./lib/'),
+  )
+
+  it('has a shell to check', () => {
+    expect(shellSide.length).toBeGreaterThan(5)
+  })
+
+  it('never imports the editor statically outside the editor itself', () => {
+    // `import type` is erased before the bundler sees it, so it carries no
+    // weight and is allowed — that is how Editor.svelte holds an EditorHandle.
+    // Multiline but NOT global: a `g` regex driven by `test` carries lastIndex
+    // from one file into the next and starts the following scan mid-source.
+    const statics =
+      /^\s*import\s+(?!type\b)[^;\n]*from\s*['"](?:\.\.\/)+editor(?:\/[^'"]*)?['"]/m
+    const offenders = shellSide
+      .filter(([, text]) => statics.test(code(text)))
+      .map(([path]) => path)
+
+    expect(offenders).toEqual([])
+  })
+
+  it('still reaches the editor, so the rule above is not vacuous', () => {
+    expect(sources['./ui/Editor.svelte']).toMatch(/import\(\s*['"]\.\.\/editor['"]\s*\)/)
+  })
+})
+
 describe('font licensing (rule 7, §03)', () => {
   const faces = import.meta.glob('../public/fonts/**/*.woff2')
   const licenses = import.meta.glob('../public/fonts/**/OFL.txt')

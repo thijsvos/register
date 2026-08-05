@@ -2,6 +2,7 @@
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
 import { setRenderMs } from '../lib/render.svelte'
+import { chrome } from './view.svelte'
 
 let parent: HTMLDivElement | null = $state(null)
 let handle = $state<EditorHandle | null>(null)
@@ -60,6 +61,19 @@ $effect(() => {
     // caret from whatever the user is doing elsewhere.
     editor.sync(text)
   }
+})
+
+// An OUTLINE row asking to be scrolled to. Tracked by nonce rather than
+// consumed, because clearing state from inside the effect that reads it costs a
+// second pass — and a stale request must not re-fire when the editor is rebuilt
+// for a different note.
+let revealed = 0
+$effect(() => {
+  const target = chrome.revealAt
+  const editor = handle
+  if (target === null || editor === null || target.nonce === revealed) return
+  revealed = target.nonce
+  editor.reveal(target.position)
 })
 
 // The vault index changes under a still document — an agent can create the note

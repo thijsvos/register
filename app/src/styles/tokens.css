@@ -55,6 +55,10 @@ html.dark {
   --pane-x: 14px;       /* pane gutter: aligns every label and row across side + inspector */
   --pane-y: 6px;        /* pane label lead */
   --nav-ref: 36px;      /* ref column in an index row (§02b Screen 1) */
+  --insp-key: 76px;     /* PROPERTIES key column — fits MODIFIED at micro tracking */
+  --insp-level: 22px;   /* "H2" gutter in the OUTLINE pane */
+  --meter-h: 6px;       /* tag meter bar — decorative, --faint (§02) */
+  --meter-w: 44px;
   --key-pad-y: 2px;     /* keeps a key box inside the 44px header rail */
   --scroll-w: 10px;
   --cross-x: 5px;
