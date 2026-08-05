@@ -6,6 +6,10 @@
 //! file tools reaches a connected client inside §06's budget. A test that
 //! reached into the crate's own types could not tell you that.
 //!
+//! P9's BYOF acceptance rides along here for the same reason: "git status stays
+//! clean" is a claim about the shipped binary and a real repository, and nothing
+//! smaller than both can check it.
+//!
 //! Not covered: the browser half. "The UI shows it" ends here at the frame the
 //! UI is listening for; asserting the pixel needs Playwright, and rule 6 puts a
 //! new dependency behind an ADR and an approval. Recorded in docs/ROADMAP.md.
@@ -351,4 +355,140 @@ EOF",
     // And the ref it used is not handed out again.
     let next = register(&["new", "After"], &vault);
     assert_eq!(next.trim(), "notes/002-after.md");
+}
+
+/// A woff2 as far as anything here is concerned: the server sniffs the first
+/// four bytes and refuses what is not a font, and licensed bytes are exactly
+/// what must never appear in this repository (§03).
+const FONT: &[u8] = b"wOF2\x00\x00\x00\x00pretend licensed face";
+
+fn put_font(server: &Server, bytes: &[u8]) -> u16 {
+    let mut stream = server.connect();
+    let head = format!(
+        "PUT /api/font HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n",
+        server.addr,
+        bytes.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write head");
+    stream.write_all(bytes).expect("write body");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("read");
+    raw.split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
+fn git(args: &[&str], cwd: &Path) -> String {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .expect("run git");
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn a_licensed_font_never_reaches_the_repository() {
+    // §08 P9's acceptance, and §03's legal position: a commercial face lives in
+    // the vault the user licensed it for and nowhere a `git push` can take it.
+    let root = scratch("byof");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8"), "--git"], &root);
+
+    // A clean starting point, so what the font does is the only variable.
+    shell(
+        "git add -A && git -c user.email=t@e -c user.name=T commit -qm init",
+        &vault,
+    );
+    assert_eq!(git(&["status", "--porcelain"], &vault), "");
+
+    let server = Server::start(&vault);
+    assert_eq!(put_font(&server, FONT), 204);
+
+    // The bytes are on disk, in the vault, ready to serve.
+    assert!(vault.join(".register/fonts/licensed.woff2").is_file());
+    assert_eq!(
+        std::fs::read(vault.join(".register/fonts/licensed.woff2")).expect("read"),
+        FONT
+    );
+
+    // And git has nothing to say about them.
+    let dirty = git(&["status", "--porcelain"], &vault);
+    assert_eq!(dirty, "", "loading a font dirtied the repo:\n{dirty}");
+
+    let tracked = git(&["ls-files"], &vault);
+    assert!(
+        !tracked.contains("fonts"),
+        "a font path is tracked:\n{tracked}"
+    );
+
+    // Config is a different case, deliberately. §08 P8 names two paths to
+    // ignore — fonts and trash — and config.json is neither: your scheme and
+    // body face are vault state, so changing one shows up as a modification.
+    // Pinned here so the distinction stays a decision rather than an accident.
+    let mut stream = server.connect();
+    let body = r#"{"scheme":"dark","bodyFace":"default"}"#;
+    let head = format!(
+        "PUT /api/config HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        server.addr,
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("read");
+
+    let after = git(&["status", "--porcelain"], &vault);
+    assert!(
+        after.contains(".register/config.json"),
+        "a setting should be a tracked change:\n{after}"
+    );
+    assert!(
+        !after.contains("fonts"),
+        "the font still must not be:\n{after}"
+    );
+}
+
+#[test]
+fn a_file_that_is_not_a_font_is_refused_by_the_binary() {
+    let root = scratch("notfont");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let server = Server::start(&vault);
+    // Sniffed by content: the name a browser reports is a user-supplied string.
+    assert_eq!(put_font(&server, b"\x89PNG\r\n\x1a\n not a font"), 415);
+    // `register init` creates the directory as part of §04's tree, so the check
+    // is that it stayed empty — not that it never existed.
+    let stored: Vec<_> = std::fs::read_dir(vault.join(".register/fonts"))
+        .expect("fonts dir")
+        .flatten()
+        .map(|e| e.file_name())
+        .collect();
+    assert!(stored.is_empty(), "it stored something anyway: {stored:?}");
+}
+
+#[test]
+fn settings_persist_where_04_says_they_do() {
+    let root = scratch("config");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let server = Server::start(&vault);
+    let mut stream = server.connect();
+    let body = r#"{"scheme":"dark","bodyFace":"teletype"}"#;
+    let head = format!(
+        "PUT /api/config HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}",
+        server.addr,
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).expect("write");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("read");
+    assert!(raw.starts_with("HTTP/1.1 204"), "{raw}");
+
+    let stored = std::fs::read_to_string(vault.join(".register/config.json")).expect("read");
+    assert!(stored.contains("teletype"), "{stored}");
+    // Config is a vault file and belongs in a commit; only fonts and trash do not.
+    assert!(!stored.contains("licensed"));
 }

@@ -12,6 +12,9 @@
   /* type */
   --font-ui: "TX-02", "Berkeley Mono", "Commit Mono",
              ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* §03: TX-02 is first in the stack and ships in no repo — it appears only if
+     the user loaded their own licensed copy, which the BYOF loader
+     registers under exactly that family name. */
   --font-micro: "Departure Mono", var(--font-ui);
   --text-micro: 11px;   --track-micro: .16em;   /* Departure Mono renders on an 11px pixel grid */
   --text-ui: 11px;      --track-ui: .06em;
@@ -22,6 +25,14 @@
   /* space (4px grid) */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
 }
+/* §02b Screen 6: "BODY FACE [ Default·Commit ][ Teletype·Server ]". The licensed
+   face stays first either way — a theme chooses which OFL face backs it up, not
+   whether the user's own font applies. */
+html.teletype {
+  --font-ui: "TX-02", "Berkeley Mono", "Server Mono",
+             ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
 html.dark {
   /* soft dark: warm near-black, demoted body ink, dimmed hairlines */
   --bg: oklch(0.17 0.006 74);        /* not #000 — cuts halation */
@@ -57,6 +68,7 @@ html.dark {
   --nav-ref: 36px;      /* ref column in an index row (§02b Screen 1) */
   --insp-key: 76px;     /* PROPERTIES key column — fits MODIFIED at micro tracking */
   --insp-level: 22px;   /* "H2" gutter in the OUTLINE pane */
+  --set-key: 110px;     /* label column in §02b Screen 6 */
   --meter-h: 6px;       /* tag meter bar — decorative, --faint (§02) */
   --meter-w: 44px;
   --key-pad-y: 2px;     /* keeps a key box inside the 44px header rail */

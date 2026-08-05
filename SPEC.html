@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev F</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev G</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -160,7 +160,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-05 · Rev F</span></div>
+    <div><label>Issued</label><span>2026-08-05 · Rev G</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -177,6 +177,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 
 <div class="callout warn"><span class="chip">Rev E</span><div><strong>Changes from Rev D — design review merged:</strong> a new <strong>§02b</strong> makes component states and all seven v1 screens (editor, search, first-run, conflict, TODAY, settings/BYOF, agent-edit-live) normative, so the builder stops improvising where §02 was silent. Type corrected — micro-label is <strong>11&nbsp;px</strong> on Departure Mono's pixel grid (was 9.5&nbsp;px, off-grid); body measure capped at ~68&nbsp;ch; note titles are sentence-case (uppercase reserved for chrome). Contrast fixed: <code>--dim</code> is now content-safe and <code>--faint</code> is decorative-only, retiring the false "AAA by construction" claim. Chrome shows <strong>only true state</strong> (watcher, vault, files, git, render) — the fabricated sync/store/activity gauges are gone. The reference prototype is now <strong>MK-II Rev E</strong> and implements this section.</div></div>
 
+<div class="callout warn"><span class="chip">Rev G</span><div><strong>Changes from Rev F — §04's API table only; the vault format is untouched.</strong> §08 P9 asks for a settings screen that reads and writes <code>.register/config.json</code> and stores a licensed font in <code>.register/fonts/</code>. Both paths were already drawn in §04's vault layout, but <code>.register/</code> is invisible to the note API on purpose, so the screen had no way to reach either — the same shape of gap that <code>/api/reveal</code> filled in Rev F. <strong><code>/api/config</code> and <code>/api/font</code> are added</strong> and the surface is now eight endpoints. Nothing about the note format, the frontmatter, the layout, §02 or §02b changes, so this is a table amendment rather than a format change.</div></div>
 <div class="callout warn"><span class="chip">Rev F</span><div><strong>Changes from Rev E — §04 amended, major version.</strong> Two normative changes, both approved before implementation. <strong>(1) Refs are allocated once and never reissued.</strong> Rev E said "ref = highest <em>existing</em> + 1", which meant deleting the highest note handed its ref straight back out and a <code>[[NNN]]</code> wikilink silently re-pointed at different prose — a correctness hole in the product's defining interaction. The rule is now "one above the highest ever allocated", with <code>.register/trash/</code> counted; trash therefore keeps each note at its original vault path so the ref it used stays recoverable. <strong>(2) <code>GET /api/tree</code> returns an envelope</strong> <code>{vault, nextRef, notes[]}</code> rather than a bare array. <code>nextRef</code> is the server's to allocate, since only the server can see the trash; <code>vault</code> fills the status-bar field §02b Screen 1 shows and Rev E's API could not supply. Everything else — the note format, the other four endpoints, §02 and §02b — is unchanged.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
@@ -459,9 +460,11 @@ shown the product.</pre></div>
 <tr><td class="k">PUT /api/note/{path}</td><td>Body + If-Match etag. Atomic tmp+rename. Stale etag ⇒ 409; client writes <code>*.conflict-&lt;ts&gt;.md</code> and surfaces it. Missing path ⇒ create.</td></tr>
 <tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
 <tr><td class="k">POST /api/reveal</td><td>Opens the vault in the OS file manager (§08 P5 — a browser cannot). Takes no parameters: the path is always the vault the server was launched with, so nothing a caller sends reaches a process. Refused with 403 unless the listener bound to loopback.</td></tr>
+<tr><td class="k">GET · PUT /api/config</td><td><code>.register/config.json</code> (§08 P9). The settings screen runs in a browser and <code>.register/</code> is invisible to the note API by design, so §02b Screen 6 has no other way to reach the file it names. A PUT that is not JSON is a 400 — the client reads this at boot, and an unparseable config would break the next load with nothing on screen to explain it.</td></tr>
+<tr><td class="k">GET · PUT · DELETE /api/font</td><td>The BYOF licensed face (§03, §08 P9). Stored under <code>.register/fonts/</code>, gitignored by <code>register init --git</code>. The container is sniffed from its magic number, never from the filename a browser reported; anything that is not woff2/woff/otf/ttf is a 415. Served <code>no-store</code>: the bytes are the user's licensed property and a cache entry is a copy of them nobody chose to make.</td></tr>
 <tr><td class="k">WS /api/events</td><td><code>{created|changed|removed, path, etag}</code>, debounced 50 ms, coalesced. Powers live reload of agent edits.</td></tr>
 </table>
-<p class="dim">That is the entire server surface. Refs, links, tasks, tags, search, templates — all client-side derivations of plain text, so the file format alone defines the product. <code>/api/reveal</code> is the one endpoint that is not about the vault's contents; it exists because opening a file manager is the single thing the UI genuinely cannot do for itself.</p>
+<p class="dim">That is the entire server surface. Refs, links, tasks, tags, search, templates — all client-side derivations of plain text, so the file format alone defines the product. The last three are the only endpoints not about the vault's <em>notes</em>: <code>/api/reveal</code> because opening a file manager is the one thing the UI genuinely cannot do for itself, and <code>/api/config</code> and <code>/api/font</code> because <code>.register/</code> is deliberately invisible to the note API and §02b Screen 6 still has to read and write what lives there.</p>
 
 <h3 class="sub">Vault format — normative</h3>
 <div class="code"><div class="codebar"><span class="lbl">Spec · vault layout + note format</span><button class="copy">Copy</button></div>

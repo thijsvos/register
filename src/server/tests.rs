@@ -442,3 +442,127 @@ async fn genuine_loopback_hosts_are_allowed() {
         assert_eq!(reply.status, 200, "{host} should be allowed");
     }
 }
+
+// ------------------------------------------------------------ config + fonts
+
+/// A minimal woff2: only the magic number is read, because §03's job here is to
+/// refuse things that are not fonts, not to validate glyph tables.
+const WOFF2: &str = "wOF2\0\0\0\0licensed bytes";
+
+#[tokio::test]
+async fn config_starts_empty_and_round_trips() {
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    // A vault that has made no choices, not an error.
+    let fresh = request(addr, "GET", "/api/config", &[], "").await;
+    assert_eq!(fresh.status, 200);
+    assert_eq!(fresh.body.trim(), "{}");
+
+    let written = request(
+        addr,
+        "PUT",
+        "/api/config",
+        &[],
+        r#"{"scheme":"dark","bodyFace":"teletype"}"#,
+    )
+    .await;
+    assert_eq!(written.status, 204);
+
+    let back = request(addr, "GET", "/api/config", &[], "").await;
+    assert!(back.body.contains("\"scheme\":\"dark\""), "{}", back.body);
+    assert_eq!(
+        back.headers.get("content-type").map(String::as_str),
+        Some("application/json")
+    );
+
+    // It landed where §04 says, inside the directory agents keep out of.
+    assert!(tmp.path().join(".register/config.json").is_file());
+}
+
+#[tokio::test]
+async fn config_that_is_not_json_is_refused() {
+    // The browser reads this at boot. Storing something unparseable would break
+    // the app on the next load, with nothing on screen to say why.
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "PUT", "/api/config", &[], "scheme: dark").await;
+    assert_eq!(reply.status, 400);
+    assert!(!tmp.path().join(".register/config.json").exists());
+}
+
+#[tokio::test]
+async fn a_licensed_font_round_trips_and_is_removable() {
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    let missing = request(addr, "GET", "/api/font", &[], "").await;
+    assert_eq!(missing.status, 404);
+
+    let stored = request(addr, "PUT", "/api/font", &[], WOFF2).await;
+    assert_eq!(stored.status, 204);
+    assert!(tmp.path().join(".register/fonts/licensed.woff2").is_file());
+
+    let served = request(addr, "GET", "/api/font", &[], "").await;
+    assert_eq!(served.status, 200);
+    assert_eq!(served.body, WOFF2);
+    assert_eq!(
+        served.headers.get("content-type").map(String::as_str),
+        Some("font/woff2")
+    );
+    // The user's licensed bytes are not something to leave in a cache.
+    assert_eq!(
+        served.headers.get("cache-control").map(String::as_str),
+        Some("no-store")
+    );
+
+    let wiped = request(addr, "DELETE", "/api/font", &[], "").await;
+    assert_eq!(wiped.status, 204);
+    assert_eq!(request(addr, "GET", "/api/font", &[], "").await.status, 404);
+    assert!(!tmp.path().join(".register/fonts/licensed.woff2").exists());
+}
+
+#[tokio::test]
+async fn a_file_that_is_not_a_font_is_refused() {
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    // A JPEG, renamed. Sniffed by content, never by the name the browser sent.
+    let reply = request(addr, "PUT", "/api/font", &[], "\u{ffff}\u{ffd8}not a font").await;
+    assert_eq!(reply.status, 415);
+    assert!(!tmp.path().join(".register/fonts").exists());
+}
+
+#[tokio::test]
+async fn loading_a_second_face_leaves_only_one_behind() {
+    let tmp = TempVault::new();
+    let addr = start(&tmp).await;
+
+    request(addr, "PUT", "/api/font", &[], WOFF2).await;
+    // An OTF this time: a different extension, so a careless implementation
+    // would leave two files and serve whichever it happened to look for first.
+    let otf = "OTTO\0\0\0\0different bytes";
+    assert_eq!(
+        request(addr, "PUT", "/api/font", &[], otf).await.status,
+        204
+    );
+
+    assert!(!tmp.path().join(".register/fonts/licensed.woff2").exists());
+    assert!(tmp.path().join(".register/fonts/licensed.otf").is_file());
+    assert_eq!(request(addr, "GET", "/api/font", &[], "").await.body, otf);
+}
+
+#[tokio::test]
+async fn a_licensed_font_never_appears_in_the_vault_tree() {
+    // §03: the bytes stay inside `.register/`, which the note API cannot see.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start(&tmp).await;
+
+    request(addr, "PUT", "/api/font", &[], WOFF2).await;
+
+    let tree = request(addr, "GET", "/api/tree", &[], "").await;
+    assert!(!tree.body.contains("licensed"), "{}", tree.body);
+    assert!(!tree.body.contains("font"), "{}", tree.body);
+}

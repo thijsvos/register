@@ -45,6 +45,13 @@ export function allCommands(): Command[] {
       keys: 'G I',
       run: () => go.follow('000'),
     },
+    // §02b Screen 6 draws no key against it, so it shows none.
+    {
+      id: 'settings',
+      label: 'GO · SETTINGS / BYOF',
+      keys: '',
+      run: () => go.settings(),
+    },
     {
       id: 'invert',
       label: 'INVERT DISPLAY',

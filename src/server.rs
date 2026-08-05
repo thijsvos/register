@@ -73,6 +73,16 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/events", any(events))
         .route("/api/reveal", post(reveal))
+        // §04's table listed six endpoints; §08 P9 asks for two more, because
+        // `.register/` is invisible to the note API by design and the settings
+        // screen has to reach the config and the licensed face somehow. The
+        // vault *format* is untouched — both paths were already drawn in §04's
+        // layout — so this grows the API table, not the contract.
+        .route("/api/config", get(read_config).put(write_config))
+        .route(
+            "/api/font",
+            get(read_font).put(write_font).delete(delete_font),
+        )
         .fallback(asset)
         // Chosen deliberately. axum's default is 2 MiB, sized for web forms;
         // §04 puts no cap on a note, and a 2 MiB limit would reject a large
@@ -202,6 +212,72 @@ fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+// ------------------------------------------------------------ config + fonts
+
+async fn read_config(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.read_config()).await {
+        Ok(body) => ([(header::CONTENT_TYPE, "application/json")], body).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn write_config(State(state): State<AppState>, body: String) -> Response {
+    // Parsed before it is stored. The client is the only writer, but a config
+    // file that is not JSON would make every later read fail in the browser, at
+    // boot, with nothing on screen to explain it.
+    if serde_json::from_str::<serde_json::Value>(&body).is_err() {
+        return (StatusCode::BAD_REQUEST, "config must be JSON\n").into_response();
+    }
+
+    let vault = state.vault.clone();
+    match blocking(move || vault.write_config(&body)).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+/// The licensed face, served back to the page that stored it (§03 BYOF).
+///
+/// `no-store`: these bytes are the user's licensed property and a cache entry is
+/// a copy of them somewhere nobody chose to put one.
+async fn read_font(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    let found = blocking(move || Ok(vault.font())).await;
+
+    match found {
+        Ok(Some((path, media_type))) => match tokio::fs::read(&path).await {
+            Ok(bytes) => (
+                [
+                    (header::CONTENT_TYPE, media_type),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                bytes,
+            )
+                .into_response(),
+            Err(_) => (StatusCode::NOT_FOUND, "no licensed font\n").into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "no licensed font\n").into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn write_font(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.write_font(&body)).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn delete_font(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.remove_font()).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
 }
 
 async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -365,6 +441,11 @@ fn error_response(error: vault::Error) -> Response {
             StatusCode::CONFLICT,
             [(header::ETAG, quoted(&current))],
             "etag is stale\n",
+        )
+            .into_response(),
+        vault::Error::UnsupportedFont => (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "not a woff2, woff, otf or ttf font\n",
         )
             .into_response(),
         vault::Error::Io(error) => {

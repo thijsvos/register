@@ -17,6 +17,57 @@ use serde::{Deserialize, Serialize};
 /// App-owned directory. §04: "app-owned; agents keep out."
 pub const APP_DIR: &str = ".register";
 const TRASH_DIR: &str = "trash";
+const FONTS_DIR: &str = "fonts";
+const CONFIG_FILE: &str = "config.json";
+/// One licensed face per vault, under a fixed name — §03 registers it as the
+/// single family "TX-02", so a second would have nowhere to go.
+const FONT_STEM: &str = "licensed";
+
+/// A font container this app will accept, by its magic number.
+pub struct FontFormat {
+    pub extension: &'static str,
+    pub media_type: &'static str,
+    magic: &'static [u8],
+}
+
+/// §03 offers ".woff2 / .ttf / .otf". woff is here too because it costs one row
+/// and a user who owns the face may well have been given that container.
+const FONT_FORMATS: &[FontFormat] = &[
+    FontFormat {
+        extension: "woff2",
+        media_type: "font/woff2",
+        magic: b"wOF2",
+    },
+    FontFormat {
+        extension: "woff",
+        media_type: "font/woff",
+        magic: b"wOFF",
+    },
+    FontFormat {
+        extension: "otf",
+        media_type: "font/otf",
+        magic: b"OTTO",
+    },
+    FontFormat {
+        extension: "ttf",
+        media_type: "font/ttf",
+        magic: &[0x00, 0x01, 0x00, 0x00],
+    },
+    // Older TrueType, still handed out by some foundries.
+    FontFormat {
+        extension: "ttf",
+        media_type: "font/ttf",
+        magic: b"true",
+    },
+];
+
+/// Which font container `bytes` is, by its first four bytes — never by the name
+/// the browser reported, which is a user-supplied string.
+pub fn font_format(bytes: &[u8]) -> Option<&'static FontFormat> {
+    FONT_FORMATS
+        .iter()
+        .find(|format| bytes.starts_with(format.magic))
+}
 /// §04's dated-log directory. Its filenames are dates, not refs.
 const DAILY_DIR: &str = "daily/";
 /// Marks an unresolved conflict copy (§04).
@@ -38,6 +89,9 @@ pub enum Error {
     Conflict {
         current: String,
     },
+    /// The bytes offered as a licensed face are not a font container this app
+    /// recognises (§03: woff2 / woff / otf / ttf).
+    UnsupportedFont,
     Io(io::Error),
 }
 
@@ -47,6 +101,7 @@ impl fmt::Display for Error {
             Self::InvalidPath => write!(f, "path is outside the vault"),
             Self::NotFound => write!(f, "no such note"),
             Self::Conflict { current } => write!(f, "etag is stale; current is {current}"),
+            Self::UnsupportedFont => write!(f, "not a woff2, woff, otf or ttf font"),
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -447,24 +502,91 @@ impl Vault {
         // symlink, so containment is re-checked once the parents exist.
         self.verify_parent(parent)?;
 
-        // The temp file is dot-prefixed so the watcher ignores it and clients
-        // never see a phantom note appear mid-write.
-        let tmp = parent.join(tmp_name());
-        let staged = (|| -> io::Result<()> {
-            let mut file = File::create(&tmp)?;
-            file.write_all(body.as_bytes())?;
-            file.sync_all()
-        })();
-        if let Err(e) = staged {
-            let _ = fs::remove_file(&tmp);
-            return Err(Error::Io(e));
-        }
-        if let Err(e) = fs::rename(&tmp, &path) {
-            let _ = fs::remove_file(&tmp);
-            return Err(Error::Io(e));
-        }
+        write_atomically(&path, body.as_bytes())?;
 
         Ok(etag_of(&fs::metadata(&path)?))
+    }
+
+    // ------------------------------------------------------- app-owned files
+    //
+    // `.register/` is invisible to the note API by design — `walk` skips every
+    // dot-prefixed name — so config and the BYOF face need their own way in.
+    // Both are single fixed paths: nothing a caller sends chooses a filename,
+    // so there is no traversal surface here at all.
+
+    fn app_file(&self, name: &str) -> PathBuf {
+        self.root.join(APP_DIR).join(name)
+    }
+
+    /// `.register/config.json` — §04's "theme, fonts, flags". `{}` when absent,
+    /// because a vault without a config has made no choices, not an error.
+    pub fn read_config(&self) -> Result<String> {
+        match fs::read_to_string(self.app_file(CONFIG_FILE)) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok("{}".to_owned()),
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+
+    pub fn write_config(&self, body: &str) -> Result<()> {
+        let _writing = self.lock();
+        self.require_root()?;
+
+        let path = self.app_file(CONFIG_FILE);
+        // A vault made by hand rather than by `register init` has no
+        // `.register/` at all, and the first setting anyone changes is where
+        // that shows up.
+        fs::create_dir_all(path.parent().ok_or(Error::InvalidPath)?)?;
+        write_atomically(&path, body.as_bytes())
+    }
+
+    /// The stored BYOF face and its media type, if the user has loaded one.
+    pub fn font(&self) -> Option<(PathBuf, &'static str)> {
+        for format in FONT_FORMATS {
+            let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+            if path.is_file() {
+                return Some((path, format.media_type));
+            }
+        }
+        None
+    }
+
+    /// Store `bytes` as the vault's licensed face (§03 BYOF).
+    ///
+    /// Sniffed before it is written, and refused if it is not a font. The bytes
+    /// are handed straight to `FontFace` in a browser, and a file that is not a
+    /// font produces a silently unstyled app rather than an error anyone can
+    /// act on — better to say so at the moment of loading.
+    pub fn write_font(&self, bytes: &[u8]) -> Result<()> {
+        let format = font_format(bytes).ok_or(Error::UnsupportedFont)?;
+
+        let _writing = self.lock();
+        self.require_root()?;
+        // One face at a time: loading a second must not leave the first behind
+        // for `font()` to find by extension order.
+        self.remove_font_locked()?;
+
+        let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+        fs::create_dir_all(path.parent().ok_or(Error::InvalidPath)?)?;
+        write_atomically(&path, bytes)
+    }
+
+    /// §08 P9: "remove wipes it".
+    pub fn remove_font(&self) -> Result<()> {
+        let _writing = self.lock();
+        self.remove_font_locked()
+    }
+
+    fn remove_font_locked(&self) -> Result<()> {
+        for format in FONT_FORMATS {
+            let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+            match fs::remove_file(&path) {
+                Ok(()) => {}
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        Ok(())
     }
 
     /// Move a note to `.register/trash/`. §04: never hard-delete.
@@ -583,6 +705,31 @@ fn mtime_millis(meta: &Metadata) -> i64 {
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Stage into a temp file, fsync, then rename — hard rule 5's one write path.
+///
+/// The temp file is dot-prefixed so the watcher ignores it and clients never see
+/// a phantom note appear mid-write. A failure at any step removes the temp file
+/// rather than leaving litter behind for `walk` to trip over.
+fn write_atomically(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().ok_or(Error::InvalidPath)?;
+    let tmp = parent.join(tmp_name());
+
+    let staged = (|| -> io::Result<()> {
+        let mut file = File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if let Err(e) = staged {
+        let _ = fs::remove_file(&tmp);
+        return Err(Error::Io(e));
+    }
+    if let Err(e) = fs::rename(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(Error::Io(e));
+    }
+    Ok(())
 }
 
 fn tmp_name() -> String {

@@ -57,4 +57,8 @@ export const go = {
   today(): void {
     chrome.showToday()
   },
+
+  settings(): void {
+    chrome.showSettings()
+  },
 }

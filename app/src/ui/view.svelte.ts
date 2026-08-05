@@ -1,11 +1,15 @@
+import { settings } from '../core/settings.svelte'
 import { measure } from '../lib/render.svelte'
 
 /**
  * Chrome state: what is on screen, as opposed to what is in the vault.
  *
- * In memory only. Hard rule 4 forbids state the vault cannot express, and none
- * of this belongs in a note — the OS owns the colour scheme, and pane visibility
- * is a property of this window, not of the knowledge base.
+ * In memory only, and that is the rule: hard rule 4 forbids state the vault
+ * cannot express, and which pane you last looked at is not knowledge.
+ *
+ * The colour scheme is the exception, and it is not one — §02b Screen 6 stores
+ * it in `.register/config.json`, which is part of the vault. This module reads
+ * that choice through `settings`; it never persists anything itself.
  */
 /** There is no `document` outside a browser, and this module is imported by
  *  code that runs under Vitest in node. */
@@ -17,6 +21,8 @@ class ChromeState {
   inspector = $state(true)
   index = $state(true)
   paletteOpen = $state(false)
+  /** §02b Screen 6 is showing instead of the note. */
+  settings = $state(false)
 
   /**
    * TODAY is showing instead of the note (§02b Screen 5).
@@ -38,11 +44,35 @@ class ChromeState {
   }
 
   /**
-   * INV means "inverted from the OS", not "dark is on" — otherwise a user whose
-   * OS is dark boots with the key already lit for a state they never entered.
+   * The scheme the vault's config asks for, or the OS when it asks for nothing.
+   *
+   * §02b Screen 6 makes `.register/config.json` the durable store — which rule 4
+   * allows, because that file is part of the vault. An unset scheme still means
+   * "whatever the OS says", so a fresh vault behaves exactly as before.
+   */
+  get #preferred(): boolean {
+    if (settings.scheme === 'light') return false
+    if (settings.scheme === 'dark') return true
+    return this.#osScheme.matches
+  }
+
+  /**
+   * INV means "inverted from what was chosen", not "dark is on" — otherwise a
+   * user whose OS is dark boots with the key already lit for a state they never
+   * entered.
    */
   get inverted(): boolean {
-    return this.dark !== this.#osScheme.matches
+    return this.dark !== this.#preferred
+  }
+
+  /** Put the stored scheme on the document. Idempotent; safe from an effect. */
+  applyScheme(): void {
+    const wanted = this.#preferred
+    if (this.dark === wanted) return
+    measure(() => {
+      this.dark = wanted
+      document.documentElement.classList.toggle('dark', wanted)
+    })
   }
 
   invert(): void {
@@ -53,12 +83,14 @@ class ChromeState {
   }
 
   /**
-   * The OS is the only durable source of truth for the scheme, because rule 4
-   * forbids storing a preference — so when it changes it wins, and any INV
-   * inversion is dropped.
+   * Follow the OS — unless the vault pinned a scheme in §02b Screen 6.
+   *
+   * A pin has to survive the machine going dark at sunset, or it is not a
+   * setting. With no pin the OS wins, and any INV inversion is dropped.
    */
   followOsScheme(): () => void {
     const onChange = (event: MediaQueryListEvent) => {
+      if (settings.scheme !== 'system') return
       measure(() => {
         this.dark = event.matches
         document.documentElement.classList.toggle('dark', this.dark)
@@ -90,12 +122,19 @@ class ChromeState {
     this.focusAt = { position: null, nonce: ++this.#nonce }
   }
 
+  showSettings(): void {
+    this.settings = true
+    this.today = false
+  }
+
   showToday(): void {
+    this.settings = false
     this.today = true
   }
 
   showNotes(): void {
     this.today = false
+    this.settings = false
   }
 
   toggleInspector(): void {

@@ -53,7 +53,14 @@ const sources: Record<string, string> = {
 
 const entries = Object.entries(sources)
 
-/** Literal colors: hex, any color-producing function, or a named CSS color. */
+/**
+ * Literal colors: hex, any color-producing function, or a named CSS color.
+ *
+ * A JS private field spelled in hex — `#face`, `#beef`, `#dad` — trips this. It
+ * is left that way on purpose: the false positive fails the build and is fixed
+ * by a rename in seconds, while a looser pattern would let a real hardcoded
+ * colour through and nobody would notice for a phase.
+ */
 const LITERAL_COLOR =
   /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|lab|lch|color-mix)\(|\b(?:black|white|red|green|blue|yellow|orange|purple|pink|brown|gray|grey|silver|gold|cyan|magenta|lime|navy|teal|olive|maroon|aqua|fuchsia|beige|ivory|coral|salmon|khaki|indigo|violet|crimson|tomato|orchid|plum|tan|azure|linen|snow|wheat)\b(?=\s*[;}),])/gi
 
@@ -286,6 +293,32 @@ describe('font licensing (rule 7, §03)', () => {
 
   it('vendors woff2 only', () => {
     expect(Object.keys(strayFormats)).toEqual([])
+  })
+
+  it('never fetches a font from the network (§08 P9)', () => {
+    // §03's whole legal position rests on this: the OFL faces are vendored and
+    // the licensed one comes from the user's own disk. One `@import` from a font
+    // CDN would make the app fetch typefaces it has no licence to serve, and
+    // leak which vault is open to whoever runs the CDN.
+    const remote =
+      /(?:@import|src:\s*url\(|fetch\(|new\s+FontFace\([^)]*)['"`]?https?:\/\//i
+    const offenders = [...entries, ['../index.html', indexHtml] as const]
+      .filter(([, text]) => remote.test(code(text)))
+      .map(([path]) => path)
+
+    expect(offenders).toEqual([])
+    // And nothing points at the usual suspects, however it is spelled.
+    for (const [path, text] of entries) {
+      expect(text, path).not.toMatch(/fonts\.(?:googleapis|gstatic|bunny|cdnfonts)/i)
+    }
+  })
+
+  it('registers a licensed face from the vault, under the family §03 names', () => {
+    const byof = sources['./core/settings.svelte.ts'] ?? ''
+    expect(byof).toContain('new FontFace(FAMILY')
+    expect(byof).toMatch(/const FAMILY = 'TX-02'/)
+    // The bytes come from this origin's own server and nowhere else.
+    expect(byof).toContain('getFont()')
   })
 
   it('never references the commercial face as a bundled file', () => {

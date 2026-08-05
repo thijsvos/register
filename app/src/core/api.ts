@@ -1,5 +1,5 @@
 /**
- * The whole server surface (§04). Six endpoints, nothing else — refs, links,
+ * The whole server surface (§04). Eight endpoints, nothing else — refs, links,
  * tasks, tags and search are all client-side derivations of plain text.
  */
 
@@ -247,4 +247,46 @@ function asEvent(value: unknown): VaultEvent | null {
     path: value.path,
     etag: typeof value.etag === 'string' ? value.etag : null,
   }
+}
+
+// --------------------------------------------------------------- config + fonts
+
+/** `.register/config.json` (§02b Screen 6). `{}` when the vault has no config. */
+export async function getConfig(): Promise<unknown> {
+  const response = await fetch('/api/config')
+  if (!response.ok) await refuse(response)
+  return await response.json()
+}
+
+export async function putConfig(value: unknown): Promise<void> {
+  const response = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(value),
+  })
+  if (!response.ok) await refuse(response)
+}
+
+/**
+ * The licensed face's bytes, or null when none is loaded (§03 BYOF).
+ *
+ * Always same-origin: §08 P9 is explicit that fonts are never fetched from the
+ * network, and the only place these bytes exist is the vault they were stored
+ * in from the user's own disk.
+ */
+export async function getFont(): Promise<ArrayBuffer | null> {
+  const response = await fetch('/api/font')
+  if (response.status === 404) return null
+  if (!response.ok) await refuse(response)
+  return await response.arrayBuffer()
+}
+
+export async function putFont(bytes: ArrayBuffer): Promise<void> {
+  const response = await fetch('/api/font', { method: 'PUT', body: bytes })
+  if (!response.ok) await refuse(response)
+}
+
+export async function deleteFont(): Promise<void> {
+  const response = await fetch('/api/font', { method: 'DELETE' })
+  if (!response.ok) await refuse(response)
 }

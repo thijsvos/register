@@ -1,5 +1,6 @@
 <script lang="ts">
 import { search } from '../core/search'
+import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
 import { render } from '../lib/render.svelte'
 import Editor from './Editor.svelte'
@@ -10,15 +11,18 @@ import Sidebar from './Frame/Sidebar.svelte'
 import StatusBar from './Frame/StatusBar.svelte'
 import { installKeymap } from './keymap'
 import Palette from './Palette/Palette.svelte'
+import Settings from './Settings.svelte'
 import Today from './Today.svelte'
 import { chrome } from './view.svelte'
 
 let crumb = $derived(
-  chrome.today
-    ? 'AGGREGATE / TODAY'
-    : vault.active
-      ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
-      : 'INDEX',
+  chrome.settings
+    ? 'CONFIG / SETTINGS'
+    : chrome.today
+      ? 'AGGREGATE / TODAY'
+      : vault.active
+        ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
+        : 'INDEX',
 )
 
 $effect(() => {
@@ -26,6 +30,16 @@ $effect(() => {
   return () => vault.stop()
 })
 
+// The vault's own config, read once at boot: the stored scheme, the body face,
+// and the licensed face registered under TX-02 (§02b Screen 6, §03).
+$effect(() => {
+  void settings.start()
+})
+// Re-applied whenever the stored scheme moves, including the moment it arrives.
+$effect(() => {
+  void settings.scheme
+  chrome.applyScheme()
+})
 $effect(() => chrome.followOsScheme())
 $effect(() => installKeymap())
 
@@ -49,7 +63,9 @@ $effect(() => {
       <Sidebar />
     {/if}
     <main>
-      {#if chrome.today}
+      {#if chrome.settings}
+        <Settings />
+      {:else if chrome.today}
         <Today />
       {:else if vault.openPath === null}
         <p class="empty">
