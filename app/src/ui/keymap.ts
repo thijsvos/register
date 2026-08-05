@@ -32,6 +32,47 @@ function isTyping(target: EventTarget | null): boolean {
   return target.closest('.cm-editor') !== null
 }
 
+export type EscapeAction = 'close-palette' | 'leave-editor' | 'nothing'
+
+/**
+ * What Escape does — stated as a function of three facts, so the rule can be
+ * read and tested without a DOM.
+ *
+ * Escape is the way out of the editor, and it has to be: opening a note puts the
+ * caret in it, and while the caret is in it every bare key is a letter rather
+ * than a command. Without this, `N`, `I`, `[`, `]` and the G-chords are reachable
+ * only by clicking something, which is §01's mouse-free promise failing quietly
+ * in the state the user spends nearly all their time in.
+ *
+ * Order matters. The palette is modal, so it wins from anywhere. Then anything
+ * closer to the event wins: CodeMirror binds Escape to `simplifySelection`,
+ * which collapses a multi-range or non-empty selection and calls preventDefault
+ * — so a first Escape clears the selection and a second leaves the editor,
+ * rather than one keystroke doing both.
+ */
+export function escapeAction(where: {
+  paletteOpen: boolean
+  /** Something nearer the target already consumed it. */
+  handledAlready: boolean
+  typing: boolean
+}): EscapeAction {
+  if (where.paletteOpen) return 'close-palette'
+  if (where.handledAlready) return 'nothing'
+  return where.typing ? 'leave-editor' : 'nothing'
+}
+
+/**
+ * Whether Enter should hand the caret back to the note.
+ *
+ * Only from `<body>` — which is exactly where Escape leaves you, and nowhere
+ * else. On a focused index row Enter has to open that row, and a global binding
+ * would swallow it; the return trip must not cost the keyboard navigation it
+ * exists to serve.
+ */
+export function entersEditor(where: { onBody: boolean; paletteOpen: boolean }): boolean {
+  return where.onBody && !where.paletteOpen
+}
+
 /**
  * The application keymap (§08 P5). Returns its own teardown.
  *
@@ -73,14 +114,29 @@ export function installKeymap(): () => void {
       return
     }
 
-    // Escape closes the palette from anywhere, not only from its input. The
+    // Escape closes the palette from anywhere, not only from its input — the
     // input handles it too, but relying on that alone means a stray focus makes
-    // an open modal unclosable without a mouse.
+    // an open modal unclosable without a mouse. Otherwise it leaves the editor.
     if (event.key === 'Escape') {
       disarm()
-      if (chrome.paletteOpen) {
+      // activeElement rather than event.target: it is the element about to be
+      // blurred, so the thing tested and the thing acted on cannot disagree.
+      const focused = document.activeElement
+      const action = escapeAction({
+        paletteOpen: chrome.paletteOpen,
+        handledAlready: event.defaultPrevented,
+        typing: isTyping(focused),
+      })
+
+      if (action === 'close-palette') {
         event.preventDefault()
         chrome.closePalette()
+      } else if (action === 'leave-editor' && focused instanceof HTMLElement) {
+        event.preventDefault()
+        // Focus falls to <body>, where isTyping is false and the bare keys
+        // work. The caret vanishing is the mode indicator: CodeMirror only
+        // draws it while the view has focus, so this needs no new chrome.
+        focused.blur()
       }
       return
     }
@@ -118,6 +174,20 @@ export function installKeymap(): () => void {
         // silently swallow whatever key comes next a minute later.
         armed = setTimeout(disarm, CHORD_MS)
         return
+      case 'enter': {
+        // The way back in, and the reason Escape is safe to offer at all: leave
+        // the editor with Escape, run a command, Enter to resume writing.
+        const back = entersEditor({
+          onBody: document.activeElement === document.body,
+          // Already returned above if the palette is open. Passed anyway, so the
+          // rule holds on its own rather than on the order of the branches here.
+          paletteOpen: chrome.paletteOpen,
+        })
+        if (!back) return
+        event.preventDefault()
+        chrome.focusEditor()
+        return
+      }
       case 'n':
         event.preventDefault()
         go.create('Untitled note')

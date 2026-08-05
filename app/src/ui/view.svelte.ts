@@ -69,17 +69,25 @@ class ChromeState {
   }
 
   /**
-   * Where a pane has asked the editor to scroll (the OUTLINE rows).
+   * A request for the editor to take focus, optionally at an offset.
    *
    * A nonce rather than a bare offset, because clicking the same heading twice
-   * has to move the caret twice — and the editor is a sibling of the pane that
-   * asks, so the request travels as state rather than as a call.
+   * has to move the caret twice — and the editor is a sibling of whatever asks,
+   * so the request travels as state rather than as a call. One channel for both
+   * intents: an OUTLINE row wants the caret moved, Enter from the frame just
+   * wants the caret back, and both are "editor, take focus".
    */
-  revealAt = $state<{ position: number; nonce: number } | null>(null)
+  focusAt = $state<{ position: number | null; nonce: number } | null>(null)
   #nonce = 0
 
+  /** Put the caret at an offset and scroll to it (the OUTLINE rows). */
   reveal(position: number): void {
-    this.revealAt = { position, nonce: ++this.#nonce }
+    this.focusAt = { position, nonce: ++this.#nonce }
+  }
+
+  /** Return to the note, leaving the caret where it was. */
+  focusEditor(): void {
+    this.focusAt = { position: null, nonce: ++this.#nonce }
   }
 
   showToday(): void {

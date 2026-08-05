@@ -64,17 +64,18 @@ $effect(() => {
   }
 })
 
-// An OUTLINE row asking to be scrolled to. Tracked by nonce rather than
-// consumed, because clearing state from inside the effect that reads it costs a
-// second pass — and a stale request must not re-fire when the editor is rebuilt
-// for a different note.
-let revealed = 0
+// Somebody asking for the caret: an OUTLINE row with an offset, or Enter from
+// the frame with none. Tracked by nonce rather than consumed, because clearing
+// state from inside the effect that reads it costs a second pass — and a stale
+// request must not re-fire when the editor is rebuilt for a different note.
+let answered = 0
 $effect(() => {
-  const target = chrome.revealAt
+  const target = chrome.focusAt
   const editor = handle
-  if (target === null || editor === null || target.nonce === revealed) return
-  revealed = target.nonce
-  editor.reveal(target.position)
+  if (target === null || editor === null || target.nonce === answered) return
+  answered = target.nonce
+  if (target.position === null) editor.focus()
+  else editor.reveal(target.position)
 })
 
 // The vault index changes under a still document — an agent can create the note
