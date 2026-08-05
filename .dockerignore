@@ -1,0 +1,23 @@
+# Build context hygiene. Everything here is either rebuilt inside the image or
+# has no business leaving this machine.
+
+# Rebuilt by the ui and server stages.
+/target/
+app/node_modules/
+app/dist/
+
+# History and tooling: a 3-stage build reads source, not provenance.
+.git/
+.github/
+docs/
+*.md
+SPEC.html
+register-prototype.html
+
+# Dev vaults, wherever they sit (see .gitignore — same rule, same reason).
+devvault/
+
+# §03: licensed font bytes are the user's, and a build context is a copy.
+**/.register/
+
+.DS_Store

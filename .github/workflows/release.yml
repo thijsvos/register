@@ -1,0 +1,140 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+
+# The tag also triggers ci.yml (a bare `push` fires for tags), so the gates run
+# alongside this rather than being restated here.
+permissions:
+  contents: write # create the release and attach binaries
+  packages: write # push the image to ghcr
+
+jobs:
+  # Built once and shared. Every platform binary embeds the UI, and they must
+  # embed the *same* UI — five independent builds would be five chances for one
+  # architecture to ship something the others did not.
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: app/package.json }
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm build
+        working-directory: app
+      # §06's shell budget applies to what ships, not only to what is reviewed.
+      - run: pnpm size
+        working-directory: app
+      - uses: actions/upload-artifact@v5
+        with: { name: ui, path: app/dist, retention-days: 1 }
+
+  binaries:
+    needs: ui
+    # One target failing must not hide whether the others are within budget.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            asset: register-macos-arm64
+          # Cross-compiled from the arm runner: Apple ships both SDKs, so this
+          # needs no extra linker.
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            asset: register-macos-x64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: register-linux-x64
+          # Native arm64, rather than cross-linking musl from x86: a static
+          # binary built through a foreign linker is the kind of thing that
+          # works until it is on someone's server.
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            asset: register-linux-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: register-windows-x64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable # rust-toolchain.toml governs
+        with: { targets: "${{ matrix.target }}" }
+      - uses: actions/download-artifact@v6
+        with: { name: ui, path: app/dist }
+
+      - name: musl linker
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Name it for the platform it runs on
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=target/${{ matrix.target }}/release/register
+          [ -f "$BIN.exe" ] && BIN="$BIN.exe"
+          cp "$BIN" "${{ matrix.asset }}"
+
+      # §06: "Release binary ≤ 10 MB". `wc -c` rather than `stat`, whose flags
+      # differ on every one of these five runners.
+      - name: §06 budget
+        shell: bash
+        run: |
+          set -euo pipefail
+          BYTES=$(wc -c < "${{ matrix.asset }}")
+          LIMIT=$((10 * 1024 * 1024))
+          echo "${{ matrix.asset }}: $BYTES bytes of $LIMIT"
+          test "$BYTES" -le "$LIMIT"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: bin-${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          retention-days: 1
+
+  publish:
+    needs: binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v6
+        with: { pattern: bin-*, path: dist, merge-multiple: true }
+      - name: Attach every binary to the release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -euo pipefail
+          ls -l dist
+          gh release create "${{ github.ref_name }}" dist/* \
+            --title "${{ github.ref_name }}" \
+            --generate-notes
+
+  container:
+    needs: ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to ghcr
+        run: |
+          echo "${{ github.token }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      # Deliberately no floating tag. Rule 11 bans `latest` as a version, and
+      # publishing one invites exactly the drift the rule exists to stop — so
+      # the image is addressable only by the version that built it.
+      - name: Build and push
+        run: |
+          set -euo pipefail
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          VERSION="${{ github.ref_name }}"
+          docker build -f deploy/Dockerfile \
+            -t "ghcr.io/$OWNER/register:$VERSION" \
+            -t "ghcr.io/$OWNER/register:${VERSION#v}" \
+            .
+          docker push --all-tags "ghcr.io/$OWNER/register"

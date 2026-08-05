@@ -1,0 +1,9 @@
+# SPEC §07, verbatim. That is the whole stack: agents run on the host against
+# the same mounted folder, and the container only serves the UI.
+services:
+  register:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    ports: ["7777:7777"]
+    volumes:
+      - ${VAULT_PATH:-./vault}:/vault
+    restart: unless-stopped

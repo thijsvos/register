@@ -12,7 +12,7 @@ jobs:
         with: { node-version-file: .nvmrc, cache: pnpm, cache-dependency-path: app/pnpm-lock.yaml }
       - run: pnpm install --frozen-lockfile
       - run: pnpm check          # biome + svelte-check
-      - run: pnpm test -- --run
+      - run: pnpm test
       - run: pnpm build
       - run: pnpm size
   server:
@@ -22,7 +22,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable  # rust-toolchain.toml governs
         with: { components: "rustfmt, clippy" }
       - run: cargo fmt --check
-      - run: cargo clippy --locked -- -D warnings   # --locked mirrors the UI job's --frozen-lockfile
+      # --all-targets so the test modules are linted too; --locked mirrors the
+      # UI job's --frozen-lockfile.
+      - run: cargo clippy --locked --all-targets -- -D warnings
       - run: cargo test --locked
   repo-size:
     runs-on: ubuntu-latest
