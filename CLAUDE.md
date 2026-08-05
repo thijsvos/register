@@ -42,8 +42,12 @@ cd app && pnpm check && pnpm test && pnpm build && pnpm size
 11. Version doctrine (§06): before scaffolding, verify every manifest pin against
     current stable (endoflife.date + official release pages) and bump the
     manifest if stable has moved. Pins live in `.nvmrc` / `rust-toolchain.toml` /
-    `packageManager` only; the string `latest` is banned in Dockerfiles,
-    workflows, and manifests; Dependabot owns drift after P0.
+    `packageManager` only; `latest` is banned as an image or package version tag
+    in Dockerfiles, workflows, and manifests. GitHub runner labels
+    (`runs-on: ubuntu-latest`) are exempt — they name GitHub-managed
+    infrastructure rather than a dependency, no Dependabot ecosystem tracks them,
+    and pinning one would create a stale pin nothing owns. Dependabot owns drift
+    after P0.
 
 ## How we work
 Build through §08 phase by phase, in order. I paste each phase prompt (P0, P1, …)

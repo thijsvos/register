@@ -4,13 +4,23 @@ updates:
     directory: /app
     schedule: { interval: weekly }
     groups: { app-deps: { patterns: ["*"] } }
+    # pnpm 11 refuses lockfile entries younger than minimumReleaseAge (1440 min),
+    # and CI installs --frozen-lockfile, so a same-day release reds the whole
+    # grouped PR. Cooldown delays opening the PR, not merging it. 7 days gives
+    # 7x margin. It gates direct deps only — a transitive bump can still land
+    # inside pnpm's window, so this reduces the failure rate, not to zero.
+    cooldown: { default-days: 7, semver-major-days: 30, semver-minor-days: 7, semver-patch-days: 7 }
   - package-ecosystem: cargo
     directory: /
     schedule: { interval: weekly }
     groups: { server-deps: { patterns: ["*"] } }
+    cooldown: { default-days: 7, semver-major-days: 30, semver-minor-days: 7, semver-patch-days: 7 }
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: weekly }
+    # github-actions and docker support default-days only, not the semver-* keys.
+    cooldown: { default-days: 7 }
   - package-ecosystem: docker
     directory: /deploy
     schedule: { interval: weekly }
+    cooldown: { default-days: 7 }

@@ -22,8 +22,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable  # rust-toolchain.toml governs
         with: { components: "rustfmt, clippy" }
       - run: cargo fmt --check
-      - run: cargo clippy -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --locked -- -D warnings   # --locked mirrors the UI job's --frozen-lockfile
+      - run: cargo test --locked
   repo-size:
     runs-on: ubuntu-latest
     steps:
