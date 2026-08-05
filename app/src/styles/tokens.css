@@ -54,11 +54,13 @@ html.dark {
   --track-mark: .08em;
   --pane-x: 14px;       /* pane gutter: aligns every label and row across side + inspector */
   --pane-y: 6px;        /* pane label lead */
+  --nav-ref: 36px;      /* ref column in an index row (§02b Screen 1) */
   --key-pad-y: 2px;     /* keeps a key box inside the 44px header rail */
   --scroll-w: 10px;
   --cross-x: 5px;
   --cross-y: 3px;
   --focus-offset: 2px;  /* §02b state matrix: "dashed ring, offset 2px" */
+  --focus-inset: -3px;  /* §02b nav row: the ring sits inside the row */
 
   /* Departure Mono is bitmap-derived on an 11px grid: half-leading must be a
      whole pixel or every micro baseline lands off-pixel and the face blurs.

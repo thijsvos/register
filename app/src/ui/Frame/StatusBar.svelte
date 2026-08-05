@@ -1,20 +1,24 @@
 <script lang="ts">
 // §02b: "Chrome shows only derivable truth. No gauge may display a number the
-// system cannot measure." P1 can measure exactly one thing — the render time.
-// Watcher, vault, files and git become real in P2/P3; until then they read as
-// unmeasured rather than inventing a value.
+// system cannot measure." Watcher, render and files are measured. Vault and git
+// are not: §04's API table is complete and exposes neither, so they stay dashed
+// rather than inventing a value.
 let {
   renderMs = null,
   watcherLive = false,
   vault = null,
   files = null,
   git = null,
+  notice = null,
+  dirty = false,
 }: {
   renderMs?: number | null
   watcherLive?: boolean
   vault?: string | null
   files?: number | null
   git?: string | null
+  notice?: string | null
+  dirty?: boolean
 } = $props()
 
 const dash = '—'
@@ -30,7 +34,14 @@ const dash = '—'
     <span class="lab">Render</span>
     <b>{renderMs === null ? dash : `${renderMs.toFixed(2)}ms`}</b>
   </div>
-  <div class="cell grow"><b>{files ?? dash}</b> <span class="lab">files</span></div>
+  <div class="cell grow" role="status">
+    {#if notice}
+      <b class="notice">{notice}</b>
+    {:else if dirty}
+      <span class="lab">Saving</span>
+    {/if}
+  </div>
+  <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
   <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
 </footer>
 
@@ -58,9 +69,14 @@ footer {
 .cell.grow {
   flex: 1;
   justify-content: flex-end;
+  min-width: 0;
   border-right: none;
   border-left: var(--hairline) solid var(--line);
   margin-left: calc(-1 * var(--hairline));
+}
+.notice {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Label demoted, readout in full ink — otherwise the bar is a flat wall of
@@ -82,9 +98,13 @@ b {
   animation: pip 2.4s steps(2, jump-none) infinite;
 }
 @keyframes pip {
-  50% { opacity: .2; }
+  50% {
+    opacity: 0.2;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
-  .led.live { animation: none; }
+  .led.live {
+    animation: none;
+  }
 }
 </style>
