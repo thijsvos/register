@@ -11,7 +11,25 @@ name = "register"
 path = "src/main.rs"
 
 [dependencies]
+axum = { version = "0.8", features = ["ws"] }
 clap = { version = "4", features = ["derive"] }
+notify = "8"
+rust-embed = { version = "8", features = ["mime-guess"] }
+serde = { version = "1", features = ["derive"] }
+# Already linked via axum's `json` feature; named here because the WS pump
+# serializes frames itself. See docs/ADRs/002-serde-json.md.
+serde_json = "1"
+# Replaces the deprecated serde_yaml. See docs/ADRs/001-yaml-crate.md.
+serde-saphyr = { version = "1", default-features = false, features = ["deserialize"] }
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "net",
+    "fs",
+    "sync",
+    "time",
+    "signal",
+] }
 
 [profile.release]
 lto = true

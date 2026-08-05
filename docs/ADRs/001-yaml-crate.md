@@ -15,9 +15,13 @@ The vault format does not change either way — frontmatter stays ordinary YAML 
 so this is an implementation choice under hard rule 6, not a §04 format change
 under hard rule 1. No major version is implied.
 
-What the server actually needs is narrow. `GET /api/tree` reads every note and
-extracts six known fields: `id`, `ref`, `title`, `created`, `modified`, `tags`.
-That is the whole surface, and it is **parse-only**:
+What the server actually needs is narrower still. `GET /api/tree` reads every
+note and extracts exactly **two** frontmatter fields: `title` and `tags`. The
+`ref` is not read from frontmatter at all — it is derived from the filename,
+because §04's invariant is `filename = ref-slug` and a filename cannot be
+mistyped into a different YAML scalar type the way an unquoted `ref: 003` can.
+`id`, `created` and `modified` are the client's business. The surface is also
+**parse-only**:
 
 - Saves go through `PUT /api/note/{path}`, which takes the complete markdown as
   a byte body. The client owns serialization (§05, `app/src/core/frontmatter.ts`).
