@@ -37,7 +37,7 @@ Every entry names a trigger. An entry without one is a wish.
 | **Any loopback origin is trusted** | The origin guard allows `http://localhost:<any port>` so `pnpm dev` can proxy from vite. That grants the same authority to every other local web server. Narrowing it needs an explicit dev-origin flag. | P12, alongside token mode — the same conversation about who may talk to the server. |
 | **No WebSocket keepalive** | `pump()` has no ping/pong and no send timeout, so a half-open connection is never detected. Harmless on loopback; it matters over a tailnet. | P12 remote mode. |
 | **`If-Match: *`** | RFC 9110 defines the wildcard as "matches iff the resource exists". Unimplemented; no client sends it. | A second client, or a spec revision that asks for it. |
-| **`cargo-audit` in CI** | Would have flagged RUSTSEC-2025-0068 (the unsound `serde_yml`) automatically rather than by hand during ADR-001. Cheap to add. | P10/P11 release engineering, where CI grows anyway. |
+| **~~`cargo-audit` in CI~~** | ~~Closed after P11.~~ The trigger was "P10/P11 release engineering, where CI grows anyway", and it did — `ci.yml` now has an `audit` job. It is the check that would have found RUSTSEC-2025-0068 without ADR-001 having to find it by hand. | — |
 
 ## Parked during P3 (client store)
 
@@ -73,7 +73,7 @@ validated at the boundary instead of cast. What remains:
 
 | Item | Why it is parked | Trigger |
 |---|---|---|
-| **The e2e stops at the frame, not the pixel** | §08 P8 asks that "the UI shows it ≤ 100 ms". `tests/live_edit.rs` drives the shipped binary and measures a real shell append to a real WebSocket frame — 48 ms of the 100 ms budget — but asserting that the browser *painted* needs Playwright, and rule 6 puts a new dependency behind an ADR and an approval. §06 already names Playwright for the screenshot stories. | The phase that adds Playwright for §02b's per-screen baselines; both asks are one dependency. |
+| **~~The e2e stops at the frame, not the pixel~~** | ~~Closed by P11.~~ Playwright arrived with ADR-005 and `e2e/budgets.spec.ts` now measures the paint itself, with a MutationObserver rather than a poll. The Rust test still measures the frame at 48 ms; the browser measures what follows it. | — |
 | **`register new` only works inside the vault** | It reads the current directory and refuses elsewhere, because §08 P8 specifies the command as `register new "title"` with no path. Convenient, but it means an agent must `cd` first. A `--vault` flag would fix it and is one line. | Anyone scripting note creation from outside the folder. |
 | **Slug folding is partial, not NFKD** | The client normalises with `normalize('NFKD')`; Rust's std has no Unicode normalisation, so `scaffold::slug` folds the Latin-1 accented range by hand and lets everything else become a dash. `Café notes` matches on both sides; a Cyrillic or CJK title does not — it slugs to `untitled` in the CLI. The ref still identifies the note either way. | A vault in a non-Latin script, or a Unicode crate arriving for another reason. |
 | **Two `register` processes can still race** | `create` checks the name is free and then writes, and the check is outside the vault's write lock. One process cannot collide with itself; two can. Same root cause as the P2 entry on cross-process writes. | The same trigger as that entry — anyone running two instances over one vault. |

@@ -32,8 +32,13 @@ jobs:
       - uses: actions/checkout@v7
         with: { fetch-depth: 0 }       # shallow clone would measure the tree, not the repo
       - run: |
+          set -euo pipefail
           KB=$(git count-objects -v | awk '/size-pack/ {print $2}')
-          echo "pack ${KB} KB"; test "$KB" -lt 5120
+          echo "pack ${KB} KB of 5120 KB"
+          # A clone that was never packed reports 0, and `0 -lt 5120` is a pass
+          # that measured nothing. Refuse to call that green.
+          test -n "$KB" && test "$KB" -gt 0
+          test "$KB" -lt 5120
   e2e:
     runs-on: ubuntu-latest
     steps:
@@ -61,3 +66,14 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: failure()
         with: { name: playwright-traces, path: app/test-results, retention-days: 7 }
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # Installed rather than pulled from a third-party action: this repo has
+      # four crate dependencies and the point of the job is supply chain.
+      - run: cargo install cargo-audit --locked
+      # The check that would have found RUSTSEC-2025-0068 — the unsound
+      # `serde_yml` — without ADR-001 having to find it by reading advisories.
+      - run: cargo audit --deny warnings
