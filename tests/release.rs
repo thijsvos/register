@@ -189,3 +189,27 @@ fn ci_runs_the_same_gates_a_phase_is_judged_by() {
     // forwards the `--`, and the script has been plain `vitest run` since P1.
     assert!(!ci.contains("pnpm test --"), "stale flag in the test step");
 }
+
+#[test]
+fn the_documented_compose_command_rebuilds() {
+    // `docker compose up` silently reuses the last image it built, so a change
+    // you just made is absent and the symptom is indistinguishable from the
+    // code not working. Documenting the form that does not rebuild is worse
+    // than documenting nothing.
+    let readme = read("README.md");
+    let compose_lines: Vec<&str> = readme
+        .lines()
+        .filter(|line| line.contains("docker compose") && line.contains("up"))
+        .collect();
+
+    assert!(
+        !compose_lines.is_empty(),
+        "the README stopped documenting it"
+    );
+    for line in compose_lines {
+        assert!(
+            line.contains("--build"),
+            "the README teaches a compose command that reuses a stale image: {line}"
+        );
+    }
+}

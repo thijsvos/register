@@ -110,8 +110,14 @@ register-notes`.
 ### Container
 
 ```sh
-VAULT_PATH=~/vault docker compose -f deploy/docker-compose.yml up -d
+VAULT_PATH=~/vault docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+**`--build` is not optional when you are building from source.** Without it,
+compose reuses whatever image it built last time — so your changes are simply
+absent, and the symptom is identical to the code not working. It cost an
+investigation here before it was written down. Drop the flag only when you are
+running a published image you have not modified.
 
 Serves on `http://localhost:7777` against the folder you mounted. The image is
 three stages down to `scratch`, so it is the binary and nothing else — no shell,

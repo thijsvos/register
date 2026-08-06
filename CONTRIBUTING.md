@@ -96,6 +96,10 @@ is not in the binary until you `cargo install --path . --force`, and the
 symptom is a fix that appears not to work. `register serve --assets app/dist`
 reads the UI from disk instead, which is the fast loop for anything visual.
 
+The container has the same shape of trap: `docker compose up` reuses the image
+it built last time, so building from source needs `up --build` or your change is
+not in there at all.
+
 `pnpm e2e` needs the binary built first (`pnpm build && cargo build --release`),
 because it drives the shipped artefact rather than a dev server — every §06
 budget is a claim about what ships.
