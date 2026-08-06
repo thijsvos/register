@@ -129,11 +129,38 @@ test('idle RSS stays under 50 MB on a 1k-note vault', async ({ page }) => {
 })
 
 test('the palette opens on a 1k-note vault without a pause', async ({ page }) => {
+  // The precondition — a thousand bodies fetched — is slower than a default
+  // test timeout on a small runner. The assertions themselves are instant.
+  test.setTimeout(120_000)
   await page.goto(server.url)
   await expect(page.getByRole('button', { name: /Note 0999/ })).toBeVisible()
-  // The index is kept warm from boot precisely so this is not a cold build.
-  await page.waitForTimeout(2000)
 
+  // Wait for the condition, not for a duration. A thousand bodies arrive three
+  // at a time — the browser allows six connections and the user needs some —
+  // so a fixed 2 s was enough on a laptop and not on a two-core runner. How
+  // long the fill takes has no budget in §06; that ⌘K is instant once it is
+  // warm does, and conflating them made this fail for the wrong reason.
+  //
+  // Opened once and left open: ⌘K toggles, so pressing it inside the poll
+  // closes the thing being polled.
+  await page.keyboard.press('ControlOrMeta+k')
+  await expect(page.getByRole('dialog', { name: 'Command and search' })).toBeVisible()
+  await expect
+    .poll(
+      async () => {
+        // Cleared first so the query genuinely changes and the derived re-runs.
+        await page.getByRole('combobox').fill('')
+        await page.getByRole('combobox').fill('Paragraph 0500')
+        return await page.getByRole('option').count()
+      },
+      { timeout: 60_000, message: 'the search index never covered the corpus' },
+    )
+    .toBeGreaterThan(0)
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: 'Command and search' })).toBeHidden()
+
+  // Warm, so this measures opening rather than indexing.
   const started = Date.now()
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByRole('dialog', { name: 'Command and search' })).toBeVisible()
@@ -141,7 +168,7 @@ test('the palette opens on a 1k-note vault without a pause', async ({ page }) =>
 
   expect(took, `⌘K took ${took} ms to open`).toBeLessThan(250)
 
-  // And it searches the corpus, not just the titles.
+  // And it searches bodies, not just the titles the tree already carries.
   await page.getByRole('combobox').fill('Paragraph 0500')
   await expect(page.getByRole('option').first()).toContainText('Note 0500')
 })
