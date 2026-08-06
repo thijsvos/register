@@ -94,12 +94,20 @@ header {
   text-overflow: ellipsis;
 }
 
+/* The same rule as .brand, on the other side: --frame-insp so the header's
+   right hairline and the inspector's left hairline are one continuous vertical
+   line. The left pair has matched since P1 and this one never did — 15px out,
+   which in a product named after registration marks is the misalignment that
+   cannot ship. Contents stay against the right edge, so widening the cell moves
+   the rule and nothing else. */
 .stats {
   flex: none;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--s2);
   padding: 0 var(--s4);
+  min-width: var(--frame-insp);
   border-left: var(--hairline) solid var(--line);
 }
 time {
@@ -121,6 +129,13 @@ time {
 .key[aria-pressed='true'] {
   background: var(--sel-bg);
   color: var(--sel-fg);
+}
+
+/* The inspector is gone below this width (App.svelte, Inspector.svelte), so
+   there is no rule left to line up with and the reserved width would only
+   squeeze the crumb. */
+@media (max-width: 1080px) {
+  .stats { min-width: 0; }
 }
 
 @media (max-width: 760px) {

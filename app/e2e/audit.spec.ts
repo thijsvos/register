@@ -136,3 +136,52 @@ test('the LED is the only thing that animates at rest', async ({ page }) => {
   expect(animated).toHaveLength(1)
   expect(animated[0]).toContain('led')
 })
+
+test('the frame’s vertical rules are continuous through the header', async ({ page }) => {
+  // §02: "in a product named after registration marks, two rules 40px out of
+  // register is the one misalignment that cannot ship." The left pair has
+  // matched since P1. The right pair was 15px out for twelve phases, because
+  // the header's right cell was sized by its contents rather than by
+  // --frame-insp, and nothing was watching.
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Alpha/ }).click()
+  await expect(page.locator('.cm-content')).toBeVisible()
+
+  for (const width of [1600, 1400, 1200, 1100]) {
+    await page.setViewportSize({ width, height: 900 })
+    const rules = await page.evaluate(() => {
+      const edge = (selector: string, side: 'left' | 'right') => {
+        const element = document.querySelector(selector)
+        if (element === null || getComputedStyle(element).display === 'none') return null
+        return Math.round(element.getBoundingClientRect()[side])
+      }
+      return {
+        brand: edge('header .brand', 'right'),
+        index: edge('aside[aria-label="Index"]', 'right'),
+        stats: edge('header .stats', 'left'),
+        inspector: edge('aside[aria-label="Inspector"]', 'left'),
+      }
+    })
+
+    expect(rules.brand, `left rule at ${width}px`).toBe(rules.index)
+    expect(rules.stats, `right rule at ${width}px`).toBe(rules.inspector)
+  }
+
+  // Below the breakpoint the inspector is gone, so the header must stop
+  // reserving room for a rule that no longer exists.
+  await page.setViewportSize({ width: 1000, height: 900 })
+  const narrow = await page.evaluate(() => {
+    const inspector = document.querySelector('aside[aria-label="Inspector"]')
+    return {
+      // A boolean, not the node: `evaluate` cannot serialise a DOM element and
+      // hands back the string "ref: <Node>", which is truthy and proves nothing.
+      inspectorShown:
+        inspector !== null && getComputedStyle(inspector).display !== 'none',
+      reserved: Math.round(
+        document.querySelector('header .stats')?.getBoundingClientRect().width ?? 0,
+      ),
+    }
+  })
+  expect(narrow.inspectorShown).toBe(false)
+  expect(narrow.reserved).toBeLessThan(268)
+})
