@@ -43,6 +43,31 @@ $effect(() => {
 $effect(() => chrome.followOsScheme())
 $effect(() => installKeymap())
 
+// The editor chunk is fetched as soon as the frame is up, rather than when the
+// first note is clicked.
+//
+// It stays a separate chunk and still does not block first paint, which is what
+// §04's "lazy chunk" is for — but "lazy" was costing the *first* open 320 kB of
+// CodeMirror to download and parse before anything was editable, and that click
+// is the one every session begins with. Measured at 460–510 ms against §06's
+// 500 ms on a developer machine and 1222 ms on a two-core runner.
+//
+// The import is idempotent: the click awaits the same promise this started, so
+// warming overlaps the tree and corpus fetches instead of following them.
+$effect(() => {
+  const warm = () => {
+    void import('../editor')
+  }
+  // After the frame, not during it. Idle if the browser offers it; a timeout
+  // otherwise, because Safari only grew requestIdleCallback recently.
+  if (typeof requestIdleCallback === 'function') {
+    const id = requestIdleCallback(warm, { timeout: 1000 })
+    return () => cancelIdleCallback(id)
+  }
+  const id = setTimeout(warm, 0)
+  return () => clearTimeout(id)
+})
+
 // The search index is kept warm from boot rather than built when ⌘K first opens.
 // P5 budgets the palette at 16 ms to open; indexing a 1k-note vault is two orders
 // of magnitude past that, so it is paid one arriving body at a time instead —

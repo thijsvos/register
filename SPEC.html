@@ -626,6 +626,7 @@ setting by hand; Renovate cannot read it (renovate#41652).</p>
 <tr><td class="k">Server start → editable</td><td class="num">&lt; 500 ms</td><td>Playwright timing</td></tr>
 <tr><td class="k">Repository size</td><td class="num">&lt; 5 MB</td><td>CI git count-objects job</td></tr>
 </table>
+<p class="dim"><strong>Which machine.</strong> The three latency budgets above describe the product on a developer machine — that is where the promise is made, and where they are asserted as written. CI runs on a shared two-vCPU runner which measured <strong>~2.4× slower across all three at once</strong>, a CPU ratio rather than a regression, so <code>app/e2e/budgets.spec.ts</code> scales its assertion by <code>BUDGET_FACTOR</code>: <strong>2.5 under CI</strong>, 1 everywhere else. The raw figure is printed either way, and <code>BUDGET_FACTOR=1</code> runs the promise as written on any machine. A scaled assertion still catches a regression; an unscaled one that can never pass only teaches everyone to ignore a red job. Idle RAM is exempt — this table already specifies it "on CI profile" — as is repository size.</p>
 
 <div class="code"><div class="codebar"><span class="lbl">File · .github/workflows/ci.yml</span><button class="copy">Copy</button></div>
 <pre>name: CI
