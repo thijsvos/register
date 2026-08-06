@@ -91,6 +91,11 @@ cd app && pnpm check && pnpm test && pnpm build && pnpm size
 cd app && pnpm e2e          # Playwright, against the release binary
 ```
 
+**The UI is embedded in the binary.** A UI change you have only `pnpm build`-ed
+is not in the binary until you `cargo install --path . --force`, and the
+symptom is a fix that appears not to work. `register serve --assets app/dist`
+reads the UI from disk instead, which is the fast loop for anything visual.
+
 `pnpm e2e` needs the binary built first (`pnpm build && cargo build --release`),
 because it drives the shipped artefact rather than a dev server — every §06
 budget is a claim about what ships.

@@ -38,6 +38,11 @@ enum Command {
         /// Require this token from anything that is not localhost (§08 P12).
         #[arg(long)]
         token: Option<String>,
+        /// Serve the UI from this directory instead of the copy built into the
+        /// binary. For working on the UI: `--assets app/dist` means a
+        /// `pnpm build` is enough, with no reinstall.
+        #[arg(long, value_name = "DIR")]
+        assets: Option<PathBuf>,
     },
     /// Scaffold a new vault.
     Init {
@@ -69,7 +74,8 @@ async fn main() -> ExitCode {
             host,
             port,
             token,
-        } => match serve(vault, &host, port, token).await {
+            assets,
+        } => match serve(vault, &host, port, token, assets).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("{message}");
@@ -132,7 +138,13 @@ fn create(title: &str) -> Result<String, String> {
     scaffold::create(&vault, title).map_err(|error| format!("new: {error}"))
 }
 
-async fn serve(root: PathBuf, host: &str, port: u16, token: Option<String>) -> Result<(), String> {
+async fn serve(
+    root: PathBuf,
+    host: &str,
+    port: u16,
+    token: Option<String>,
+    assets: Option<PathBuf>,
+) -> Result<(), String> {
     let vault =
         vault::Vault::open(&root).map_err(|error| format!("serve {}: {error}", root.display()))?;
     let vault = Arc::new(vault);
@@ -160,9 +172,22 @@ async fn serve(root: PathBuf, host: &str, port: u16, token: Option<String>) -> R
     let _checkpoints = git::Checkpointer::start(vault.clone(), events.subscribe());
 
     // The bound address decides whether /api/reveal is available at all.
+    if let Some(dir) = assets.as_deref() {
+        if !dir.is_dir() {
+            return Err(format!("assets {}: not a directory", dir.display()));
+        }
+        // Said out loud: this is the one mode where what you are looking at is
+        // not what the binary would ship.
+        println!(
+            "register · serving the UI from {} (not the built-in copy)",
+            dir.display()
+        );
+    }
+
     let state = server::AppState::new(vault, events)
         .bound_to(addr)
-        .with_token(token);
+        .with_token(token)
+        .with_assets(assets);
     if state.guarded() {
         println!("register · remote mode: a token is required from anything but localhost");
     }

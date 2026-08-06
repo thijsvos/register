@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -776,4 +777,103 @@ async fn remote_mode_does_not_reopen_the_rebinding_hole() {
         rebound_with_token.status, 403,
         "loopback + a token skipped the Host rule"
     );
+}
+
+// ------------------------------------------------------------ --assets (dev)
+
+/// A built-UI-shaped directory, plus a secret beside it to try to reach.
+fn ui_dir() -> (TempVault, std::path::PathBuf) {
+    let tmp = TempVault::new();
+    let dist = tmp.path().join("dist");
+    fs::create_dir_all(dist.join("assets")).expect("create dist");
+    fs::write(dist.join("index.html"), "<html>from disk</html>").expect("index");
+    fs::write(dist.join("assets/app.css"), ".from{disk:1}").expect("css");
+    fs::write(tmp.path().join("secret.txt"), "not for the web").expect("secret");
+    (tmp, dist)
+}
+
+async fn start_serving(tmp: &TempVault, dist: &std::path::Path) -> SocketAddr {
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state = AppState::new(vault, events).with_assets(Some(dist.to_path_buf()));
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = serve(bound, state).await;
+    });
+    addr
+}
+
+#[tokio::test]
+async fn assets_are_served_from_disk_when_asked() {
+    // The point of the flag: a `pnpm build` is enough, with no reinstall. A
+    // stale embedded UI looks exactly like a fix that did not work, which cost
+    // real time before this existed.
+    let (tmp, dist) = ui_dir();
+    let addr = start_serving(&tmp, &dist).await;
+
+    let shell = request(addr, "GET", "/", &[], "").await;
+    assert_eq!(shell.status, 200);
+    assert_eq!(shell.body, "<html>from disk</html>");
+
+    let css = request(addr, "GET", "/assets/app.css", &[], "").await;
+    assert_eq!(css.status, 200);
+    assert_eq!(css.body, ".from{disk:1}");
+    assert_eq!(
+        css.headers.get("content-type").map(String::as_str),
+        Some("text/css; charset=utf-8")
+    );
+}
+
+#[tokio::test]
+async fn a_disk_asset_path_cannot_escape_the_directory() {
+    // The request path is the caller's, so it gets what a note path gets.
+    let (tmp, dist) = ui_dir();
+    let addr = start_serving(&tmp, &dist).await;
+
+    for escape in [
+        "/../secret.txt",
+        "/assets/../../secret.txt",
+        "/..%2fsecret.txt",
+        "/./../secret.txt",
+    ] {
+        let reply = request(addr, "GET", escape, &[], "").await;
+        assert!(
+            !reply.body.contains("not for the web"),
+            "{escape} escaped the assets directory"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_symlink_out_of_the_assets_directory_is_refused() {
+    // Lexical checks cannot see this one: every path component is ordinary.
+    let (tmp, dist) = ui_dir();
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(tmp.path().join("secret.txt"), dist.join("leak.txt"))
+        .expect("symlink");
+    let addr = start_serving(&tmp, &dist).await;
+
+    let reply = request(addr, "GET", "/leak.txt", &[], "").await;
+    assert!(
+        !reply.body.contains("not for the web"),
+        "a symlink walked out of the assets directory"
+    );
+}
+
+#[tokio::test]
+async fn an_unknown_route_still_gets_the_shell_and_an_api_path_still_does_not() {
+    // Same two rules as the embedded path: the client owns routing, and an
+    // unmatched /api/* is a routing mistake rather than a page.
+    let (tmp, dist) = ui_dir();
+    let addr = start_serving(&tmp, &dist).await;
+
+    let route = request(addr, "GET", "/some/client/route", &[], "").await;
+    assert_eq!(route.status, 200);
+    assert_eq!(route.body, "<html>from disk</html>");
+
+    let missing = request(addr, "GET", "/api/nope", &[], "").await;
+    assert_eq!(missing.status, 404);
+    assert!(missing.body.contains("no such endpoint"));
 }

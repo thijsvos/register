@@ -89,6 +89,20 @@ cd .. && cargo install --path . --force
 The `--force` matters: without it `cargo install` silently does nothing when the
 version has not changed, and you keep running the binary you built last time.
 
+**Working on the UI?** The binary carries the UI inside it, so every change
+otherwise needs that full reinstall — and a stale binary looks exactly like a
+fix that did not work. `--assets` skips it:
+
+```sh
+register serve ~/vault --assets app/dist    # from the repo root
+```
+
+Now `cd app && pnpm build` is enough; reload the browser and the change is
+there. The server says so at startup, because this is the one mode where what
+you are looking at is not what the binary would ship. For live reload while
+typing, `pnpm dev` is still faster — this is for seeing the *built* UI without
+paying for a reinstall.
+
 From v1.0 onward: prebuilt binaries on the GitHub release page for macOS
 (arm64/x64), Linux (x64/arm64, musl) and Windows x64, or `cargo install
 register-notes`.

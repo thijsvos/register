@@ -5,6 +5,7 @@
 //! for itself (§08 P5).
 
 use std::net::SocketAddr;
+use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
 
 use axum::Json;
@@ -49,6 +50,11 @@ pub struct AppState {
     /// Remote mode's shared secret (§08 P12), or `None` when there is none —
     /// which is the default, and the only state a local `register serve` has.
     token: Option<String>,
+    /// Serve the UI from this directory instead of the copy embedded at build
+    /// time. A development affordance: the binary carries the UI, so without it
+    /// every CSS change needs a full `cargo install --path . --force` before it
+    /// can be seen, and a stale binary looks exactly like a broken fix.
+    assets: Option<PathBuf>,
 }
 
 impl AppState {
@@ -58,7 +64,14 @@ impl AppState {
             events,
             local: true,
             token: None,
+            assets: None,
         }
+    }
+
+    /// Read the UI from `dir` rather than from the embedded bundle.
+    pub fn with_assets(mut self, dir: Option<PathBuf>) -> Self {
+        self.assets = dir;
+        self
     }
 
     /// Require this token from anything that is not loopback (§08 P12).
@@ -489,7 +502,56 @@ async fn pump(mut socket: WebSocket, mut events: broadcast::Receiver<Event>) {
     }
 }
 
-async fn asset(uri: Uri) -> Response {
+/// Resolve a request path inside `root`, or `None` if it would escape.
+///
+/// The directory is the operator's choice; the path is the caller's, so it gets
+/// the same treatment `vault.rs` gives a note path. Lexically first — only
+/// ordinary segments, no `..`, no absolute paths, no dot-prefixed names — and
+/// then canonicalised and checked against the root, because a symlink inside
+/// the directory would otherwise walk straight out of it.
+fn under(root: &FsPath, request: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for part in FsPath::new(request).components() {
+        match part {
+            Component::Normal(name) => {
+                if name.to_str().is_some_and(|text| text.starts_with('.')) {
+                    return None;
+                }
+                out.push(name);
+            }
+            _ => return None,
+        }
+    }
+
+    let resolved = out.canonicalize().ok()?;
+    let base = root.canonicalize().ok()?;
+    resolved.starts_with(&base).then_some(resolved)
+}
+
+/// The UI from disk, for `--assets`. `None` means "not there", never "escaped".
+fn from_disk(root: &FsPath, wanted: &str) -> Option<(&'static str, Vec<u8>)> {
+    let path = under(root, wanted).filter(|path| path.is_file())?;
+    let bytes = std::fs::read(&path).ok()?;
+    Some((media_type(&path), bytes))
+}
+
+/// The media types a built UI actually contains. A match rather than a crate:
+/// `vite build` emits exactly these, and anything else is served as bytes.
+fn media_type(path: &FsPath) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json") => "application/json",
+        Some("svg") => "image/svg+xml",
+        Some("woff2") => "font/woff2",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn asset(State(state): State<AppState>, uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
     // An unmatched /api/* is a routing mistake, never a page. Answering it with
@@ -499,6 +561,22 @@ async fn asset(uri: Uri) -> Response {
     }
 
     let wanted = if path.is_empty() { "index.html" } else { path };
+
+    if let Some(root) = state.assets.as_deref() {
+        // Same fallback as the embedded path: an unknown route is the shell,
+        // because the client owns routing.
+        return match from_disk(root, wanted).or_else(|| from_disk(root, "index.html")) {
+            Some((mime, bytes)) => {
+                (StatusCode::OK, [(header::CONTENT_TYPE, mime)], bytes).into_response()
+            }
+            None => (
+                StatusCode::NOT_FOUND,
+                format!("no UI in {}; run `cd app && pnpm build`\n", root.display()),
+            )
+                .into_response(),
+        };
+    }
+
     match Assets::get(wanted).or_else(|| Assets::get("index.html")) {
         Some(file) => (
             StatusCode::OK,
