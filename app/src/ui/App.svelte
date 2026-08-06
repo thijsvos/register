@@ -49,23 +49,17 @@ $effect(() => installKeymap())
 // It stays a separate chunk and still does not block first paint, which is what
 // §04's "lazy chunk" is for — but "lazy" was costing the *first* open 320 kB of
 // CodeMirror to download and parse before anything was editable, and that click
-// is the one every session begins with. Measured at 460–510 ms against §06's
-// 500 ms on a developer machine and 1222 ms on a two-core runner.
+// is the one every session begins with.
 //
-// The import is idempotent: the click awaits the same promise this started, so
-// warming overlaps the tree and corpus fetches instead of following them.
+// Started immediately rather than on an idle callback. Idle was the tidier
+// instinct and it was wrong: on a two-core runner boot leaves no idle before
+// the first click, so the warm never happened where it was needed most — 1222
+// ms with the idle version, unchanged from having no warm at all. This effect
+// already runs after the DOM is updated, so the fetch overlaps the tree and the
+// corpus instead of following a click, and the import is idempotent: the click
+// awaits the same promise this started.
 $effect(() => {
-  const warm = () => {
-    void import('../editor')
-  }
-  // After the frame, not during it. Idle if the browser offers it; a timeout
-  // otherwise, because Safari only grew requestIdleCallback recently.
-  if (typeof requestIdleCallback === 'function') {
-    const id = requestIdleCallback(warm, { timeout: 1000 })
-    return () => cancelIdleCallback(id)
-  }
-  const id = setTimeout(warm, 0)
-  return () => clearTimeout(id)
+  void import('../editor')
 })
 
 // The search index is kept warm from boot rather than built when ⌘K first opens.
