@@ -34,6 +34,9 @@ struct Assets;
 /// Upper bound on a single note. Generous — a note is prose, and the vault is
 /// local — but bounded, so a runaway client cannot ask the server to buffer
 /// unbounded bytes.
+/// Carries remote mode's token into the WebSocket, which can send no headers.
+const TOKEN_COOKIE: &str = "register_token";
+
 const MAX_NOTE_BYTES: usize = 16 * 1024 * 1024;
 
 #[derive(Clone)]
@@ -43,6 +46,9 @@ pub struct AppState {
     /// Whether the server is bound to a loopback interface. Gates `/api/reveal`,
     /// which is the one endpoint that starts a process.
     local: bool,
+    /// Remote mode's shared secret (§08 P12), or `None` when there is none —
+    /// which is the default, and the only state a local `register serve` has.
+    token: Option<String>,
 }
 
 impl AppState {
@@ -51,7 +57,21 @@ impl AppState {
             vault,
             events,
             local: true,
+            token: None,
         }
+    }
+
+    /// Require this token from anything that is not loopback (§08 P12).
+    pub fn with_token(mut self, token: Option<String>) -> Self {
+        // An empty `--token ""` is a mistake, not a secret. Refusing it here
+        // stops it becoming "remote mode is on and lets everyone in".
+        self.token = token.filter(|value| !value.is_empty());
+        self
+    }
+
+    /// Whether this server is in remote mode at all.
+    pub fn guarded(&self) -> bool {
+        self.token.is_some()
     }
 
     /// Record what the listener actually bound to.
@@ -59,6 +79,151 @@ impl AppState {
         self.local = addr.ip().is_loopback();
         self
     }
+}
+
+/// Whether a request carries the token remote mode requires (§08 P12).
+///
+/// Two ways in, because a browser has only one of them: `Authorization: Bearer`
+/// is what a script sends, and a cookie is what a WebSocket can carry — the
+/// WebSocket API takes no headers, so a bearer-only scheme would leave the live
+/// reload unauthenticated or unreachable. `?token=` on any request sets the
+/// cookie, so the whole flow is: open the URL once with the token in it.
+///
+/// Compared byte by byte in constant time. A token check that returns early on
+/// the first wrong character leaks its length and then its content to anyone
+/// who can time it, and this one guards a whole vault over a network.
+fn authorised(headers: &HeaderMap, uri: &Uri, expected: &str) -> bool {
+    let offered = bearer(headers)
+        .or_else(|| cookie_token(headers))
+        .or_else(|| query_token(uri));
+
+    match offered {
+        Some(token) => constant_time_eq(token.as_bytes(), expected.as_bytes()),
+        None => false,
+    }
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn bearer(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let rest = value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))?;
+    Some(rest.trim().to_owned())
+}
+
+fn cookie_token(headers: &HeaderMap) -> Option<String> {
+    let raw = headers.get(header::COOKIE)?.to_str().ok()?;
+    raw.split(';')
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == TOKEN_COOKIE)
+        .map(|(_, value)| value.to_owned())
+}
+
+fn query_token(uri: &Uri) -> Option<String> {
+    uri.query()?
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _)| *name == "token")
+        .map(|(_, value)| value.to_owned())
+}
+
+/// The gate remote mode puts in front of everything.
+///
+/// Loopback is exempt: §08 P12 requires that "localhost stays tokenless", and a
+/// request that reached 127.0.0.1 came from this machine, where the vault's
+/// files are readable anyway. Everything else must present the token, including
+/// the UI itself — serving the shell to an unauthenticated stranger tells them
+/// a vault is here and what it is called.
+/// What the gate decides. Separated from the plumbing so every combination can
+/// be tested — a real remote peer is not something a unit test has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// No token configured, or the peer is this machine, or it presented one.
+    Allow,
+    /// Allowed, and the token arrived in the URL — so hand back a cookie, which
+    /// is the only way the WebSocket can carry it afterwards.
+    AllowAndRemember,
+    Refuse,
+}
+
+/// The whole of remote mode's access rule (§08 P12).
+pub fn decide(
+    expected: Option<&str>,
+    peer_is_loopback: bool,
+    headers: &HeaderMap,
+    uri: &Uri,
+) -> Gate {
+    // No token: the default, and the entire local experience.
+    let Some(expected) = expected else {
+        return Gate::Allow;
+    };
+    // §08 P12: "localhost stays tokenless". A request that reached 127.0.0.1
+    // came from this machine, where the vault's files are readable anyway.
+    if peer_is_loopback {
+        return Gate::Allow;
+    }
+    if !authorised(headers, uri, expected) {
+        return Gate::Refuse;
+    }
+    if query_token(uri).is_some() {
+        return Gate::AllowAndRemember;
+    }
+    Gate::Allow
+}
+
+async fn token_gate(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    // Read from extensions rather than taken as an extractor: `ConnectInfo` is
+    // only there when the service was built with it, and a missing peer must
+    // mean "not loopback" rather than a rejected request.
+    let peer_is_loopback = request
+        .extensions()
+        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+        .map(|info| info.0.ip().is_loopback())
+        .unwrap_or(false);
+
+    let gate = decide(
+        state.token.as_deref(),
+        peer_is_loopback,
+        request.headers(),
+        request.uri(),
+    );
+
+    if gate == Gate::Refuse {
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::WWW_AUTHENTICATE, "Bearer")],
+            "this vault requires a token\n",
+        )
+            .into_response();
+    }
+
+    // Only a presented credential authenticates. A loopback peer is exempt from
+    // the token but is exactly who a rebinding attack runs as, so it keeps the
+    // Host rule.
+    let mut request = request;
+    if !peer_is_loopback {
+        request.extensions_mut().insert(Authenticated);
+    }
+
+    let mut response = next.run(request).await;
+    // Presenting it once is enough. HttpOnly so a script cannot read it back
+    // out, SameSite=Strict so another site cannot ride it, and no Secure flag
+    // because a tailnet is plain HTTP by default.
+    if gate == Gate::AllowAndRemember
+        && let Some(token) = state.token.as_deref()
+        && let Ok(cookie) =
+            format!("{TOKEN_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict").parse()
+    {
+        response.headers_mut().insert(header::SET_COOKIE, cookie);
+    }
+    response
 }
 
 pub fn router(state: AppState) -> Router {
@@ -89,6 +254,9 @@ pub fn router(state: AppState) -> Router {
         // note with an unexplained 413 that nothing in the codebase decided on.
         .layer(DefaultBodyLimit::max(MAX_NOTE_BYTES))
         .layer(middleware::from_fn(same_origin_only))
+        // Outside `same_origin_only`, so it runs first: an unauthenticated
+        // stranger is refused before anything reasons about their Origin.
+        .layer(middleware::from_fn_with_state(state.clone(), token_gate))
         .with_state(state)
 }
 
@@ -97,7 +265,13 @@ pub async fn listener(host: &str, port: u16) -> std::io::Result<TcpListener> {
 }
 
 pub async fn serve(listener: TcpListener, state: AppState) -> std::io::Result<()> {
-    axum::serve(listener, router(state)).await
+    // With connect info, so the token gate can tell a request from this machine
+    // from one off the network. §08 P12: "localhost stays tokenless".
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
 }
 
 // ------------------------------------------------------------------- handlers
@@ -353,7 +527,28 @@ async fn asset(uri: Uri) -> Response {
 /// Loopback origins are allowed rather than one exact origin because `pnpm dev`
 /// serves the UI from vite on another port and proxies `/api` here, so the
 /// browser sends `Origin: http://localhost:5173`.
+/// Marks a request that proved it holds remote mode's token.
+///
+/// Set by the token gate and read by the origin guard, because the two rules
+/// are about different attackers and only one of them applies at a time.
+#[derive(Clone, Copy)]
+struct Authenticated;
+
 async fn same_origin_only(request: Request, next: Next) -> Result<Response, Response> {
+    // A request that presented the token is authenticated, and the Host rule
+    // below does not apply to it.
+    //
+    // That rule exists for DNS rebinding: a hostile page whose domain resolves
+    // to 127.0.0.1 is same-origin by the browser's reckoning, so it can reach a
+    // *local* server without an Origin header. It cannot reach a remote one,
+    // and it cannot obtain the token — the cookie is HttpOnly and SameSite=Strict,
+    // so a cross-site request never carries it and script cannot read it. In
+    // remote mode the token is the check; demanding a loopback Host as well
+    // simply makes remote mode impossible, which is what it did.
+    if request.extensions().get::<Authenticated>().is_some() {
+        return Ok(next.run(request).await);
+    }
+
     // DNS rebinding closes the gap the Origin check alone leaves open. A hostile
     // page on a domain that has been rebound to 127.0.0.1 is same-origin by the
     // browser's own reckoning, so it sends NO Origin header at all and the check

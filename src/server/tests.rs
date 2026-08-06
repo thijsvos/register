@@ -77,9 +77,17 @@ async fn request(
 }
 
 async fn start(tmp: &TempVault) -> SocketAddr {
+    start_with(tmp, None).await
+}
+
+/// A server in remote mode: bound to loopback, but demanding a token from
+/// anything that is not loopback. The tests reach it over 127.0.0.1, which is
+/// exactly the exemption §08 P12 requires — so the refusals below are driven by
+/// a forged peer rather than by a real remote host.
+async fn start_with(tmp: &TempVault, token: Option<&str>) -> SocketAddr {
     let vault = Arc::new(tmp.open());
     let (events, _keep) = broadcast::channel(64);
-    let state = AppState::new(vault, events);
+    let state = AppState::new(vault, events).with_token(token.map(str::to_owned));
 
     let bound = listener("127.0.0.1", 0).await.expect("bind");
     let addr = bound.local_addr().expect("local addr");
@@ -565,4 +573,207 @@ async fn a_licensed_font_never_appears_in_the_vault_tree() {
     let tree = request(addr, "GET", "/api/tree", &[], "").await;
     assert!(!tree.body.contains("licensed"), "{}", tree.body);
     assert!(!tree.body.contains("font"), "{}", tree.body);
+}
+
+// ------------------------------------------------------------- remote mode
+
+#[test]
+fn a_token_is_compared_whole_and_in_constant_time() {
+    // Length first, then every byte — no early return on the first wrong
+    // character. This guards a whole vault over a network, and an early return
+    // leaks the token's length and then its content to anyone who can time it.
+    assert!(constant_time_eq(b"hunter2", b"hunter2"));
+    assert!(!constant_time_eq(b"hunter2", b"hunter3"));
+    assert!(!constant_time_eq(b"hunter2", b"hunter22"));
+    assert!(!constant_time_eq(b"", b"x"));
+    assert!(constant_time_eq(b"", b""));
+}
+
+#[test]
+fn a_token_is_read_from_a_header_a_cookie_or_the_query() {
+    let uri: Uri = "/api/tree".parse().expect("uri");
+    let with_query: Uri = "/?token=hunter2&x=1".parse().expect("uri");
+
+    let mut bearer_headers = HeaderMap::new();
+    bearer_headers.insert(header::AUTHORIZATION, "Bearer hunter2".parse().unwrap());
+    assert!(authorised(&bearer_headers, &uri, "hunter2"));
+
+    let mut cookie_headers = HeaderMap::new();
+    cookie_headers.insert(
+        header::COOKIE,
+        "other=1; register_token=hunter2; more=2".parse().unwrap(),
+    );
+    assert!(authorised(&cookie_headers, &uri, "hunter2"));
+
+    // The query is how the cookie gets set in the first place.
+    assert!(authorised(&HeaderMap::new(), &with_query, "hunter2"));
+
+    // And none of them accepts the wrong one, or nothing at all.
+    assert!(!authorised(&bearer_headers, &uri, "hunter3"));
+    assert!(!authorised(&HeaderMap::new(), &uri, "hunter2"));
+}
+
+#[tokio::test]
+async fn without_a_token_nothing_is_guarded() {
+    // The default, and the whole local experience: no token, no gate.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start_with(&tmp, None).await;
+
+    assert_eq!(request(addr, "GET", "/api/tree", &[], "").await.status, 200);
+}
+
+#[tokio::test]
+async fn localhost_stays_tokenless_even_in_remote_mode() {
+    // §08 P12, verbatim. A request that reached 127.0.0.1 came from this
+    // machine, where the vault's files are readable anyway.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start_with(&tmp, Some("hunter2")).await;
+
+    let reply = request(addr, "GET", "/api/tree", &[], "").await;
+    assert_eq!(reply.status, 200, "loopback was asked for a token");
+    assert!(reply.body.contains("003-a.md"));
+}
+
+#[tokio::test]
+async fn an_empty_token_is_a_mistake_not_a_secret() {
+    // `--token ""` must not read as "remote mode is on and lets everyone in".
+    let tmp = TempVault::new();
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+
+    assert!(
+        !AppState::new(vault.clone(), events.clone())
+            .with_token(Some(String::new()))
+            .guarded()
+    );
+    assert!(
+        AppState::new(vault, events)
+            .with_token(Some("hunter2".to_owned()))
+            .guarded()
+    );
+}
+
+/// Every combination of the rule §08 P12 states, including the one a unit test
+/// cannot otherwise reach: a peer that is not this machine.
+#[test]
+fn a_tokenless_remote_request_is_refused_and_localhost_is_not() {
+    let plain: Uri = "/api/tree".parse().expect("uri");
+    let carrying: Uri = "/?token=hunter2".parse().expect("uri");
+    let wrong_query: Uri = "/?token=guess".parse().expect("uri");
+
+    let none = HeaderMap::new();
+    let mut bearer = HeaderMap::new();
+    bearer.insert(header::AUTHORIZATION, "Bearer hunter2".parse().unwrap());
+    let mut cookie = HeaderMap::new();
+    cookie.insert(header::COOKIE, "register_token=hunter2".parse().unwrap());
+    let mut wrong = HeaderMap::new();
+    wrong.insert(header::AUTHORIZATION, "Bearer guess".parse().unwrap());
+
+    const REMOTE: bool = false;
+    const LOCAL: bool = true;
+
+    for (label, expected, peer, headers, uri, want) in [
+        // No token configured: the default, and nothing is guarded.
+        ("no token, remote", None, REMOTE, &none, &plain, Gate::Allow),
+        ("no token, local", None, LOCAL, &none, &plain, Gate::Allow),
+        // Configured: localhost is exempt, whatever it sends.
+        (
+            "token, local",
+            Some("hunter2"),
+            LOCAL,
+            &none,
+            &plain,
+            Gate::Allow,
+        ),
+        // …and a stranger is not. This is the clause.
+        (
+            "token, remote, nothing",
+            Some("hunter2"),
+            REMOTE,
+            &none,
+            &plain,
+            Gate::Refuse,
+        ),
+        (
+            "token, remote, wrong header",
+            Some("hunter2"),
+            REMOTE,
+            &wrong,
+            &plain,
+            Gate::Refuse,
+        ),
+        (
+            "token, remote, wrong query",
+            Some("hunter2"),
+            REMOTE,
+            &none,
+            &wrong_query,
+            Gate::Refuse,
+        ),
+        // Presented properly, three ways.
+        (
+            "token, remote, bearer",
+            Some("hunter2"),
+            REMOTE,
+            &bearer,
+            &plain,
+            Gate::Allow,
+        ),
+        (
+            "token, remote, cookie",
+            Some("hunter2"),
+            REMOTE,
+            &cookie,
+            &plain,
+            Gate::Allow,
+        ),
+        (
+            "token, remote, query",
+            Some("hunter2"),
+            REMOTE,
+            &none,
+            &carrying,
+            // Remembered, because the WebSocket that follows can send no header.
+            Gate::AllowAndRemember,
+        ),
+    ] {
+        assert_eq!(decide(expected, peer, headers, uri), want, "{label}");
+    }
+}
+
+#[tokio::test]
+async fn remote_mode_does_not_reopen_the_rebinding_hole() {
+    // The live check that found this: a valid token used to be answered 403,
+    // because the Host rule from P2 demands loopback and remote mode by
+    // definition is not. Authenticating now bypasses that rule — so this pins
+    // that the rule still holds for everyone who has *not* authenticated,
+    // which is exactly who a rebinding attack runs as.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start_with(&tmp, Some("hunter2")).await;
+
+    // A loopback peer is exempt from the token, and still may not be reached
+    // through a rebound name.
+    let rebound = request(addr, "GET", "/api/tree", &[("Host", "evil.example")], "").await;
+    assert_eq!(rebound.status, 403, "a rebound Host was allowed through");
+
+    // …even while carrying the token, because a rebinding attack cannot obtain
+    // it but could be handed one by a careless user.
+    let rebound_with_token = request(
+        addr,
+        "GET",
+        "/api/tree",
+        &[
+            ("Host", "evil.example"),
+            ("Authorization", "Bearer hunter2"),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(
+        rebound_with_token.status, 403,
+        "loopback + a token skipped the Host rule"
+    );
 }

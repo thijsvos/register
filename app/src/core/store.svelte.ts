@@ -2,6 +2,7 @@ import { isoStamp } from '../lib/time'
 import {
   ApiError,
   type Entry,
+  type GitStatus,
   getNote,
   getTree,
   type Loaded,
@@ -69,6 +70,8 @@ class VaultStore {
   vaultPath = $state<string | null>(null)
   /** The ref a new note must take. The server owns it: only it sees the trash. */
   nextRef = $state<string | null>(null)
+  /** The vault's git state, or null when it is not a repository (§08 P12). */
+  git = $state<GitStatus | null>(null)
 
   /**
    * The note changed on disk while the buffer was dirty (P4).
@@ -242,6 +245,7 @@ class VaultStore {
       this.tree = tree.notes
       this.vaultPath = tree.vault
       this.nextRef = tree.nextRef
+      this.git = tree.git
     } catch (error) {
       this.notice = describe(error)
       return

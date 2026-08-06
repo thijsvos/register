@@ -1,3 +1,4 @@
+mod git;
 mod scaffold;
 mod server;
 mod vault;
@@ -34,6 +35,9 @@ enum Command {
         /// Port to bind.
         #[arg(long, default_value_t = 7777)]
         port: u16,
+        /// Require this token from anything that is not localhost (§08 P12).
+        #[arg(long)]
+        token: Option<String>,
     },
     /// Scaffold a new vault.
     Init {
@@ -60,7 +64,12 @@ async fn main() -> ExitCode {
             println!("ok");
             ExitCode::SUCCESS
         }
-        Command::Serve { vault, host, port } => match serve(vault, &host, port).await {
+        Command::Serve {
+            vault,
+            host,
+            port,
+            token,
+        } => match serve(vault, &host, port, token).await {
             Ok(()) => ExitCode::SUCCESS,
             Err(message) => {
                 eprintln!("{message}");
@@ -123,7 +132,7 @@ fn create(title: &str) -> Result<String, String> {
     scaffold::create(&vault, title).map_err(|error| format!("new: {error}"))
 }
 
-async fn serve(root: PathBuf, host: &str, port: u16) -> Result<(), String> {
+async fn serve(root: PathBuf, host: &str, port: u16, token: Option<String>) -> Result<(), String> {
     let vault =
         vault::Vault::open(&root).map_err(|error| format!("serve {}: {error}", root.display()))?;
     let vault = Arc::new(vault);
@@ -145,8 +154,18 @@ async fn serve(root: PathBuf, host: &str, port: u16) -> Result<(), String> {
         vault.root().display()
     );
 
+    // Checkpoints run off the same event stream the UI does, so they see
+    // exactly what the watcher saw — and they are off unless the vault's own
+    // config asks for them (§08 P12).
+    let _checkpoints = git::Checkpointer::start(vault.clone(), events.subscribe());
+
     // The bound address decides whether /api/reveal is available at all.
-    let state = server::AppState::new(vault, events).bound_to(addr);
+    let state = server::AppState::new(vault, events)
+        .bound_to(addr)
+        .with_token(token);
+    if state.guarded() {
+        println!("register · remote mode: a token is required from anything but localhost");
+    }
     server::serve(listener, state)
         .await
         .map_err(|error| error.to_string())

@@ -121,6 +121,59 @@ Images are published to `ghcr.io/OWNER/register` on tags, addressable by version
 only — there is no `latest`, deliberately, because nothing should depend on a
 tag that moves under it.
 
+## Remote access, and history
+
+Both are off by default and neither adds an account, a service or any telemetry.
+
+### Git checkpoints
+
+If your vault is a git repository of its own, REGISTER can commit it for you
+after it has been quiet for 90 seconds:
+
+```jsonc
+// .register/config.json
+{ "checkpoints": true }
+```
+
+Commits are `checkpoint: 14:07Z`. It **never pushes** — that is a decision about
+somebody else's repository — and it never commits a folder that merely *contains*
+your vault, so a vault nested inside a larger repo checkpoints itself or not at
+all. Nothing changes? Nothing is committed. The status bar's GIT field shows
+`CLEAN`, `DIRTY`, or `N AHEAD` when there is an upstream to be ahead of.
+
+Turn it off by deleting the flag. Your history is ordinary git: `git log`,
+`git revert`, `git checkout` all work, because there was never anything else.
+
+### Remote mode
+
+```sh
+register serve ~/vault --host 0.0.0.0 --token "$(openssl rand -hex 24)"
+```
+
+Then open `http://<host>:7777/?token=<the token>` once. The token is stored as
+an HttpOnly cookie, which is what carries it into the WebSocket — that API
+cannot send an `Authorization` header, so a bearer-only scheme would leave live
+reload either unauthenticated or unreachable. Scripts can use
+`Authorization: Bearer <token>` instead.
+
+**Localhost stays tokenless.** A request that reached 127.0.0.1 came from the
+machine the vault is on, where the files are readable anyway.
+
+**Behind Tailscale is the intended shape** (§07). Put the machine on your
+tailnet and bind to its tailnet address rather than to the whole world:
+
+```sh
+register serve ~/vault --host "$(tailscale ip -4)" --token "$(openssl rand -hex 24)"
+```
+
+Every device you own reaches it; nothing else can route to it at all. The token
+is then a second lock rather than the only one. There is no TLS here — a tailnet
+is already encrypted, and terminating TLS is your reverse proxy's job if you put
+one in front.
+
+No accounts. No user table. No telemetry. The token is a string you chose,
+compared in constant time, and forgotten when the process exits.
+
 ## Build status
 Under construction with Claude Code, phase by phase per `SPEC.html` §08.
 

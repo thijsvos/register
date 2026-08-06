@@ -24,6 +24,9 @@ class FakeVault {
   /** Paths that answer with a status instead of their content. */
   #broken = new Map<string, number>()
 
+  /** What §08 P12's git field reports, or null for a vault that is not a repo. */
+  git: { clean: boolean; ahead: number | null } | null = null
+
   seed(path: string, body: string): void {
     this.files.set(path, { body, etag: `etag-${++this.#version}` })
     this.#remember(path)
@@ -89,7 +92,12 @@ class FakeVault {
           etag: held.etag,
         }))
         .sort((a, b) => a.path.localeCompare(b.path))
-      return json({ vault: '/tmp/fake-vault', nextRef: this.#nextRef(), notes: tree })
+      return json({
+        vault: '/tmp/fake-vault',
+        nextRef: this.#nextRef(),
+        git: this.git,
+        notes: tree,
+      })
     }
 
     const notePath = decodeURIComponent(path.replace('/api/note/', ''))
@@ -782,6 +790,21 @@ describe('new note', () => {
 
     expect(vault.tree).toHaveLength(3)
     expect(vault.files).toBe(1)
+  })
+
+  it('carries git state when the vault is a repository, and null when it is not', async () => {
+    // §02b Screen 1 has a GIT field; until P12 nothing could fill it. An
+    // unreadable shape has to read as "no git" rather than break the tree.
+    await vault.refresh()
+    expect(vault.git).toBeNull()
+
+    server.git = { clean: false, ahead: 3 }
+    await vault.refresh()
+    expect(vault.git).toEqual({ clean: false, ahead: 3 })
+
+    server.git = { clean: true, ahead: null }
+    await vault.refresh()
+    expect(vault.git).toEqual({ clean: true, ahead: null })
   })
 
   it('reports the vault path for the status bar', async () => {

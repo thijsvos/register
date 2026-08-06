@@ -14,7 +14,16 @@
 export interface Tree {
   vault: string
   nextRef: string
+  /** §08 P12: the vault's git state, or null when it is not a repository. */
+  git: GitStatus | null
   notes: Entry[]
+}
+
+/** What §02b Screen 1's GIT field shows. Derived, never stored. */
+export interface GitStatus {
+  clean: boolean
+  /** Commits the branch has that its upstream does not; null with no upstream. */
+  ahead: number | null
 }
 
 /** One row of `GET /api/tree`. */
@@ -213,7 +222,18 @@ function asTree(value: unknown): Tree {
   return {
     vault: value.vault,
     nextRef: value.nextRef,
+    git: asGit(value.git),
     notes: value.notes.map(asEntry).filter((entry): entry is Entry => entry !== null),
+  }
+}
+
+function asGit(value: unknown): GitStatus | null {
+  // Absent is the ordinary case — most vaults are not repositories — so an
+  // unreadable shape reads as "no git", never as a broken tree.
+  if (!isRecord(value) || typeof value.clean !== 'boolean') return null
+  return {
+    clean: value.clean,
+    ahead: typeof value.ahead === 'number' ? value.ahead : null,
   }
 }
 

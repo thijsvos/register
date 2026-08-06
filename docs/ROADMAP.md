@@ -104,3 +104,13 @@ validated at the boundary instead of cast. What remains:
 | **The e2e budgets are measured on one machine** | The numbers are real but they are this laptop's. §06 says the RAM budget is "an e2e measurement on CI profile", and CI has not run. A GitHub runner is slower and the thresholds may need to be honest about that rather than generous. | The first CI run of the `e2e` job. |
 | **Frontmatter is shown in the editor** | Markdown stays the literal source (§02), so every note opens with six lines of YAML above the prose. Correct by doctrine, and the caret now lands below it — but it is the first thing anyone sees, and folding it is the obvious next question. | A §02 ruling on whether folding counts as hiding the source. |
 | **`register serve` has no `--open`** | Every run prints a URL you then click. Trivial to add, and one more thing between clone and running. | The "stranger goes clone → running in two commands" claim being tested on an actual stranger. |
+
+## Parked during P12 (checkpoints + remote mode)
+
+| Item | Why it is parked | Trigger |
+|---|---|---|
+| **~~GIT is permanently dashed~~** | ~~Closed by P12.~~ The tree envelope carries `{clean, ahead}` and §02b Screen 1's GIT field shows CLEAN / DIRTY / N AHEAD, or `—` when the vault is not a repository. | — |
+| **A checkpoint sweeps the staging area** | It runs `git add -A`, so anything you had part-staged with `git add -p` joins the checkpoint. Off by default, and the alternative — committing only what the app touched — needs a list of what the app touched, which the watcher has but the committer does not. | Anyone using the index deliberately in a checkpointed vault. |
+| **`git status` runs on every tree fetch** | Cheap on a repository this size and skipped entirely for a non-repository, but the tree is fetched after every event burst, so a very large repo would pay for it repeatedly. A short-lived cache is the obvious fix and was not worth guessing at. | A vault where `git status` is slow enough to notice. |
+| **Remote mode has no TLS** | Deliberate — §07's pattern is a tailnet, which is already encrypted, and terminating TLS is a reverse proxy's job. But a user who binds `0.0.0.0` on an untrusted network sends their notes and their token in clear. The token gate cannot tell those cases apart. | An encrypted-remote milestone; §12 already lists "E2E-encrypted remote". |
+| **The token lives in one process, not in a file** | No accounts, no user table, no revocation list — the token is an argv string, so rotating it means restarting the server, and it is visible in `ps` to anyone already on the machine. Right for a tailnet; thin for anything more exposed. | The same milestone as TLS. |

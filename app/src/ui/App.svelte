@@ -15,6 +15,20 @@ import Settings from './Settings.svelte'
 import Today from './Today.svelte'
 import { chrome } from './view.svelte'
 
+/**
+ * §02b Screen 1's GIT field, finally fillable (§08 P12).
+ *
+ * `—` when the vault is not a repository, which is most of them. "Chrome shows
+ * only derivable truth" — so this says CLEAN only when git says clean, and
+ * counts ahead only when there is an upstream to be ahead of.
+ */
+let gitLabel = $derived.by(() => {
+  const state = vault.git
+  if (state === null) return null
+  if (state.ahead !== null && state.ahead > 0) return `${state.ahead} ahead`
+  return state.clean ? 'Clean' : 'Dirty'
+})
+
 let crumb = $derived(
   chrome.settings
     ? 'CONFIG / SETTINGS'
@@ -106,6 +120,7 @@ $effect(() => {
     vault={vault.vaultPath}
     files={vault.files}
     words={vault.openWords}
+    git={gitLabel}
     notice={vault.notice}
     dirty={vault.dirty}
     externalEdit={vault.externalEdit}

@@ -140,6 +140,10 @@ pub struct Tree {
     pub vault: String,
     /// The ref a new note must take.
     pub next_ref: String,
+    /// The vault's git state, or `null` when it is not a repository of its own
+    /// (§08 P12). §02b Screen 1 has a GIT field and until now nothing could
+    /// fill it.
+    pub git: Option<crate::git::Status>,
     pub notes: Vec<Entry>,
 }
 
@@ -326,6 +330,10 @@ impl Vault {
         Ok(Tree {
             vault: self.root.display().to_string(),
             next_ref: self.next_ref()?,
+            // Cheap when the vault is not a repository — one `rev-parse` — and
+            // the tree is already a blocking walk of the whole vault, so a
+            // `git status` on top of it is not what makes this call expensive.
+            git: crate::git::status(&self.root),
             notes: self.list()?,
         })
     }
