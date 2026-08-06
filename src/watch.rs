@@ -10,7 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use notify::event::{AccessKind, AccessMode};
+use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::{Instant, timeout_at};
@@ -141,6 +142,28 @@ fn absorb(
     // so this must be checked before iterating or the signal is lost entirely.
     if event.need_rescan() {
         return true;
+    }
+
+    // Reading a note is not changing it.
+    //
+    // This is the one place the event *kind* has to be consulted, and it is
+    // portable to do so here: an access is never a mutation on any platform.
+    // Linux makes it load-bearing — notify subscribes to `WatchMask::OPEN`, so
+    // every file the server opens to serve it produces an event. Filling the
+    // corpus of a 1k-note vault therefore generated a thousand of them, which
+    // overflowed the 256-slot broadcast, made the server hang up on the client
+    // ("client lagged, 632 dropped; closing"), and the client's reconnect
+    // re-read the whole vault — feeding the loop that caused it. macOS never
+    // showed it because FSEvents does not report opens.
+    //
+    // `Close(Write)` is deliberately NOT dropped: it is how a completed write
+    // announces itself. `Close(Read)` and `Open` are pure reads.
+    if matches!(
+        event.kind,
+        EventKind::Access(AccessKind::Open(_) | AccessKind::Read)
+            | EventKind::Access(AccessKind::Close(AccessMode::Read))
+    ) {
+        return false;
     }
 
     let mut resync = false;

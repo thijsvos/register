@@ -4,6 +4,8 @@ use std::time::Duration;
 
 use tokio::sync::broadcast;
 
+use notify::event::{AccessKind, AccessMode, DataChange, ModifyKind};
+
 use super::*;
 use crate::vault::tests::TempVault;
 
@@ -153,4 +155,45 @@ async fn the_servers_own_atomic_write_reports_one_change_not_a_temp_file() {
     assert_eq!(seen.len(), 1, "expected one event, got {seen:?}");
     assert_eq!(seen[0].change, Change::Changed);
     assert_eq!(seen[0].path, "notes/003-a.md");
+}
+
+#[tokio::test]
+async fn reading_a_note_is_not_a_change() {
+    // The regression that cost CI its e2e job. `notify` subscribes to
+    // `WatchMask::OPEN` on Linux, so every note the server opens in order to
+    // serve it produced an event; filling the corpus of a 1k-note vault made a
+    // thousand of them, overflowed the broadcast, and the client's reconnect
+    // re-read the vault that had caused it. macOS cannot reproduce it —
+    // FSEvents does not report opens — so this drives `absorb` directly.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
+    let vault = tmp.open();
+    let path = tmp.path().join("notes/003-a.md");
+
+    let mut pending = HashSet::new();
+
+    for ignored in [
+        AccessKind::Open(AccessMode::Any),
+        AccessKind::Read,
+        AccessKind::Close(AccessMode::Read),
+    ] {
+        let event = notify::Event::new(EventKind::Access(ignored)).add_path(path.clone());
+        assert!(
+            !absorb(&vault, Ok(event), &mut pending),
+            "{ignored:?} asked for a resync"
+        );
+        assert!(pending.is_empty(), "{ignored:?} was treated as a change");
+    }
+
+    // A finished write still announces itself, on the same Access branch.
+    let closed = notify::Event::new(EventKind::Access(AccessKind::Close(AccessMode::Write)))
+        .add_path(path.clone());
+    absorb(&vault, Ok(closed), &mut pending);
+    assert_eq!(pending.len(), 1, "a completed write went unnoticed");
+
+    pending.clear();
+    let modified =
+        notify::Event::new(EventKind::Modify(ModifyKind::Data(DataChange::Any))).add_path(path);
+    absorb(&vault, Ok(modified), &mut pending);
+    assert_eq!(pending.len(), 1, "an ordinary write went unnoticed");
 }
