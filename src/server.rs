@@ -728,21 +728,58 @@ impl Authenticated {
 /// anywhere, so a restrictive `default-src` costs nothing and turns any future
 /// injected `<script src>` into a console error instead of vault access.
 /// `form-action 'none'` because there is no form to submit anywhere.
+/// The ` ws://host wss://host` fragment for this request's own origin, or empty.
+///
+/// `connect-src 'self'` ought to cover a same-origin WebSocket, and in Chromium
+/// it does. Not everywhere: WebKit has long treated `ws:` as a scheme distinct
+/// from the document's `http:` and refused it under `'self'`. A blocked socket
+/// makes `new WebSocket` *throw* rather than fire `onerror`, so the client never
+/// reaches its reconnect path and the WATCHER lamp stays dark for the session.
+/// Naming the authority removes the argument.
+///
+/// Sanitised because the result is interpolated into a policy: a `;` in the Host
+/// header would end the directive and begin one of the sender's choosing.
+fn socket_origin(headers: &HeaderMap) -> String {
+    headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .filter(|host| {
+            !host.is_empty()
+                && host.len() <= 255
+                && host
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b":.-[]".contains(&b))
+        })
+        .map(|host| format!(" ws://{host} wss://{host}"))
+        .unwrap_or_default()
+}
+
 async fn hardening_headers(request: Request, next: Next) -> Response {
-    const POLICY: &str = "default-src 'self'; \
+    // `connect-src 'self'` ought to cover a same-origin WebSocket, and in
+    // Chromium it does. Not everywhere: WebKit has long treated `ws:` as a
+    // different scheme from the document's `http:` and refused it under
+    // `'self'` — and a blocked socket makes `new WebSocket` *throw*, so the
+    // client never even reaches its reconnect path and the WATCHER lamp stays
+    // dark for good. Naming the origin's own authority removes the argument.
+    let same_origin_socket = socket_origin(request.headers());
+
+    let policy = format!(
+        "default-src 'self'; \
          frame-ancestors 'none'; \
          form-action 'none'; \
          base-uri 'none'; \
          object-src 'none'; \
          img-src 'self' data: blob:; \
          font-src 'self' data: blob:; \
-         connect-src 'self'; \
-         style-src 'self' 'unsafe-inline'";
+         connect-src 'self'{same_origin_socket}; \
+         style-src 'self' 'unsafe-inline'"
+    );
+    let policy = policy.as_str();
 
     let mut response = next.run(request).await;
     let headers = response.headers_mut();
     for (name, value) in [
-        (header::CONTENT_SECURITY_POLICY, POLICY),
+        (header::CONTENT_SECURITY_POLICY, policy),
         (header::X_FRAME_OPTIONS, "DENY"),
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         // The token can arrive in a URL once, before the redirect swaps it for a

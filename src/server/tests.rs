@@ -1151,3 +1151,42 @@ async fn an_unknown_route_still_gets_the_shell_and_an_api_path_still_does_not() 
     assert_eq!(missing.status, 404);
     assert!(missing.body.contains("no such endpoint"));
 }
+
+#[test]
+fn the_policy_names_this_origins_socket_and_nothing_else() {
+    let with = |host: &str| {
+        let mut headers = HeaderMap::new();
+        if let Ok(value) = host.parse() {
+            headers.insert(header::HOST, value);
+        }
+        socket_origin(&headers)
+    };
+
+    // The ordinary shapes, including IPv6 in brackets and a bare name.
+    assert_eq!(
+        with("127.0.0.1:7777"),
+        " ws://127.0.0.1:7777 wss://127.0.0.1:7777"
+    );
+    assert_eq!(with("localhost"), " ws://localhost wss://localhost");
+    assert_eq!(with("[::1]:7777"), " ws://[::1]:7777 wss://[::1]:7777");
+    assert_eq!(
+        with("vault.tail1234.ts.net"),
+        " ws://vault.tail1234.ts.net wss://vault.tail1234.ts.net"
+    );
+
+    // Anything that could end the directive and start another is dropped whole,
+    // rather than escaped — there is no escaping in CSP, and a header this
+    // strange is not a request worth accommodating.
+    for hostile in [
+        "evil;script-src *",
+        "evil' 'unsafe-inline",
+        "evil example",
+        "evil\tx",
+        "",
+    ] {
+        assert_eq!(with(hostile), "", "{hostile:?} reached the policy");
+    }
+
+    // No Host at all: fall back to `'self'` alone rather than to a broken policy.
+    assert_eq!(socket_origin(&HeaderMap::new()), "");
+}

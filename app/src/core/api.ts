@@ -152,7 +152,20 @@ export function openEvents(handlers: {
 
   const connect = () => {
     if (closed) return
-    socket = new WebSocket(url)
+    try {
+      socket = new WebSocket(url)
+    } catch {
+      // `new WebSocket` throws — it does not fire `onerror` — when the socket is
+      // refused before it opens, which a Content-Security-Policy that does not
+      // cover `ws:` will do. Uncaught, that killed this function on the first
+      // call: no handler ran, no retry was ever scheduled, and the WATCHER lamp
+      // stayed dark for the rest of the session with nothing in the console
+      // after the initial violation. The reconnect loop is the whole point of
+      // this function, so it has to survive its own first attempt failing.
+      handlers.onConnected(false)
+      retry = setTimeout(connect, RECONNECT_MS)
+      return
+    }
 
     socket.onopen = () => {
       handlers.onConnected(true)
