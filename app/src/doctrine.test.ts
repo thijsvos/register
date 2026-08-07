@@ -7,11 +7,12 @@
  * new dependency: every source is read through Vite's own glob, not node:fs.
  */
 import { describe, expect, it } from 'vitest'
+import indexHtml from '../index.html?raw'
 // Stylesheets and index.html are imported explicitly with ?raw. They cannot come
 // from import.meta.glob: Vite's CSS pipeline outranks the ?raw query there and
 // hands back an empty string, which would make every assertion below pass
 // vacuously against exactly the files that matter most.
-import indexHtml from '../index.html?raw'
+import bootJs from '../public/boot.js?raw'
 import baseCss from './styles/base.css?raw'
 import tokensCss from './styles/tokens.css?raw'
 import viewState from './ui/view.svelte.ts?raw'
@@ -209,10 +210,22 @@ describe('frame geometry (§02 component doctrine)', () => {
 
 describe('boot & theme (§02)', () => {
   it('applies the OS scheme before first paint', () => {
-    expect(indexHtml).toMatch(/prefers-color-scheme:\s*dark/)
-    expect(indexHtml).toMatch(/classList\.add\(['"]dark['"]\)/)
-    // The boot script must be inline in <head>, not a deferred module.
-    expect(indexHtml).toMatch(/<head>[\s\S]*prefers-color-scheme[\s\S]*<\/head>/)
+    // It used to be an inline <script>, and the server's CSP — `default-src
+    // 'self'` with no `script-src` — silently blocked it. v0.3.0 shipped that
+    // way: every load logged a violation and booted in the wrong scheme. So the
+    // bootstrap is a real file now, and this asserts the property rather than
+    // the old spelling.
+    expect(bootJs).toMatch(/prefers-color-scheme:\s*dark/)
+    expect(bootJs).toMatch(/classList\.add\(['"]dark['"]\)/)
+
+    // Still synchronous and still in <head>, or it does not beat the paint.
+    expect(indexHtml).toMatch(/<head>[\s\S]*<script src="\/boot\.js">[\s\S]*<\/head>/)
+    expect(indexHtml).not.toMatch(
+      /<script src="\/boot\.js"[^>]*\b(defer|async|type="module")/,
+    )
+
+    // And no inline script anywhere, because the policy forbids executing one.
+    expect(indexHtml).not.toMatch(/<script(?![^>]*\bsrc=)[^>]*>/)
   })
 
   it('declares color-scheme per theme', () => {

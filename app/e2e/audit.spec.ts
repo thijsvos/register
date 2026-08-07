@@ -44,7 +44,12 @@ test('a whole session without touching the mouse', async ({ page }) => {
   await page.keyboard.press('Escape')
   await expect(page.locator('.cm-content')).not.toBeFocused()
 
-  // ] and [ toggle the panes; I inverts. All bare keys, all from <body>.
+  // ] and [ toggle the panes. All bare keys, all from <body>.
+  //
+  // `I` is not here, and this comment used to claim it was — it said "I inverts"
+  // and then pressed neither. INV was broken from P9 until someone opened the
+  // app and clicked it; a comment is not a test. It has its own now, in
+  // inv.spec.ts, which asserts the class actually flips.
   await page.keyboard.press(']')
   await expect(page.getByRole('complementary', { name: 'Inspector' })).toBeHidden()
   await page.keyboard.press(']')

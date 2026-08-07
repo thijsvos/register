@@ -1,4 +1,5 @@
 <script lang="ts">
+import { untrack } from 'svelte'
 import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
@@ -50,9 +51,17 @@ $effect(() => {
   void settings.start()
 })
 // Re-applied whenever the stored scheme moves, including the moment it arrives.
+//
+// `untrack` because `applyScheme` reads `chrome.dark`, and a `$effect` tracks
+// every reactive read inside it — including ones inside the functions it calls.
+// Without it this effect depended on `chrome.dark` as well as on the setting, so
+// INV set `dark`, the effect woke, and `applyScheme` put it straight back to the
+// stored scheme. The button and the `i` key both looked dead.
+//
+// The dependency that is wanted is read explicitly above.
 $effect(() => {
   void settings.scheme
-  chrome.applyScheme()
+  untrack(() => chrome.applyScheme())
 })
 $effect(() => chrome.followOsScheme())
 $effect(() => installKeymap())
