@@ -38,7 +38,7 @@ $effect(() => {
   <div class="crumb">{crumb}</div>
   <div class="stats">
     <time datetime={clock.replace(' ', 'T')}>{clock}</time>
-    <button class="key" aria-pressed={pressed} title="Invert display" onclick={oninvert}>
+    <button class="key" aria-pressed={pressed} title="Switch light or dark" onclick={oninvert}>
       INV
     </button>
     <!-- §01: every control shows its key, and §02b Screen 1 draws it here. -->

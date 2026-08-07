@@ -11,9 +11,11 @@ test.beforeAll(async () => {
 })
 test.afterAll(async () => await server.stop())
 
-test('a chosen scheme survives a reload; INV does not', async ({ page }) => {
+test('a chosen scheme survives a reload, however it was chosen', async ({ page }) => {
   const dark = () =>
     page.evaluate(() => document.documentElement.classList.contains('dark'))
+  const storedScheme = async () =>
+    (await (await page.request.get(`${server.url}/api/config`)).json()).scheme
 
   await page.goto(server.url)
   await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
@@ -25,19 +27,34 @@ test('a chosen scheme survives a reload; INV does not', async ({ page }) => {
   await page.getByRole('button', { name: 'Light', exact: true }).click()
   await expect.poll(dark, { timeout: 2000 }).toBe(false)
 
-  // It must be in the vault, not in the tab.
-  const stored = await (await page.request.get(`${server.url}/api/config`)).json()
-  expect(stored.scheme).toBe('light')
+  // It must be in the vault, not in the tab. Polled, not read once: the class
+  // flips synchronously and the PUT is still in flight behind it, so a single
+  // read races the write and fails only under load — which is exactly when the
+  // whole suite runs.
+  await expect.poll(storedScheme, { timeout: 3000 }).toBe('light')
 
   await page.reload()
   await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
   await expect.poll(dark, { timeout: 3000 }).toBe(false)
 
-  // INV is a transient inversion by design — the spec says "INV inverts", and
-  // §02b Screen 6 is where a scheme is chosen. So it must NOT survive a reload.
+  // INV is the same act as pressing Light or Dark, so it persists too. It used
+  // to be a preview — press it, get light, refresh, get dark — which read as a
+  // broken button, and the distinction was never visible on screen.
   await page.keyboard.press('Escape')
   await page.keyboard.press('i')
   await expect.poll(dark, { timeout: 2000 }).toBe(true)
+
+  await expect
+    .poll(storedScheme, { timeout: 3000, message: 'INV did not reach the vault' })
+    .toBe('dark')
+
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
+  await expect.poll(dark, { timeout: 3000 }).toBe(true)
+
+  // And back again by the button, still persisting.
+  await page.getByRole('button', { name: 'INV' }).click()
+  await expect.poll(dark, { timeout: 2000 }).toBe(false)
   await page.reload()
   await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
   await expect.poll(dark, { timeout: 3000 }).toBe(false)

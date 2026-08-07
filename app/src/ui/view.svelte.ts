@@ -57,12 +57,16 @@ class ChromeState {
   }
 
   /**
-   * INV means "inverted from what was chosen", not "dark is on" — otherwise a
-   * user whose OS is dark boots with the key already lit for a state they never
-   * entered.
+   * Lit when the display differs from what the OS asked for.
+   *
+   * Measured against the OS rather than against the stored scheme, because INV
+   * now *is* the stored scheme: comparing it against its own result would leave
+   * the key unlit the instant it took effect. The property the old comparison
+   * was protecting still holds — a user whose OS is dark and who has chosen
+   * nothing boots with the key dark, not lit for a state they never entered.
    */
   get inverted(): boolean {
-    return this.dark !== this.#preferred
+    return this.dark !== this.#osScheme.matches
   }
 
   /** Put the stored scheme on the document. Idempotent; safe from an effect. */
@@ -75,11 +79,27 @@ class ChromeState {
     })
   }
 
+  /**
+   * Choose the other scheme, and keep it.
+   *
+   * INV used to be a preview: it flipped the class and nothing else, so a reload
+   * put the stored scheme straight back. That reads as a broken button —
+   * press it, get light, refresh, get dark — and the distinction between "invert
+   * the display" and "choose a scheme" was never visible on screen. It is now
+   * the same act as pressing Light or Dark in §02b Screen 6.
+   *
+   * Applied first and saved after: the paint is what the user is waiting for,
+   * and the write is a file. `applyScheme` will not fight it — by the time the
+   * stored scheme lands, the document already agrees with it and its early
+   * return holds.
+   */
   invert(): void {
+    const wanted = this.dark ? 'light' : 'dark'
     measure(() => {
       this.dark = !this.dark
       document.documentElement.classList.toggle('dark', this.dark)
     })
+    void settings.setScheme(wanted)
   }
 
   /**

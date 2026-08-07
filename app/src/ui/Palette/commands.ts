@@ -54,7 +54,7 @@ export function allCommands(): Command[] {
     },
     {
       id: 'invert',
-      label: 'INVERT DISPLAY',
+      label: 'INVERT DISPLAY / LIGHT & DARK',
       keys: 'I',
       run: () => chrome.invert(),
     },

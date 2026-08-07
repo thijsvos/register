@@ -194,7 +194,7 @@ own key — so this table is a convenience, not a manual.
 | `G` `I` | The inbox, note `000` |
 | `G` `T` | TODAY, the chord form |
 | `N` | New note |
-| `I` | Invert display |
+| `I` | Switch light ↔ dark — kept in the vault, same as Settings |
 | `[` · `]` | Toggle the index · the inspector |
 | `Esc` | Leave the editor — the caret vanishing is the mode indicator |
 | `↵` | Back into the editor |
@@ -222,7 +222,7 @@ exist creates it.
 
 **Settings** (`GO · SETTINGS / BYOF` in ⌘K) holds three things, none of them in
 browser storage: the scheme (light, dark, or press the lit one again to follow
-the OS) and the body face (Commit, or Server Mono as a "teletype" theme), both
+the OS — `I` and the INV key do the same thing and are kept the same way) and the body face (Commit, or Server Mono as a "teletype" theme), both
 written to `.register/config.json`; and BYOF, whose font bytes go to
 `.register/fonts/` — a directory `register init --git` adds to `.gitignore`,
 because a licensed face is yours and not the repository's. See below.
