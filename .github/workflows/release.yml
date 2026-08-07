@@ -180,6 +180,11 @@ jobs:
           # `dist/*` by bash rather than erroring, so without this the failure
           # arrives as gh complaining about a filename.
           test "$(ls -1 dist | wc -l)" -eq 5
+          # Something to verify a download against. Not a signature — that wants
+          # a key and a policy for it — but it closes the case where a mirror or
+          # a broken transfer hands someone a binary that is not this one.
+          ( cd dist && sha256sum * > SHA256SUMS )
+          cat dist/SHA256SUMS
           # Idempotent: a re-run after a dropped runner or a transient failure
           # should converge rather than fail on "a release with that tag already
           # exists" — after rebuilding everything.

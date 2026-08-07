@@ -34,6 +34,11 @@ RUN cargo build --release --locked
 
 FROM scratch
 COPY --from=server /build/target/release/register /register
+# A bare `docker run` should not be root. compose overrides this with the host
+# user's own ids so the mounted vault comes out theirs; this is only the default
+# for someone who runs the image directly. Numeric because `scratch` has no
+# /etc/passwd to name anyone.
+USER 1000:1000
 VOLUME /vault
 EXPOSE 7777
 # 0.0.0.0 because a published port needs it, not because the server is meant to

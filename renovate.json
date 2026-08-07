@@ -6,6 +6,15 @@
   "labels": ["dependencies"],
   "prConcurrentLimit": 3,
   "minimumReleaseAge": "7 days",
+  "customManagers": [
+    {
+      "description": "The `audit` job installs cargo-audit at a pinned version, because a supply-chain gate that installs an unpinned tool on every run is a gate a third party can change without a commit here. Pinning it created the other half of the problem — a version nothing watches — so this is the thing that watches it.",
+      "customType": "regex",
+      "managerFilePatterns": ["/^\\.github/workflows/.+\\.ya?ml$/"],
+      "matchStrings": ["cargo install (?<depName>[a-z0-9-]+) --version (?<currentValue>[0-9.]+)"],
+      "datasourceTemplate": "crate"
+    }
+  ],
   "packageRules": [
     {
       "description": "pnpm 11 refuses to resolve lockfile entries younger than its own minimumReleaseAge (1440 min) and CI installs --frozen-lockfile, so a fresh release would break the install. Seven days clears that window sevenfold. Note Renovate cannot read pnpm's setting itself (renovate#41652), so the two are kept in step by hand.",

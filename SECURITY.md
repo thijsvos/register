@@ -45,8 +45,17 @@ when you move away from it.
 
 **Out of scope:**
 
-- Anything requiring an attacker who already runs code as you. They can read the
-  vault directly; the server is not the boundary.
+- Anything requiring an attacker who already runs code as **you**. They can read
+  the vault directly; the server is not the boundary.
+
+  A *different* local user is a different question, and the honest answer is that
+  the server does not check. "Loopback" is taken to mean "the owner", and on a
+  shared host it does not: a vault you chmod 700 is protected by the filesystem
+  from other uids, and the server hands them the same read, write and delete over
+  127.0.0.1. Closing it needs a peer credential, which TCP does not carry
+  portably — a Unix socket would, and that is a change to §04's API surface
+  rather than a patch. Until then: do not run `register serve` on a multi-user
+  machine you do not trust, or run it with a token even on loopback.
 - The tokenless loopback default itself. It is a documented decision (§08 P12,
   "localhost stays tokenless"), not an oversight. A same-host reverse proxy
   inherits that exemption and must therefore carry its own authentication — no

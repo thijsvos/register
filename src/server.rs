@@ -339,6 +339,7 @@ pub fn router(state: AppState) -> Router {
         // §04 puts no cap on a note, and a 2 MiB limit would reject a large
         // note with an unexplained 413 that nothing in the codebase decided on.
         .layer(DefaultBodyLimit::max(MAX_NOTE_BYTES))
+        .layer(middleware::from_fn(hardening_headers))
         .layer(middleware::from_fn(same_origin_only))
         // Outside `same_origin_only`, so it runs first: an unauthenticated
         // stranger is refused before anything reasons about their Origin.
@@ -598,7 +599,24 @@ fn under(root: &FsPath, request: &str) -> Option<PathBuf> {
 
     let resolved = out.canonicalize().ok()?;
     let base = root.canonicalize().ok()?;
-    resolved.starts_with(&base).then_some(resolved)
+    if !resolved.starts_with(&base) {
+        return None;
+    }
+
+    // The dot check above reads the *request*; this one reads where it landed.
+    // A symlink inside the assets root whose own name has no dot — `pub` ->
+    // `.private` — satisfies the first check and still resolves into a hidden
+    // directory, and because the target is inside the root the containment test
+    // is happy too. Both halves have to agree on what is hidden.
+    let hidden = resolved
+        .strip_prefix(&base)
+        .ok()?
+        .components()
+        .any(|part| match part {
+            Component::Normal(name) => name.to_str().is_some_and(|text| text.starts_with('.')),
+            _ => true,
+        });
+    (!hidden).then_some(resolved)
 }
 
 /// The UI from disk, for `--assets`. `None` means "not there", never "escaped".
@@ -696,6 +714,47 @@ impl Authenticated {
     fn earned_by(gate: Gate) -> Option<Self> {
         gate.proved_the_token().then_some(Self)
     }
+}
+
+/// Headers on every response, for the attacks the Origin rule cannot reach.
+///
+/// The origin guard decides who may *make* a request. None of it stops a hostile
+/// page from putting the UI in an invisible iframe and letting the user click
+/// through it, because that page never makes a request at all — the browser does,
+/// as a top-level navigation the user appears to have asked for.
+///
+/// `frame-ancestors 'none'` is the one that matters; `X-Frame-Options` repeats it
+/// for anything that predates CSP. The rest is cheap: the UI loads nothing from
+/// anywhere, so a restrictive `default-src` costs nothing and turns any future
+/// injected `<script src>` into a console error instead of vault access.
+/// `form-action 'none'` because there is no form to submit anywhere.
+async fn hardening_headers(request: Request, next: Next) -> Response {
+    const POLICY: &str = "default-src 'self'; \
+         frame-ancestors 'none'; \
+         form-action 'none'; \
+         base-uri 'none'; \
+         object-src 'none'; \
+         img-src 'self' data: blob:; \
+         font-src 'self' data: blob:; \
+         connect-src 'self'; \
+         style-src 'self' 'unsafe-inline'";
+
+    let mut response = next.run(request).await;
+    let headers = response.headers_mut();
+    for (name, value) in [
+        (header::CONTENT_SECURITY_POLICY, POLICY),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        // The token can arrive in a URL once, before the redirect swaps it for a
+        // cookie. Until that redirect lands, this is what keeps it out of the
+        // Referer of anything the page links to.
+        (header::REFERRER_POLICY, "no-referrer"),
+    ] {
+        if let Ok(value) = value.parse() {
+            headers.insert(name, value);
+        }
+    }
+    response
 }
 
 async fn same_origin_only(request: Request, next: Next) -> Result<Response, Response> {

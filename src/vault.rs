@@ -522,14 +522,28 @@ impl Vault {
     // Both are single fixed paths: nothing a caller sends chooses a filename,
     // so there is no traversal surface here at all.
 
-    fn app_file(&self, name: &str) -> PathBuf {
-        self.root.join(APP_DIR).join(name)
+    /// A path inside `.register/`, verified to be inside it.
+    ///
+    /// The API cannot reach `.register/` — `resolve` rejects every dot-prefixed
+    /// segment — so for a long time these paths were built by joining and used
+    /// directly. That is fine right up until the vault comes from somewhere
+    /// else: git preserves symlinks, so a cloned vault whose
+    /// `.register/config.json` or `.register/fonts/body.woff2` is a link to
+    /// `/etc/passwd` had that file read and served, because nothing here did
+    /// what `resolve` does for notes.
+    ///
+    /// Same component walk, same rule: a link anywhere in the chain, including
+    /// the final one, is refused.
+    fn app_file(&self, name: &str) -> Result<PathBuf> {
+        let path = self.root.join(APP_DIR).join(name);
+        self.verify_contained(&path)?;
+        Ok(path)
     }
 
     /// `.register/config.json` — §04's "theme, fonts, flags". `{}` when absent,
     /// because a vault without a config has made no choices, not an error.
     pub fn read_config(&self) -> Result<String> {
-        match fs::read_to_string(self.app_file(CONFIG_FILE)) {
+        match fs::read_to_string(self.app_file(CONFIG_FILE)?) {
             Ok(text) => Ok(text),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok("{}".to_owned()),
             Err(e) => Err(Error::Io(e)),
@@ -540,7 +554,7 @@ impl Vault {
         let _writing = self.lock();
         self.require_root()?;
 
-        let path = self.app_file(CONFIG_FILE);
+        let path = self.app_file(CONFIG_FILE)?;
         // A vault made by hand rather than by `register init` has no
         // `.register/` at all, and the first setting anyone changes is where
         // that shows up.
@@ -551,7 +565,11 @@ impl Vault {
     /// The stored BYOF face and its media type, if the user has loaded one.
     pub fn font(&self) -> Option<(PathBuf, &'static str)> {
         for format in FONT_FORMATS {
-            let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+            let Ok(path) = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension))
+            else {
+                // A linked font is not served rather than being followed.
+                continue;
+            };
             if path.is_file() {
                 return Some((path, format.media_type));
             }
@@ -574,8 +592,9 @@ impl Vault {
         // for `font()` to find by extension order.
         self.remove_font_locked()?;
 
-        let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+        let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension))?;
         fs::create_dir_all(path.parent().ok_or(Error::InvalidPath)?)?;
+        self.verify_parent(path.parent().ok_or(Error::InvalidPath)?)?;
         write_atomically(&path, bytes)
     }
 
@@ -587,7 +606,10 @@ impl Vault {
 
     fn remove_font_locked(&self) -> Result<()> {
         for format in FONT_FORMATS {
-            let path = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension));
+            let Ok(path) = self.app_file(&format!("{FONTS_DIR}/{FONT_STEM}.{}", format.extension))
+            else {
+                continue;
+            };
             match fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == io::ErrorKind::NotFound => {}

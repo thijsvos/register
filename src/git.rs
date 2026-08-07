@@ -81,13 +81,25 @@ const DISARM: &[&str] = &[
 /// See [`DISARM`]. `filter.*` is handled separately in [`disarm_filters`],
 /// because those keys are named by the attacker and cannot be listed in advance.
 pub(crate) fn hardened(root: &Path) -> Command {
+    hardened_for(root, true)
+}
+
+/// The same, but skipping the filter lookup for subcommands that cannot run one.
+///
+/// `disarm_filters` costs a process, and `/api/tree` runs three git commands per
+/// request. Only `status`, `add` and `commit` put content through a filter, so
+/// the other two pay nothing — measured as the difference between four and six
+/// spawns per tree request.
+fn hardened_for(root: &Path, runs_filters: bool) -> Command {
     let mut command = Command::new("git");
     command.arg("--no-pager");
     for setting in DISARM {
         command.arg("-c").arg(setting);
     }
-    for setting in disarm_filters(root) {
-        command.arg("-c").arg(setting);
+    if runs_filters {
+        for setting in disarm_filters(root) {
+            command.arg("-c").arg(setting);
+        }
     }
     // Ambient git state overrides `-C` entirely, so a server started from inside
     // a rebase or a hook would otherwise operate on that repository instead.
@@ -158,8 +170,16 @@ fn disarm_filters(root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// Whether this subcommand puts worktree content through a clean/smudge filter.
+fn runs_filters(args: &[&str]) -> bool {
+    matches!(args.first(), Some(&"status" | &"add" | &"commit" | &"diff"))
+}
+
 fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let out = hardened(root).args(args).output().ok()?;
+    let out = hardened_for(root, runs_filters(args))
+        .args(args)
+        .output()
+        .ok()?;
     if !out.status.success() {
         return None;
     }

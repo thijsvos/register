@@ -144,27 +144,61 @@ fn report(outcome: Result<String, String>) -> ExitCode {
 /// file` puts one there and a token that differs by one byte fails in a way
 /// nothing explains.
 fn read_token(token: Option<String>, file: Option<&Path>) -> Result<Option<String>, String> {
-    let Some(file) = file else {
-        return Ok(token);
+    let resolved = match file {
+        None => token,
+        Some(file) => {
+            let raw = std::fs::read_to_string(file)
+                .map_err(|error| format!("token file {}: {error}", file.display()))?;
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                // Silently serving an unguarded vault because the file was empty
+                // is the one outcome nobody would notice.
+                return Err(format!("token file {} is empty", file.display()));
+            }
+            // Interior whitespace is the two-line file: it trims to something no
+            // header, cookie or query string can carry, so the server would
+            // start, announce remote mode, and refuse every credential anyone
+            // can actually send.
+            if trimmed.chars().any(char::is_whitespace) {
+                return Err(format!(
+                    "token file {} has whitespace inside the token; it must be one word",
+                    file.display()
+                ));
+            }
+            Some(trimmed.to_owned())
+        }
     };
-    let raw = std::fs::read_to_string(file)
-        .map_err(|error| format!("token file {}: {error}", file.display()))?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        // Silently serving an unguarded vault because the file was empty is the
-        // one outcome nobody would notice.
-        return Err(format!("token file {} is empty", file.display()));
+
+    // Whichever of the three routes it arrived by. A flag and an environment
+    // variable are exactly as capable of holding `hunter2` as a file is.
+    match resolved {
+        None => Ok(None),
+        Some(token) => {
+            check_strength(&token)?;
+            Ok(Some(token))
+        }
     }
-    // Interior whitespace is the two-line file: it trims to something no header,
-    // cookie or query string can carry, so the server starts, announces remote
-    // mode, and refuses every credential anyone can actually send.
-    if trimmed.chars().any(char::is_whitespace) {
+}
+
+/// The shortest token worth calling one.
+///
+/// There is no rate limiting — a request costs the server almost nothing, so a
+/// peer that can reach the port can guess as fast as the network allows. That
+/// makes length the only thing standing between a token and a dictionary, so a
+/// short one is refused rather than quietly accepted. 16 characters is about
+/// what `openssl rand -hex 8` gives; the README suggests three times that.
+const MIN_TOKEN: usize = 16;
+
+fn check_strength(token: &str) -> Result<(), String> {
+    if token.chars().count() < MIN_TOKEN {
         return Err(format!(
-            "token file {} has whitespace inside the token; it must be one word",
-            file.display()
+            "that token is {} characters; {MIN_TOKEN} is the minimum.\n\
+             Nothing rate-limits guesses, so length is the whole defence:\n\
+             \n    openssl rand -hex 24",
+            token.chars().count()
         ));
     }
-    Ok(Some(trimmed.to_owned()))
+    Ok(())
 }
 
 fn init(path: &Path, git: bool) -> Result<String, String> {
@@ -315,19 +349,20 @@ mod tests {
     #[test]
     fn no_file_means_the_flag_or_the_environment_stands() {
         assert_eq!(read_token(None, None), Ok(None));
+        let long = "from-argv-and-long-enough";
         assert_eq!(
-            read_token(Some("from-argv".to_owned()), None),
-            Ok(Some("from-argv".to_owned()))
+            read_token(Some(long.to_owned()), None),
+            Ok(Some(long.to_owned()))
         );
     }
 
     #[test]
     fn a_file_wins_over_the_flag_and_loses_its_trailing_newline() {
         let path = scratch("good.txt");
-        std::fs::write(&path, "s3cret\n").expect("write");
+        std::fs::write(&path, "s3cret-and-long-enough\n").expect("write");
         assert_eq!(
-            read_token(Some("from-argv".to_owned()), Some(&path)),
-            Ok(Some("s3cret".to_owned()))
+            read_token(Some("from-argv-and-long-enough".to_owned()), Some(&path)),
+            Ok(Some("s3cret-and-long-enough".to_owned()))
         );
     }
 
@@ -356,5 +391,22 @@ mod tests {
                 "{path:?}: {error}"
             );
         }
+    }
+
+    /// Nothing rate-limits a guess, so a short token is not a weak secret — it
+    /// is no secret. Every route in must be checked, not only the file.
+    #[test]
+    fn a_short_token_is_refused_however_it_arrived() {
+        let short = read_token(Some("hunter2".to_owned()), None).expect_err("should refuse");
+        assert!(short.contains("minimum"), "{short}");
+        assert!(short.contains("openssl rand"), "{short}");
+
+        let path = scratch("short.txt");
+        std::fs::write(&path, "hunter2\n").expect("write");
+        let from_file = read_token(None, Some(&path)).expect_err("should refuse");
+        assert!(from_file.contains("minimum"), "{from_file}");
+
+        // And no token at all is still the ordinary local case.
+        assert_eq!(read_token(None, None), Ok(None));
     }
 }

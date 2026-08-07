@@ -134,7 +134,10 @@ jobs:
         with: { node-version-file: .nvmrc }
       # Installed rather than pulled from a third-party action: this repo has
       # four crate dependencies and the point of the job is supply chain.
-      - run: cargo install cargo-audit --locked
+      # Pinned: a gate that installs an unpinned tool on every run is a gate
+      # whose behaviour a third party can change without a commit here.
+      # Renovate tracks this the same as any other pin.
+      - run: cargo install cargo-audit --version 0.22.2 --locked
       # The check that would have found RUSTSEC-2025-0068 — the unsound
       # `serde_yml` — without ADR-001 having to find it by reading advisories.
       #

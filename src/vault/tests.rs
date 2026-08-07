@@ -668,3 +668,46 @@ fn a_conflict_copy_takes_no_ref_and_does_not_consume_one() {
     assert_eq!(copy.reference, None);
     assert_eq!(vault.next_ref().expect("next ref"), "004");
 }
+
+/// `.register/` is unreachable through the API, which for a long time was taken
+/// to mean its paths needed no containment check. That holds only while the
+/// vault is one you made: git preserves symlinks, so a vault cloned from
+/// somewhere else can point `config.json` or the stored face at any file the
+/// server can read — and both are served over HTTP.
+#[test]
+fn a_symlinked_app_file_is_refused_rather_than_followed() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    let outside = tmp.path().parent().expect("parent").join("outside-secret");
+    fs::write(&outside, "SECRET\n").expect("write secret");
+
+    let app = tmp.path().join(".register");
+    fs::create_dir_all(app.join("fonts")).expect("mkdir");
+    let _ = fs::remove_file(app.join("config.json"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(&outside, app.join("config.json")).expect("link config");
+        symlink(&outside, app.join("fonts/licensed.woff2")).expect("link font");
+
+        let config = vault.read_config();
+        assert!(
+            config.is_err(),
+            "a linked config was read: {:?}",
+            config.ok()
+        );
+        assert!(
+            vault.font().is_none(),
+            "a linked font was offered for serving"
+        );
+        // …and a write through the link must not reach the target either.
+        let _ = vault.write_config("{}");
+        assert_eq!(
+            fs::read_to_string(&outside).expect("read secret"),
+            "SECRET\n",
+            "writing config followed the link and clobbered a file outside the vault"
+        );
+    }
+}
