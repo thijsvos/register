@@ -6,13 +6,23 @@ use crate::vault::tests::TempVault;
 
 /// A vault that is its own git repository, with one commit in it.
 fn repo(tmp: &TempVault) {
+    // Each step asserted. Swallowing the exit status meant a failed `git init`
+    // left a plain directory that every test below then treated as a
+    // repository — and `log()` returns "" for a broken repo, so
+    // `assert_eq!(log(&tmp), before)` passed as `"" == ""` while proving
+    // nothing about checkpoints at all.
     let run = |args: &[&str]| {
-        Command::new("git")
+        let out = Command::new("git")
             .arg("-C")
             .arg(tmp.path())
             .args(args)
             .output()
             .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     };
     run(&["init", "--quiet"]);
     run(&["config", "user.email", "t@e"]);
@@ -20,19 +30,35 @@ fn repo(tmp: &TempVault) {
     tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
     run(&["add", "-A"]);
     run(&["commit", "--quiet", "-m", "first"]);
+
+    // The fixture built what it claims to have built.
+    assert!(
+        tmp.path().join(".git").is_dir(),
+        "no repository was created"
+    );
 }
 
+/// The commit subjects, or `""` for a repository that has none yet.
+///
+/// `git log` exits non-zero on a repo with no commits, which is a legitimate
+/// state here — so failure is distinguished from emptiness by checking stderr
+/// rather than by ignoring the status outright.
 fn log(tmp: &TempVault) -> String {
-    String::from_utf8_lossy(
-        &Command::new("git")
-            .arg("-C")
-            .arg(tmp.path())
-            .args(["log", "--oneline"])
-            .output()
-            .expect("git log")
-            .stdout,
-    )
-    .into_owned()
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(tmp.path())
+        .args(["log", "--oneline"])
+        .output()
+        .expect("git log");
+    if !out.status.success() {
+        let why = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            why.contains("does not have any commits"),
+            "git log failed for a reason other than an empty history: {why}"
+        );
+        return String::new();
+    }
+    String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
 #[test]

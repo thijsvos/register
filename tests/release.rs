@@ -79,7 +79,16 @@ fn the_image_takes_pnpm_from_the_manifest_rather_than_restating_it() {
 
 #[test]
 fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
-    let dockerfile = read("deploy/Dockerfile");
+    // Comments stripped, for the reason `compose_mounts_a_vault_and_publishes_
+    // one_port_on_loopback` gives 100 lines below — and this test is the proof
+    // that writing it down once was not enough. It read the file raw, and
+    // `deploy/Dockerfile:11` is a comment mentioning both `--locked` and
+    // `--frozen-lockfile` while explaining why they are there. Measured: delete
+    // both flags from the real lines and every assertion here still passed, so
+    // the release image would resolve a dependency graph nobody tested — the
+    // exact failure the next two lines exist to prevent.
+    let dockerfile = strip_comments(&read("deploy/Dockerfile"));
+
     // §07: "3-stage → scratch, image ≈ binary size".
     assert_eq!(dockerfile.matches("FROM ").count(), 3, "§07 wants 3 stages");
     assert!(dockerfile.contains("FROM scratch"));
@@ -88,6 +97,17 @@ fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
     // The lockfile governs, exactly as it does in CI.
     assert!(dockerfile.contains("--locked"));
     assert!(dockerfile.contains("--frozen-lockfile"));
+
+    // A positive control on the stripping itself: prose that names these flags
+    // is still in the file, so if `strip_comments` ever became a no-op the
+    // assertions above would silently go back to reading comments.
+    let raw = read("deploy/Dockerfile");
+    assert!(
+        raw.lines().any(|line| line.trim_start().starts_with('#')
+            && (line.contains("--locked") || line.contains("--frozen-lockfile"))),
+        "the comment that made this test vacuous is gone; if the flags are now \
+         only in code, this control is no longer measuring anything"
+    );
 }
 
 #[test]
@@ -189,16 +209,39 @@ fn ci_greps_for_stray_fonts() {
         ci.contains("git ls-files"),
         "the font job no longer reads what is tracked"
     );
-    assert!(
-        ci.contains("app/public/fonts/"),
-        "the font job no longer names the one sanctioned directory"
-    );
     for face in ["berkeley", "tx-?02"] {
         assert!(
             ci.contains(face),
             "the font job stopped naming `{face}`, which §03 bans outright"
         );
     }
+
+    // The extension alternation, by name. This is the pattern the job's own
+    // anti-vacuity guard was written against after it proved a *narrower* one
+    // — and nothing here checked it, so narrowing it back to `\.woff2$` would
+    // have let a .otf through with both layers green.
+    assert!(
+        ci.contains(r"\.(woff2?|ttf|otf|eot)$"),
+        "the font job's extension pattern changed; a stray .otf may now pass"
+    );
+
+    // `app/public/fonts/` appears twice — once in the real `grep -v` exclusion
+    // and once in the job's own proof line — so a bare `contains` survives
+    // deleting the entire check. Require the exclusion specifically.
+    assert!(
+        ci.contains("grep -v '^app/public/fonts/'"),
+        "nothing excludes the sanctioned directory, so every vendored face \
+         now reads as a stray — or the check is gone"
+    );
+
+    // And that finding one is fatal. Without this, turning both `exit 1`s into
+    // `echo` leaves the job reporting success on a repo with a licensed face
+    // committed, which is the only outcome §03 actually cares about.
+    assert_eq!(
+        ci.matches("exit 1").count(),
+        2,
+        "the font job no longer fails when it finds something"
+    );
 }
 
 #[test]

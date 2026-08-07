@@ -674,6 +674,11 @@ fn a_conflict_copy_takes_no_ref_and_does_not_consume_one() {
 /// vault is one you made: git preserves symlinks, so a vault cloned from
 /// somewhere else can point `config.json` or the stored face at any file the
 /// server can read — and both are served over HTTP.
+// Gated whole, not by an inner block. With `#[cfg(unix)]` on the block the
+// test still *ran* on Windows — with an empty body, reporting green for a
+// guard it had not exercised. A test that cannot run should say so by being
+// absent, which is what the three above already do.
+#[cfg(unix)]
 #[test]
 fn a_symlinked_app_file_is_refused_rather_than_followed() {
     let tmp = TempVault::new();
@@ -686,7 +691,6 @@ fn a_symlinked_app_file_is_refused_rather_than_followed() {
     fs::create_dir_all(app.join("fonts")).expect("mkdir");
     let _ = fs::remove_file(app.join("config.json"));
 
-    #[cfg(unix)]
     {
         use std::os::unix::fs::symlink;
         symlink(&outside, app.join("config.json")).expect("link config");

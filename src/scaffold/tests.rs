@@ -178,14 +178,18 @@ fn a_repository_we_did_not_create_is_never_committed_to() {
     let theirs = tmp.path().join("theirs");
     fs::create_dir_all(&theirs).expect("mkdir");
 
+    // No silent early return when git is missing or `init` fails. Both used to
+    // be bare `return`s, which meant this test reported green on a machine where
+    // it had proved nothing — and its own final assertion reads only stdout,
+    // which `git log` leaves empty when it exits 128 in a directory that is not
+    // a repository. Between them, a change that blew away and recreated `.git`
+    // would have passed while doing exactly the damage this test is named for.
     let made = std::process::Command::new("git")
         .args(["init", "--quiet"])
         .current_dir(&theirs)
-        .status();
-    let Ok(made) = made else { return };
-    if !made.success() {
-        return;
-    }
+        .status()
+        .expect("git init");
+    assert!(made.success(), "could not make the repository under test");
     fs::write(theirs.join("draft.txt"), "mine\n").expect("write");
     let staged = std::process::Command::new("git")
         .args(["add", "draft.txt"])
@@ -201,10 +205,24 @@ fn a_repository_we_did_not_create_is_never_committed_to() {
         .current_dir(&theirs)
         .output()
         .expect("git log");
+    // Empty stdout alone would also be what a *broken* repository produces, so
+    // the staged file has to still be staged and uncommitted — a positive
+    // statement about the state we are protecting rather than an absence.
     assert!(
         log.stdout.is_empty(),
         "committed to a repository we did not create: {}",
         String::from_utf8_lossy(&log.stdout)
+    );
+    assert!(theirs.join(".git").is_dir(), "their repository is gone");
+    let staged = std::process::Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(&theirs)
+        .output()
+        .expect("git diff");
+    assert_eq!(
+        String::from_utf8_lossy(&staged.stdout).trim(),
+        "draft.txt",
+        "their staged work did not survive `init --git`"
     );
 }
 
@@ -223,10 +241,22 @@ fn a_new_repository_gets_a_baseline_commit() {
     let repo = tmp.path().join("repo");
     init(&repo, true).expect("init --git");
 
-    // Nothing to assert on a machine with no git at all.
-    if !repo.join(".git").is_dir() {
-        return;
-    }
+    // Unconditional, and that is the whole point. This used to read
+    // `if !repo.join(".git").is_dir() { return }` — which looks like a
+    // reasonable "skip when git is missing" guard and is not one, because a
+    // `.git` directory existing *is* part of the outcome under test: making the
+    // repository is what `--git` does. Measured: replace the `git init` call in
+    // `init_git` with `git --version` and this test returned green with zero
+    // assertions run. The same defect the comment below congratulates itself
+    // for removing, one step earlier.
+    //
+    // Git is a hard requirement of this test rather than an optional
+    // convenience: `force_a_git_identity` above only means anything if a child
+    // git process actually runs.
+    assert!(
+        repo.join(".git").is_dir(),
+        "`init --git` did not create a repository"
+    );
 
     let out = std::process::Command::new("git")
         .args(["log", "--oneline"])

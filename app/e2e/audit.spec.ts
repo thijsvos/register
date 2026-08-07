@@ -81,16 +81,35 @@ test('every focusable control shows a focus ring', async ({ page }) => {
   // §02: "keep focus rings visible". Tab through the frame and require that
   // whatever holds focus draws something — an outline is the design's own way
   // of saying where you are, and `outline: none` is the classic regression.
+  //
+  // `return true` when nothing is focused used to be the escape hatch: if Tab
+  // stopped moving focus at all — every control gaining `tabindex="-1"`, the
+  // frame failing to render its buttons, a modal trapping focus on <body> —
+  // all eight rounds passed and §02's keyboard promise was unguarded. So the
+  // ring is asserted *and* the walk is proved to have gone somewhere.
+  const visited: string[] = []
   for (let step = 0; step < 8; step++) {
     await page.keyboard.press('Tab')
-    const drawn = await page.evaluate(() => {
+    const seen = await page.evaluate(() => {
       const active = document.activeElement
-      if (active === null || active === document.body) return true
+      if (active === null || active === document.body) return null
       const style = getComputedStyle(active)
-      return style.outlineStyle !== 'none' && style.outlineWidth !== '0px'
+      const ring = style.outlineStyle !== 'none' && style.outlineWidth !== '0px'
+      const id = `${active.tagName}:${active.getAttribute('aria-label') ?? active.textContent?.trim().slice(0, 20) ?? ''}`
+      return { ring, id }
     })
-    expect(drawn, `step ${step} focused something with no visible ring`).toBe(true)
+    if (seen === null) continue
+    expect(seen.ring, `step ${step} focused ${seen.id} with no visible ring`).toBe(true)
+    visited.push(seen.id)
   }
+
+  // Tab reached real controls, and more than one of them — otherwise the loop
+  // above proved only that nothing was focusable.
+  expect(visited.length, 'Tab never landed on a focusable control').toBeGreaterThan(0)
+  expect(
+    new Set(visited).size,
+    `Tab did not move: ${visited.join(' → ')}`,
+  ).toBeGreaterThan(1)
 })
 
 test('the index is traversable with j and k', async ({ page }) => {

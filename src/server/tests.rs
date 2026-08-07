@@ -1120,14 +1120,26 @@ async fn a_disk_asset_path_cannot_escape_the_directory() {
     }
 }
 
+// Gated whole. With `#[cfg(unix)]` on the symlink call alone, this ran on
+// Windows against a link that was never created and asserted that a file which
+// does not exist did not leak — green, and measuring nothing.
+#[cfg(unix)]
 #[tokio::test]
 async fn a_symlink_out_of_the_assets_directory_is_refused() {
     // Lexical checks cannot see this one: every path component is ordinary.
     let (tmp, dist) = ui_dir();
-    #[cfg(unix)]
     std::os::unix::fs::symlink(tmp.path().join("secret.txt"), dist.join("leak.txt"))
         .expect("symlink");
     let addr = start_serving(&tmp, &dist).await;
+
+    // Positive control: the link really does point at readable bytes, so the
+    // refusal below is the guard working rather than a broken fixture.
+    assert!(
+        std::fs::read_to_string(dist.join("leak.txt"))
+            .expect("the symlink should resolve on disk")
+            .contains("not for the web"),
+        "the fixture never linked anything, so nothing was tested"
+    );
 
     let reply = request(addr, "GET", "/leak.txt", &[], "").await;
     assert!(

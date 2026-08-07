@@ -105,6 +105,18 @@ describe('design tokens (rule 2)', () => {
       )
 
     expect(offenders).toEqual([])
+    // Every branch of the pattern, not just "it matched something".
+    // LITERAL_COLOR is a three-way alternation — hex, colour function, bare
+    // keyword — and it is the most complex and most frequently edited regex in
+    // the repo. Proving it against tokens.css alone was not enough: breaking
+    // the hex branch left the other two matching and the control stayed green,
+    // which is how a gate this important would quietly stop guarding hex.
+    for (const sample of ['#ff2a00', 'rgba(0,0,0,.5)', 'color: red;']) {
+      expect(
+        sample.match(LITERAL_COLOR) ?? [],
+        `LITERAL_COLOR missed ${sample}`,
+      ).not.toHaveLength(0)
+    }
   })
 
   it('declares every length in tokens.css and nowhere else', () => {
@@ -115,6 +127,7 @@ describe('design tokens (rule 2)', () => {
       )
 
     expect(offenders).toEqual([])
+    expect(code(sources[TOKENS] ?? '').match(LENGTH) ?? []).not.toHaveLength(0)
   })
 
   it('routes every font-family through a token', () => {
@@ -127,6 +140,11 @@ describe('design tokens (rule 2)', () => {
       )
 
     expect(offenders).toEqual([])
+    // tokens.css and base.css are excluded above, so the scanner would report
+    // nothing if the regex broke. Prove it still finds the declarations there.
+    expect(
+      code(sources[BASE] ?? '').match(/font-family:\s*([^;}]+)/g) ?? [],
+    ).not.toHaveLength(0)
   })
 })
 
@@ -141,6 +159,14 @@ describe('motion doctrine (§02: zero animations except the status LED)', () => 
       .map(([path]) => path)
 
     expect(offenders).toEqual([])
+    // A gate that greps for something nobody writes reads identically whether
+    // the rule holds or the pattern is broken, so exercise it on a string that
+    // must match. Inline rather than from a source: no file may contain one.
+    expect(
+      /\btransition(?:-[a-z-]+)?\s*:|\bscroll-behavior\s*:\s*smooth/.test(
+        'a { transition-duration: 1ms }',
+      ),
+    ).toBe(true)
   })
 
   it('declares animation and keyframes only in the status bar', () => {

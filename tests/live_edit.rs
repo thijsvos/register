@@ -379,12 +379,25 @@ fn put_font(server: &Server, bytes: &[u8]) -> u16 {
         .unwrap_or(0)
 }
 
+/// Run git and return stdout, failing loudly if git itself did not.
+///
+/// It used to discard `status`. That made every assertion built on it — "the
+/// vault is clean", "no font path is tracked" — satisfiable by git *failing*,
+/// because a git that errors prints nothing to stdout and an empty string is
+/// what those tests were checking for. A test that passes when its own tooling
+/// is broken is measuring the tooling, not the product.
 fn git(args: &[&str], cwd: &Path) -> String {
     let out = Command::new("git")
         .args(args)
         .current_dir(cwd)
         .output()
         .expect("run git");
+    assert!(
+        out.status.success(),
+        "git {args:?} failed in {}: {}",
+        cwd.display(),
+        String::from_utf8_lossy(&out.stderr)
+    );
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
