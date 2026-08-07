@@ -5,13 +5,16 @@ it fits the §04 vault contract (or bumps the major version with a documented
 migration), it fits the §06 budgets or ships lazily, and it obeys §02. Process
 is roadmap entry → ADR → milestone.
 
-Two kinds of entry live here. The **§12 table** below is the designed expansion
+Three kinds of entry live here. The **§12 table** below is the designed expansion
 path — features deliberately left out of v1, each with the landing path that
-keeps it contract-safe. Everything after it is a risk or a decision **parked
-during a phase**, recorded here rather than in a commit message nobody will
-re-read.
+keeps it contract-safe. After it come risks and decisions **parked during a
+phase**, recorded here rather than in a commit message nobody will re-read. Last
+are things **decided after release**, raised by using the thing rather than by
+building it: those are answers, not deferrals, and they are written down so the
+same question is not re-argued with every new pair of eyes.
 
-Every entry names a trigger. An entry without one is a wish.
+Every entry names a trigger — for a parked item, what would un-park it; for a
+decided one, what would reopen it. An entry without one is a wish.
 
 ## Post-v1 expansion (§12, seeded by P11)
 
@@ -117,3 +120,13 @@ validated at the boundary instead of cast. What remains:
 | **`git status` runs on every tree fetch** | Cheap on a repository this size and skipped entirely for a non-repository, but the tree is fetched after every event burst, so a very large repo would pay for it repeatedly. A short-lived cache is the obvious fix and was not worth guessing at. | A vault where `git status` is slow enough to notice. |
 | **Remote mode has no TLS** | Deliberate — §07's pattern is a tailnet, which is already encrypted, and terminating TLS is a reverse proxy's job. But a user who binds `0.0.0.0` on an untrusted network sends their notes and their token in clear. The token gate cannot tell those cases apart. | An encrypted-remote milestone; §12 already lists "E2E-encrypted remote". |
 | **The token still has no revocation list** | ~~Partly closed:~~ `--token-file` and `REGISTER_TOKEN` mean it need not be an argv string visible in `ps`. What remains is the model — no accounts, no user table, no revocation, so rotating it means restarting the server. Right for a tailnet; thin for anything more exposed. | The same milestone as TLS. |
+
+## Decided after v0.3.1 (first use in anger)
+
+Entries here were raised by someone using the app rather than by a phase, and
+answered rather than deferred. They are recorded because the alternative is
+re-arguing them every time a new pair of eyes arrives.
+
+| Item | The decision, and why | What would reopen it |
+|---|---|---|
+| **The WATCHER lamp is red when live, and red usually means broken** | Kept as it is. It is a **tally light**, not a traffic light — the red lamp on a camera, a transmit LED, a record light, where red means *on air* rather than *fault*. The slow pip reinforces it: fault lamps are steady, activity lamps pulse. Green is not available as an addition either, because §02 is "monochrome plus a **single** signal colour" and CONTRIBUTING names §02 the one permanent constraint — a second accent is a different product. The colour could be *changed* rather than added (`--signal` is one token), but it is also the editor caret, the active-line marker, the palette caret and its selected row, so `#ff2a00` is a large part of how this looks and the LED is only one of eight consumers. | More than one person reading the lamp as an alarm. One report is a convention mismatch; a pattern is a design fault, and the cheapest answer then is not green — it is that the dot is redundant beside a label already reading `Watcher Live`, and could go. |
