@@ -551,3 +551,129 @@ fn a_tokenless_bind_on_a_real_interface_is_refused() {
         "it printed a serving banner and then refused: {banner}"
     );
 }
+
+/// The escape hatch the shipped image depends on.
+///
+/// `deploy/Dockerfile`'s ENTRYPOINT passes `--allow-tokenless-network`, because
+/// the binary refuses a tokenless bind on a real interface and the container has
+/// to bind `0.0.0.0` for its published port to reach anything. Only the refusal
+/// was tested. If the flag stopped being accepted, the published image would not
+/// start at all — and nothing here would notice, because `cargo test` never runs
+/// the container. A `docker compose up` would be the first thing to find out.
+#[test]
+fn the_container_shape_still_starts_and_says_what_it_is_doing() {
+    let root = scratch("tokenless");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let mut child = Command::new(BINARY)
+        .args([
+            "serve",
+            vault.to_str().expect("utf-8"),
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "0",
+            "--allow-tokenless-network",
+        ])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn server");
+
+    let stdout = child.stdout.take().expect("piped stdout");
+    let mut reader = BufReader::new(stdout);
+    let mut banner = String::new();
+    reader.read_line(&mut banner).expect("read banner");
+    let mut warning = String::new();
+    reader.read_line(&mut warning).expect("read warning");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    // It started rather than refusing — the whole point of the flag.
+    assert!(
+        banner.contains("http://"),
+        "the container's own invocation was refused: {banner}{warning}"
+    );
+    // And said so. A tokenless port on a real interface is readable and
+    // writable by anything that can reach it; the flag says someone else is
+    // deciding who that is, so the server has to be loud about the trade.
+    assert!(
+        warning.to_lowercase().contains("warning"),
+        "no warning for a tokenless network bind: {warning:?}"
+    );
+}
+
+/// `--assets` pointed at something that is not a directory.
+///
+/// The check lives in `main.rs`, so `server/tests.rs` cannot reach it: those
+/// tests hand `AppState` a path that already exists. Here the failure has to
+/// arrive as an exit code and a sentence, not a panic.
+#[test]
+fn assets_that_are_not_a_directory_are_refused_before_serving() {
+    let root = scratch("assets");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+    let not_a_dir = root.join("a-file");
+    std::fs::write(&not_a_dir, "hello\n").expect("write");
+
+    // Spawned and waited for with a deadline, not `output()`. `output()` waits
+    // for the process to exit, so when this guard is removed the server simply
+    // serves and the test **hangs** rather than failing. Found by mutating it:
+    // CI would have reported a timeout with no assertion to read, and locally it
+    // looks like the machine is busy. A test that hangs on regression is worse
+    // than one that fails.
+    let mut child = Command::new(BINARY)
+        .args([
+            "serve",
+            vault.to_str().expect("utf-8"),
+            "--port",
+            "0",
+            "--assets",
+            not_a_dir.to_str().expect("utf-8"),
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn register");
+
+    let deadline = Instant::now() + PATIENCE;
+    let settled = loop {
+        match child.try_wait().expect("wait") {
+            Some(status) => break Some(status),
+            None if Instant::now() >= deadline => break None,
+            None => std::thread::sleep(Duration::from_millis(10)),
+        }
+    };
+
+    let Some(status) = settled else {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("a file was accepted as an asset root; the server is still running");
+    };
+    assert!(!status.success(), "a file was accepted as an asset root");
+
+    let mut said = String::new();
+    child
+        .stderr
+        .take()
+        .expect("piped stderr")
+        .read_to_string(&mut said)
+        .expect("read stderr");
+    assert!(said.contains("not a directory"), "{said}");
+
+    // And it did not announce a server it never started. This half already
+    // caught something: the check used to run *after* the banner, so a refusal
+    // arrived looking like a server that started and then died.
+    let mut printed = String::new();
+    child
+        .stdout
+        .take()
+        .expect("piped stdout")
+        .read_to_string(&mut printed)
+        .expect("read stdout");
+    assert!(
+        !printed.contains("http://"),
+        "it printed a serving banner and then refused: {printed}"
+    );
+}

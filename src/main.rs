@@ -249,6 +249,16 @@ async fn serve(
     allow_tokenless_network: bool,
     assets: Option<PathBuf>,
 ) -> Result<(), String> {
+    // Argument validation first, before anything binds a port or prints a
+    // banner. A refusal that follows "register · vault … · http://…" reads as a
+    // server that started and then died, which is a different bug from the one
+    // that happened.
+    if let Some(dir) = assets.as_deref()
+        && !dir.is_dir()
+    {
+        return Err(format!("assets {}: not a directory", dir.display()));
+    }
+
     let vault =
         vault::Vault::open(&root).map_err(|error| format!("serve {}: {error}", root.display()))?;
     let vault = Arc::new(vault);
@@ -299,23 +309,19 @@ published to loopback, a firewall — then say so explicitly:
         vault.root().display()
     );
 
-    // Checkpoints run off the same event stream the UI does, so they see
-    // exactly what the watcher saw — and they are off unless the vault's own
-    // config asks for them (§08 P12).
-    let _checkpoints = git::Checkpointer::start(vault.clone(), events.subscribe());
-
-    // The bound address decides whether /api/reveal is available at all.
+    // Said out loud: this is the one mode where what you are looking at is not
+    // what the binary would ship.
     if let Some(dir) = assets.as_deref() {
-        if !dir.is_dir() {
-            return Err(format!("assets {}: not a directory", dir.display()));
-        }
-        // Said out loud: this is the one mode where what you are looking at is
-        // not what the binary would ship.
         println!(
             "register · serving the UI from {} (not the built-in copy)",
             dir.display()
         );
     }
+
+    // Checkpoints run off the same event stream the UI does, so they see
+    // exactly what the watcher saw — and they are off unless the vault's own
+    // config asks for them (§08 P12).
+    let _checkpoints = git::Checkpointer::start(vault.clone(), events.subscribe());
 
     let state = server::AppState::new(vault, events)
         .bound_to(addr)
