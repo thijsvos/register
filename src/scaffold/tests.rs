@@ -148,6 +148,116 @@ fn git_is_opt_in_and_ignores_the_two_directories_that_must_not_ship() {
     // machine running the tests, so the repository itself is not asserted here.
 }
 
+/// Give the `git` children an identity through the environment.
+///
+/// `GIT_AUTHOR_*` / `GIT_COMMITTER_*` outrank config and are inherited by every
+/// child, which is the only way to make a commit succeed on a machine that has
+/// no `user.email` — a bare CI runner, for instance. Set once for the whole test
+/// process; every test that cares wants the same values.
+fn force_a_git_identity() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        // Safety: called before any test spawns a git child, and the values are
+        // constant, so no other thread can observe a half-written variable.
+        unsafe {
+            std::env::set_var("GIT_AUTHOR_NAME", "register tests");
+            std::env::set_var("GIT_AUTHOR_EMAIL", "tests@register.invalid");
+            std::env::set_var("GIT_COMMITTER_NAME", "register tests");
+            std::env::set_var("GIT_COMMITTER_EMAIL", "tests@register.invalid");
+        }
+    });
+}
+
+#[test]
+fn a_repository_we_did_not_create_is_never_committed_to() {
+    // `git init` yourself, stage something, then point `register init --git` at
+    // the folder. The baseline commit must not fire: `git add -A` would sweep
+    // that staged work — and anything else in the directory — into a commit
+    // called "vault: initial".
+    let tmp = TempVault::new();
+    let theirs = tmp.path().join("theirs");
+    fs::create_dir_all(&theirs).expect("mkdir");
+
+    let made = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&theirs)
+        .status();
+    let Ok(made) = made else { return };
+    if !made.success() {
+        return;
+    }
+    fs::write(theirs.join("draft.txt"), "mine\n").expect("write");
+    let staged = std::process::Command::new("git")
+        .args(["add", "draft.txt"])
+        .current_dir(&theirs)
+        .status()
+        .expect("git add");
+    assert!(staged.success());
+
+    init(&theirs, true).expect("init --git");
+
+    let log = std::process::Command::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(&theirs)
+        .output()
+        .expect("git log");
+    assert!(
+        log.stdout.is_empty(),
+        "committed to a repository we did not create: {}",
+        String::from_utf8_lossy(&log.stdout)
+    );
+}
+
+#[test]
+fn a_new_repository_gets_a_baseline_commit() {
+    // Without one, `--git` leaves a repository with no commits: the status bar
+    // reads DIRTY on a vault nobody has touched, and the first checkpoint
+    // quietly becomes the initial import instead of a checkpoint.
+    // Forced, so this test means the same thing on a laptop and on a runner.
+    // Without it the assertions below hold only where a `user.email` happens to
+    // be configured, and CI — the place a regression would actually surface —
+    // is exactly where one is not.
+    force_a_git_identity();
+
+    let tmp = TempVault::new();
+    let repo = tmp.path().join("repo");
+    init(&repo, true).expect("init --git");
+
+    // Nothing to assert on a machine with no git at all.
+    if !repo.join(".git").is_dir() {
+        return;
+    }
+
+    let out = std::process::Command::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(&repo)
+        .output()
+        .expect("git log");
+
+    // Unconditional. An earlier version of this test put both assertions behind
+    // `if committed`, so deleting the feature it guards left it passing with an
+    // empty body — the test was green precisely when the thing under test did
+    // not happen. `init` runs with an identity forced below, so "could not
+    // commit" is not a state this test tolerates.
+    assert!(
+        out.status.success() && !out.stdout.is_empty(),
+        "no baseline commit: {}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let dirty = std::process::Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(&repo)
+        .output()
+        .expect("git status");
+    assert!(
+        dirty.stdout.is_empty(),
+        "the scaffold committed but the vault still reads dirty: {}",
+        String::from_utf8_lossy(&dirty.stdout)
+    );
+}
+
 // ------------------------------------------------------------------------ new
 
 #[test]

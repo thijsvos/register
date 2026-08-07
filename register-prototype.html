@@ -21,13 +21,19 @@ if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement
    agent-edit-live) are all reachable from one prototype.
    ================================================================ */
 
-/* ---- fonts: OFL faces, self-hostable at ship (§03) -------------- */
+/* ---- fonts: the OFL faces this repository already vendors (§03) --
+   Relative paths, so open this file from the repository root. It used to pull
+   them from jsDelivr — one of them from `projectnoonnu/2409-1`, an unaffiliated
+   mirror, at a tag anyone could move under it. A mock is still a page someone
+   opens, and the app ships these exact bytes anyway. Nothing here touches the
+   network now.
+   ----------------------------------------------------------------- */
 @font-face{font-family:"Commit Mono";font-weight:400;font-display:swap;
-  src:url("https://cdn.jsdelivr.net/fontsource/fonts/commit-mono@latest/latin-400-normal.woff2") format("woff2")}
+  src:url("app/public/fonts/commit-mono/commit-mono-latin-400-normal.woff2") format("woff2")}
 @font-face{font-family:"Commit Mono";font-weight:700;font-display:swap;
-  src:url("https://cdn.jsdelivr.net/fontsource/fonts/commit-mono@latest/latin-700-normal.woff2") format("woff2")}
+  src:url("app/public/fonts/commit-mono/commit-mono-latin-700-normal.woff2") format("woff2")}
 @font-face{font-family:"Departure Mono";font-weight:400;font-display:swap;
-  src:url("https://cdn.jsdelivr.net/gh/projectnoonnu/2409-1@1.0/DepartureMono-Regular.woff2") format("woff2")}
+  src:url("app/public/fonts/departure-mono/departure-mono-400-normal.woff2") format("woff2")}
 
 :root{
   --bg:#ffffff;

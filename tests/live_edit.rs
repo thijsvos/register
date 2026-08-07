@@ -397,8 +397,12 @@ fn a_licensed_font_never_reaches_the_repository() {
     register(&["init", vault.to_str().expect("utf-8"), "--git"], &root);
 
     // A clean starting point, so what the font does is the only variable.
+    // `init --git` commits the scaffold itself now, so this only has to cover
+    // the machine where that could not happen — no configured identity, which
+    // is exactly what CI looks like until something sets one.
     shell(
-        "git add -A && git -c user.email=t@e -c user.name=T commit -qm init",
+        "git add -A && git diff --cached --quiet \
+         || git -c user.email=t@e -c user.name=T commit -qm init",
         &vault,
     );
     assert_eq!(git(&["status", "--porcelain"], &vault), "");

@@ -10,8 +10,9 @@ cd app && pnpm install && pnpm build
 cd .. && cargo install --path . --force && register init ~/vault && register serve ~/vault
 ```
 
-`--force` matters: `cargo install` silently does nothing when the version has
-not changed, and you keep running the binary you built last time.
+`--force` is belt and braces: cargo 1.97 replaces a changed binary without it,
+but the failure it guards against — a fix that appears not to work because the
+binary is last week's — costs more to diagnose than the flag costs to type.
 
 ## The scope fence
 
@@ -109,7 +110,14 @@ not in there at all.
 
 `pnpm e2e` needs the binary built first (`pnpm build && cargo build --release`),
 because it drives the shipped artefact rather than a dev server — every §06
-budget is a claim about what ships.
+budget is a claim about what ships. It also needs a browser, once per machine:
+
+```sh
+cd app && pnpm exec playwright install --with-deps chromium
+```
+
+Chromium only, deliberately — §06's budgets are numbers measured on one engine,
+and three engines would mean three sets of numbers and no answer.
 
 **Check the exit codes, not the output.** A vitest run whose import throws prints
 a summary that looks like success; this repository has shipped a commit claiming
@@ -117,3 +125,18 @@ a green suite that was exiting 1.
 
 One conventional commit per unit of work, and the message says what was
 measured, not just what changed.
+
+## Cutting a release
+
+`release.yml` fires on a `v[0-9]*` tag and its first job compares the tag to
+`version` in `Cargo.toml`. They must already match on the commit being tagged —
+`register --version` serves `CARGO_PKG_VERSION`, so a mismatch would publish
+binaries and image tags that misreport themselves to every bug report that
+follows. Bump the manifest, commit, then tag:
+
+```sh
+git tag v0.3.0 && git push origin v0.3.0
+```
+
+Push the one tag, not `--tags`: the latter sends every local tag at once, and
+any stray `v`-prefixed name would cut a release of whatever it pointed at.

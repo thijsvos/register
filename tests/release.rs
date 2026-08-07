@@ -101,6 +101,83 @@ fn the_build_context_carries_no_licensed_font_bytes() {
 }
 
 #[test]
+fn the_cross_targets_land_in_the_toolchain_that_does_the_building() {
+    // Three of the five release legs cross-compile, and this is the seam they
+    // fell through. `dtolnay/rust-toolchain@stable` installs the toolchain it
+    // names; rust-toolchain.toml pins a channel, and a pin beats a default — so
+    // `with: { targets: … }` put the cross std in `stable` while cargo ran under
+    // the pin, a different directory that had never seen it. Every such leg died
+    // on E0463 before compiling a line.
+    //
+    // `rustup target add` as a step, with no `+toolchain`, resolves the active
+    // toolchain the same way cargo does. That is the property worth holding: not
+    // which toolchain, but that the build and whatever installs its std can only
+    // ever agree.
+    let code = strip_comments(&read(".github/workflows/release.yml"));
+
+    assert!(
+        !code.contains("targets:"),
+        "release.yml hands `targets:` to the toolchain action, which installs \
+         them into the toolchain the action names rather than the one \
+         rust-toolchain.toml pins"
+    );
+    assert!(
+        code.contains("rustup target add ${{ matrix.target }}"),
+        "nothing adds the cross target to the toolchain cargo will run under"
+    );
+
+    // And the fix must not quietly become a second copy of the pin (rule 11):
+    // the step names a matrix target, never a channel.
+    let channel = read("rust-toolchain.toml")
+        .lines()
+        .find_map(|line| line.split_once("channel = "))
+        .map(|(_, value)| value.trim().trim_matches('"').to_owned())
+        .expect("channel in rust-toolchain.toml");
+    if channel.starts_with(|c: char| c.is_ascii_digit()) {
+        assert!(
+            !code.contains(&channel),
+            "release.yml names the {channel} pin; rust-toolchain.toml is the one copy"
+        );
+    }
+}
+
+#[test]
+fn a_tag_still_runs_the_gates() {
+    // release.yml says the gates "run alongside this rather than being restated
+    // here", which is only true while a tag push reaches ci.yml. That was free
+    // under a bare `push:`; adding a `branches:` filter to cut duplicate runs
+    // silently took it away, and would have cut a release with nothing checking
+    // it. The comment is load-bearing, so it gets a test.
+    // The two patterns compared, not merely `contains("tags:")` — that is
+    // satisfied by `tags: []`, which runs on nothing, and by a pattern that has
+    // drifted from the one release.yml fires on. What matters is that every tag
+    // starting a release also starts the gates.
+    let pattern = |path: &str| {
+        strip_comments(&read(path))
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("tags:")
+                    .map(str::trim)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| panic!("{path} has no `tags:` in its push trigger"))
+    };
+    let ci = pattern(".github/workflows/ci.yml");
+    let release = pattern(".github/workflows/release.yml");
+
+    assert!(
+        !ci.is_empty() && ci != "[]",
+        "ci.yml's tag filter matches nothing: {ci}"
+    );
+    assert_eq!(
+        ci, release,
+        "ci.yml fires on {ci} and release.yml on {release}, so some tag cuts a \
+         release with nothing checking it"
+    );
+}
+
+#[test]
 fn ci_greps_for_stray_fonts() {
     // §03's last line and CLAUDE.md rule 7 both promise this grep, and
     // CONTRIBUTING.md tells contributors a licensed face cannot be committed.
@@ -125,11 +202,31 @@ fn ci_greps_for_stray_fonts() {
 }
 
 #[test]
-fn compose_mounts_a_vault_and_publishes_one_port() {
-    let compose = read("deploy/docker-compose.yml");
+fn compose_mounts_a_vault_and_publishes_one_port_on_loopback() {
+    // Comments stripped first, and that is the point rather than tidiness. This
+    // test used to read the raw file and look for `"7777:7777"`; when the port
+    // moved to `"127.0.0.1:7777:7777"` that substring survived only in a comment
+    // showing the old form, so the assertion went on passing while testing
+    // nothing. A test satisfied by a comment is worse than no test.
+    let compose = strip_comments(&read("deploy/docker-compose.yml"));
     assert!(compose.contains("${VAULT_PATH:-./vault}:/vault"));
-    assert!(compose.contains(r#""7777:7777""#));
     assert!(compose.contains("dockerfile: deploy/Dockerfile"));
+
+    assert!(
+        compose.contains(r#""127.0.0.1:7777:7777""#),
+        "compose no longer publishes on loopback only:\n{compose}"
+    );
+    // The negative is what survives a rename: any published port whose host part
+    // is absent or wildcard reaches every interface on the machine.
+    assert!(
+        !compose.contains(r#""7777:7777""#) && !compose.contains(r#""0.0.0.0:"#),
+        "compose publishes on every interface:\n{compose}"
+    );
+    // Root in the container writes root-owned notes into the host's vault.
+    assert!(
+        compose.contains("user:"),
+        "compose no longer pins the uid the server writes as:\n{compose}"
+    );
 }
 
 // ---------------------------------------------------------------- the release
@@ -146,8 +243,25 @@ fn every_platform_08_p10_names_is_built() {
     ] {
         assert!(release.contains(target), "release.yml is missing {target}");
     }
-    assert!(release.contains("tags: [\"v*\"]"), "should fire on v* tags");
+    // Narrower than `v*` on purpose: that also matches `vault-experiment` and
+    // `v2-spike`, and `git push --tags` sends every local tag at once — one
+    // stray name would cut a release of whatever it pointed at.
+    assert!(
+        release.contains("tags: [\"v[0-9]*\"]"),
+        "release should fire on version tags, and only those"
+    );
     assert!(release.contains("ghcr.io/$OWNER/register"), "no ghcr push");
+
+    // The publish job refuses to release unless it has one asset per target,
+    // and that count is a literal. Tie it to the matrix here, so adding a sixth
+    // target fails in the pull request rather than after six release builds
+    // have run and the image has already been pushed.
+    let targets = release.matches("- os:").count();
+    assert_eq!(targets, 5, "the release matrix changed size");
+    assert!(
+        release.contains(&format!("wc -l)\" -eq {targets}")),
+        "publish counts a different number of assets than the matrix builds"
+    );
 }
 
 #[test]

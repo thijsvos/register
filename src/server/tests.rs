@@ -81,6 +81,42 @@ async fn start(tmp: &TempVault) -> SocketAddr {
     start_with(tmp, None).await
 }
 
+/// A WebSocket handshake, spoken by hand, returning the status line's code.
+///
+/// `request` above always sends `Connection: close`, which contradicts
+/// `Connection: Upgrade` — hyper then answers the malformed request and a test
+/// asserting "the upgrade was refused" passes without the guard ever running.
+/// Verified against the real binary: this shape gets 101 where that one gets 400.
+async fn upgrade(addr: SocketAddr, path: &str, extra: &[(&str, &str)]) -> u16 {
+    let mut stream = TcpStream::connect(addr).await.expect("connect");
+    let host = extra
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("host"))
+        .map(|(_, value)| *value)
+        .unwrap_or("localhost");
+
+    let mut head = format!(
+        "GET {path} HTTP/1.1\r\nHost: {host}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\
+         Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+    );
+    for (name, value) in extra {
+        if name.eq_ignore_ascii_case("host") {
+            continue;
+        }
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).await.expect("write");
+
+    let mut buf = [0u8; 256];
+    let read = stream.read(&mut buf).await.expect("read");
+    String::from_utf8_lossy(&buf[..read])
+        .split_whitespace()
+        .nth(1)
+        .and_then(|code| code.parse().ok())
+        .unwrap_or(0)
+}
+
 /// A server in remote mode: bound to loopback, but demanding a token from
 /// anything that is not loopback. The tests reach it over 127.0.0.1, which is
 /// exactly the exemption §08 P12 requires — so the refusals below are driven by
@@ -873,23 +909,17 @@ async fn a_stranger_on_a_tokenless_bind_keeps_the_host_and_origin_rules() {
     // The event stream matters most: a WebSocket is not bound by CORS, so it is
     // the one route a hostile page could read from even without the response
     // headers a `fetch` needs.
-    let socket = request(
-        addr,
-        "GET",
-        "/api/events",
-        &[
-            ("Origin", "https://evil.example"),
-            ("Connection", "Upgrade"),
-            ("Upgrade", "websocket"),
-            ("Sec-WebSocket-Version", "13"),
-            ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
-        ],
-        "",
-    )
-    .await;
     assert_eq!(
-        socket.status, 403,
+        upgrade(addr, "/api/events", &[("Origin", "https://evil.example")]).await,
+        403,
         "a hostile origin opened the event stream"
+    );
+    // And the same handshake without the hostile origin does open, so the 403
+    // above is the guard refusing rather than the handshake being malformed.
+    assert_eq!(
+        upgrade(addr, "/api/events", &[]).await,
+        101,
+        "the event stream never opens, so the refusal above proves nothing"
     );
 
     // And a stranger who *does* hold the token still gets in, so the fix did
@@ -912,6 +942,80 @@ async fn a_stranger_on_a_tokenless_bind_keeps_the_host_and_origin_rules() {
         carrying.status, 200,
         "remote mode stopped working for a valid token"
     );
+}
+
+#[test]
+fn stripping_the_token_leaves_the_rest_of_the_query_alone() {
+    for (before, after) in [
+        ("/?token=abc", "/"),
+        ("/index.html?token=abc", "/index.html"),
+        ("/?token=abc&q=1", "/?q=1"),
+        ("/?q=1&token=abc", "/?q=1"),
+        ("/?q=1&token=abc&r=2", "/?q=1&r=2"),
+        // A value that merely contains the word survives untouched.
+        ("/?q=token=notmine", "/?q=token=notmine"),
+        ("/?q=1", "/?q=1"),
+        ("/", "/"),
+        // Repeated, both dropped.
+        ("/?token=a&token=b", "/"),
+        // This string becomes a `Location`, and `//host/` is a scheme-relative
+        // URL rather than a path — the browser would leave this origin. Measured
+        // before the fix: `location: //evil.example/`. Backslash is the same
+        // hole, because browsers normalise it to a slash.
+        ("//evil.example/?token=abc", "/evil.example/"),
+        ("////evil.example/?token=abc", "/evil.example/"),
+        ("/\\evil.example?token=abc", "/evil.example"),
+        ("//evil.example/?token=abc&q=1", "/evil.example/?q=1"),
+    ] {
+        let uri: Uri = before.parse().expect("uri");
+        let after_it = without_token(&uri);
+        assert_eq!(after_it, after, "{before}");
+        // The property behind those last four, stated once: whatever comes out
+        // is a same-origin path. One leading slash, and never two.
+        assert!(after_it.starts_with('/'), "{before} -> {after_it}");
+        assert!(
+            !after_it.starts_with("//") && !after_it.starts_with("/\\"),
+            "{before} -> {after_it} is scheme-relative, so it leaves the origin"
+        );
+    }
+}
+
+/// §08 P12 hands back a cookie so the token need only be presented once. It was
+/// still sitting in the address bar afterwards — kept in history, in a bookmark,
+/// and in the `Referer` of every outbound link. Now the page redirects to itself
+/// without it.
+#[tokio::test]
+async fn the_token_does_not_stay_in_the_address_bar() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start_as_stranger(&tmp, Some("hunter2")).await;
+
+    let opened = request(addr, "GET", "/?token=hunter2", &[], "").await;
+    assert_eq!(opened.status, 303, "the token stayed in the URL");
+    assert_eq!(
+        opened.headers.get("location").map(String::as_str),
+        Some("/"),
+        "redirected somewhere other than the same page"
+    );
+    // The redirect is only worth anything if the cookie went with it.
+    let cookie = opened.headers.get("set-cookie").expect("no cookie issued");
+    assert!(cookie.contains("register_token=hunter2"), "{cookie}");
+    assert!(cookie.contains("HttpOnly"), "{cookie}");
+    assert!(cookie.contains("SameSite=Strict"), "{cookie}");
+
+    // A WebSocket cannot follow a redirect, and `?token=` is how it
+    // authenticates before any cookie exists — so it must not be redirected.
+    let socket = upgrade(addr, "/api/events?token=hunter2", &[]).await;
+    assert_ne!(socket, 303, "the event stream was redirected");
+    assert_eq!(socket, 101, "the event stream did not open");
+
+    // Nor is an API read a navigation. `GET /api/tree?token=…` is an ordinary
+    // way for a script to read the vault, and answering 303 hands back a
+    // redirect instead of the JSON it asked for. Only the address bar needed
+    // cleaning, and only a document has one.
+    let api = request(addr, "GET", "/api/tree?token=hunter2", &[], "").await;
+    assert_eq!(api.status, 200, "an API read was redirected");
+    assert!(api.body.contains("\"notes\""), "{}", api.body);
 }
 
 #[tokio::test]

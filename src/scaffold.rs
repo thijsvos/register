@@ -102,6 +102,10 @@ pub struct Report {
     /// Already there. `init` never overwrites: re-running it on a real vault
     /// must be safe, or nobody can use it to add the pieces they are missing.
     pub kept: Vec<String>,
+    /// Anything that did not go to plan but did not make the vault unusable —
+    /// said out loud rather than swallowed, because the alternative is a vault
+    /// that is subtly not what was asked for and never mentions it.
+    pub notes: Vec<String>,
 }
 
 /// Scaffold a vault at `root`, creating only what is absent.
@@ -134,7 +138,15 @@ pub fn init(root: &Path, git: bool) -> io::Result<Report> {
 
     if git {
         write_new(root, ".gitignore", GITIGNORE, &mut report)?;
-        init_git(root)?;
+        // Only a repository *we* just created gets a commit. Someone who ran
+        // `git init` themselves and then pointed us at the folder has staged
+        // work and intentions we know nothing about, and `git add -A` would
+        // sweep all of it into a commit called "vault: initial".
+        if init_git(root)?
+            && let Some(note) = commit_the_scaffold(root)
+        {
+            report.notes.push(note);
+        }
     }
 
     Ok(report)
@@ -152,11 +164,34 @@ fn write_new(root: &Path, rel: &str, body: &str, report: &mut Report) -> io::Res
     Ok(())
 }
 
-fn init_git(root: &Path) -> io::Result<()> {
-    if root.join(".git").exists() {
-        return Ok(());
+/// A `git` child that ignores an inherited git environment.
+///
+/// `GIT_DIR`, `GIT_WORK_TREE` and friends override `current_dir` entirely, so a
+/// `register init --git` run from inside a hook, a rebase, or any shell where
+/// they are exported would `add -A` and commit against *that* repository rather
+/// than the vault. Nothing in the vault's own scaffolding wants to inherit it.
+fn git_command() -> Command {
+    let mut command = Command::new("git");
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+    ] {
+        command.env_remove(name);
     }
-    let status = Command::new("git")
+    command
+}
+
+/// Make the vault a repository. `Ok(false)` when it already was one.
+fn init_git(root: &Path) -> io::Result<bool> {
+    if root.join(".git").exists() {
+        return Ok(false);
+    }
+    let status = git_command()
         .arg("init")
         .arg("--quiet")
         .current_dir(root)
@@ -172,7 +207,57 @@ fn init_git(root: &Path) -> io::Result<()> {
             "the vault is complete, but `git init` failed",
         ));
     }
-    Ok(())
+    Ok(true)
+}
+
+/// Commit the freshly written scaffold, so the repository has a baseline.
+///
+/// Without it `--git` leaves a repository with no commits at all: the status bar
+/// reads DIRTY on a vault nobody has touched, `git log` has nothing to say, and
+/// the first checkpoint silently becomes the initial import. Returns a note when
+/// it could not commit, which is not a failure — the vault is complete either
+/// way, and the usual cause is a machine with no `user.email` configured.
+fn commit_the_scaffold(root: &Path) -> Option<String> {
+    // Only ever the repository we just made. A vault that already had history
+    // is not ours to write to.
+    let head = git_command()
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if head.status.success() {
+        return None;
+    }
+
+    let staged = git_command()
+        .args(["add", "-A"])
+        .current_dir(root)
+        .status()
+        .ok()?;
+    if !staged.success() {
+        return Some("git add failed, so the vault is uncommitted".to_owned());
+    }
+
+    // `--no-verify`: someone's global hooks template should not get a vote on
+    // whether a new vault has a first commit.
+    let out = git_command()
+        .args(["commit", "--no-verify", "-m", "vault: initial"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+    if out.status.success() {
+        return None;
+    }
+
+    let why = String::from_utf8_lossy(&out.stderr);
+    let why = why
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("");
+    Some(format!(
+        "the vault is complete but uncommitted ({}). `git commit` in it when you have set an identity.",
+        why.trim()
+    ))
 }
 
 /// `register new "title"`: a conforming note, and the path it was written to.

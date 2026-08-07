@@ -11,8 +11,9 @@ within 100 ms.
   never stored.
 - **Agent-compatible by construction.** `register init` writes a `CLAUDE.md`
   agent contract into every vault, so Claude Code works with it out of the box.
-- **Instrument, not lounge.** Engineering-grade monochrome, one typeface family,
-  1px hairlines, a single signal color for live status. Latency is a material:
+- **Instrument, not lounge.** Engineering-grade monochrome, one typeface family
+  in two working weights, 1px hairlines, a single signal color for live status.
+  Latency is a material:
   16 ms interactions, sub-100 ms agent-edit-to-paint, enforced in CI.
 
 V1 ships five things to instrument grade — notes, links, tags, tasks, search —
@@ -32,6 +33,11 @@ it needs a folder and a contract, and `register init` writes the contract into
 the folder. A human edits through the UI, an agent edits the files, and a
 watcher keeps both views identical inside 100 ms. Neither side is a guest.
 
+Nothing is ever hard-deleted, either. A removed note moves to `.register/trash/`,
+which the server still counts when it hands out the next reference number — so a
+`[[003]]` written last month can never quietly start pointing at different prose.
+That is the whole of the vault's bookkeeping.
+
 The design follows from the same idea. If files are the truth, the interface is
 an instrument for reading them, not a place things live — so it is monochrome,
 hairlined, keyboard-first, and free of animation that would cost latency for
@@ -39,14 +45,20 @@ decoration.
 
 ## Budgets
 
-Not aspirations. Every one is asserted in CI, and the measured figure is what
-the last commit actually produced.
+Not aspirations. Every one is asserted in CI. Where a number is given it is what
+the last commit produced on an M-series laptop; `asserted` means the budget is
+checked on every run but the figure is the machine's rather than the product's.
+
+The three latency budgets are asserted at 2.5× under `CI`: a shared two-vCPU
+runner measured ~2.4× slower across all three at once, which is a CPU ratio and
+not a regression. The raw figure is printed either way, and `BUDGET_FACTOR=1`
+runs the promise as written on any machine.
 
 | Budget | Limit | Measured | Enforced by |
 |---|---|---|---|
-| Release binary | ≤ 10 MB | 2.96 MB | `release.yml` per platform |
-| Shell JS (initial) | ≤ 60 kB gz | 37.3 kB | `size-limit` |
-| Editor chunk (lazy) | ≤ 150 kB gz | 101.3 kB | `size-limit` |
+| Release binary | ≤ 10 MB | 3.04 MB macOS arm64 · 3.65 MB linux x64, the largest | `release.yml` per platform |
+| Shell JS (initial) | ≤ 60 kB gz | 37.45 kB | `size-limit` |
+| Editor chunk (lazy) | ≤ 150 kB gz | 101.36 kB | `size-limit` |
 | Idle RAM, 1k notes | ≤ 50 MB | asserted | Playwright + `ps` |
 | Agent edit → visible | ≤ 100 ms | asserted | Playwright, real file write |
 | Document switch | < 16 ms | asserted | status-bar RENDER + Playwright |
@@ -86,8 +98,11 @@ cd app && pnpm build          # the UI is embedded in the binary
 cd .. && cargo install --path . --force
 ```
 
-The `--force` matters: without it `cargo install` silently does nothing when the
-version has not changed, and you keep running the binary you built last time.
+`--force` is belt and braces. Cargo 1.97 does replace an installed binary whose
+source changed even without it — measured — but it has not always, the message
+it prints when it declines is easy to miss, and the failure it prevents is the
+expensive one: a fix that appears not to work because you are still running last
+week's binary.
 
 **Working on the UI?** The binary carries the UI inside it, so every change
 otherwise needs that full reinstall — and a stale binary looks exactly like a
@@ -104,22 +119,26 @@ typing, `pnpm dev` is still faster — this is for seeing the *built* UI without
 paying for a reinstall.
 
 From v1.0 onward: prebuilt binaries on the GitHub release page for macOS
-(arm64/x64), Linux (x64/arm64, musl) and Windows x64. Until then, and from
-source at any time:
+(arm64/x64), Linux (x64/arm64, musl) and Windows x64. Until then, the two
+commands above are the whole story.
 
-```sh
-cargo install --git https://github.com/thijsvos/register --locked
-```
+Two install commands you will not find here, both deliberately.
 
-There is deliberately no `cargo install register-notes` line to copy: the name
-is not claimed on crates.io, and printing an install command for a package
-someone else could publish is how you get a supply-chain incident with your own
-README as the delivery mechanism.
+**No `cargo install --git`.** `app/dist/` is gitignored, so the checkout cargo
+makes for itself has no UI to embed — and that build *succeeds*. It starts, it
+serves `/api`, and it answers every page request with `no UI bundled; run cd app
+&& pnpm build`: a working server behind a blank 404, which is a worse failure
+than not compiling at all. Build the UI first and install from the path.
+
+**No `cargo install register-notes`.** The name is not claimed on crates.io, and
+printing an install command for a package someone else could publish is how you
+get a supply-chain incident with your own README as the delivery mechanism.
 
 ### Container
 
 ```sh
-VAULT_PATH=~/vault docker compose -f deploy/docker-compose.yml up -d --build
+REGISTER_UID=$(id -u) REGISTER_GID=$(id -g) VAULT_PATH=~/vault \
+  docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 **`--build` is not optional when you are building from source.** Without it,
@@ -130,29 +149,83 @@ running a published image you have not modified.
 
 Serves on `http://localhost:7777` against the folder you mounted. The image is
 three stages down to `scratch`, so it is the binary and nothing else — no shell,
-no package manager, **3.28 MB**.
+no package manager, **3.65 MB** on amd64 — which is what `release.yml` publishes,
+since it builds on an x64 runner. Build it on an arm64 machine and you get
+3.25 MB. The image *is* the binary; there is nothing else in it to account for
+the difference. Every MB on this page is 1024², the unit `release.yml` measures
+the budget in.
 
 The live-reload works through the bind mount: edit a note on the host and the
 watcher inside the container reports it in about 15 ms, so an agent running on
 your machine and the UI in the container stay in step.
 
-Two things worth knowing before you publish that port:
+The compose file publishes on `127.0.0.1` only, so out of the box this reaches
+the machine it runs on and nowhere else. Three things before you widen it:
 
 - The container binds `0.0.0.0` because a published port needs it, not because
   the server is meant to be reachable from a network. The Origin and Host guards
   still hold, and `/api/reveal` refuses outright on a non-loopback bind — but
   putting this on a network is a decision. Behind Tailscale is the intended
   shape.
-- Which is enforced, not just advised: `http://localhost:7777` works, and the
-  same container reached by the host's LAN address answers **403**. The Host
-  guard refuses a non-loopback name from anyone who has not presented a token,
-  so making this genuinely reachable means setting one — see below.
+- Widening the `ports` line is not enough, because the refusal is in the server,
+  not in Docker: `http://localhost:7777` works, and the same container reached
+  by the host's LAN address answers **403**. The Host guard refuses a
+  non-loopback name from anyone who has not presented a token, so making this
+  genuinely reachable means setting one — `command: ["--token", "<secret>"]` in
+  the compose file, which is appended to the image ENTRYPOINT.
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
 Images are published to `ghcr.io/thijsvos/register` on tags, addressable by version
 only — there is no `latest`, deliberately, because nothing should depend on a
 tag that moves under it.
+
+## Using it
+
+Everything is reachable from the keyboard, and every control on screen prints its
+own key — so this table is a convenience, not a manual.
+
+| Key | Does |
+|---|---|
+| `⌘K` / `Ctrl-K` | Command palette — full-text search, commands, templates |
+| `⌘D` / `Ctrl-D` | TODAY — every open task in the vault, grouped by note |
+| `G` `D` | The daily log for today's date |
+| `G` `I` | The inbox, note `000` |
+| `G` `T` | TODAY, the chord form |
+| `N` | New note |
+| `I` | Invert display |
+| `[` · `]` | Toggle the index · the inspector |
+| `Esc` | Leave the editor — the caret vanishing is the mode indicator |
+| `↵` | Back into the editor |
+| `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
+| `↑` `↓` · `Tab` | Move within the palette — `j` and `k` are letters while you are typing |
+
+⌘K is the whole navigation surface. It runs real full-text search over the note
+bodies rather than filtering a fixed list; it matches commands as a subsequence,
+so `tgi` finds TOGGLE INSPECTOR; and it lists everything in `templates/` under
+NEW FROM TEMPLATE, where whatever you have typed becomes the new note's title.
+
+**The daily log.** `G D` opens `daily/YYYY-MM-DD.md`, cutting it from
+`templates/daily.md` the first time each day and opening it every time after. The
+date is UTC, like every other timestamp in the chrome.
+
+**TODAY** is an aggregate that stores nothing. It re-derives every `- [ ]` in the
+vault, groups them under the note each came from, and ticking one writes through
+to that line in that file — the count in the header is the vault's, not a
+list's.
+
+**The inspector** is the same trick applied to one note: properties, outline,
+backlinks and tag counts, all recomputed from the buffer as you type. The
+backlinks are `[[wikilinks]]` inverted; following one to a note that does not
+exist creates it.
+
+**Settings** (`GO · SETTINGS / BYOF` in ⌘K) holds three things, none of them in
+browser storage: the scheme (light, dark, or press the lit one again to follow
+the OS) and the body face (Commit, or Server Mono as a "teletype" theme), both
+written to `.register/config.json`; and BYOF, whose font bytes go to
+`.register/fonts/` — a directory `register init --git` adds to `.gitignore`,
+because a licensed face is yours and not the repository's. See below.
+
 
 ## Remote access, and history
 
@@ -177,17 +250,33 @@ all. Nothing changes? Nothing is committed. The status bar's GIT field shows
 Turn it off by deleting the flag. Your history is ordinary git: `git log`,
 `git revert`, `git checkout` all work, because there was never anything else.
 
+Not in the container, though. The image is `FROM scratch` and has no git binary,
+so checkpoints cannot run there and the status bar's GIT field stays dashed even
+for a vault that is a repository. Run `register serve` natively if you want them.
+
 ### Remote mode
 
 ```sh
-register serve ~/vault --host 0.0.0.0 --token "$(openssl rand -hex 24)"
+openssl rand -hex 24 > ~/.register-token
+register serve ~/vault --host 0.0.0.0 --token-file ~/.register-token
 ```
+
+`--token-file` rather than `--token`, because a command line is public: `ps`
+shows it to every other user on the machine. `REGISTER_TOKEN` in the environment
+works too and is nearly as good — on Linux `/proc/<pid>/environ` is readable by
+the same user, but not by others. `--token` still exists for a throwaway, and
+the three are mutually exclusive.
 
 Then open `http://<host>:7777/?token=<the token>` once. The token is stored as
 an HttpOnly cookie, which is what carries it into the WebSocket — that API
 cannot send an `Authorization` header, so a bearer-only scheme would leave live
 reload either unauthenticated or unreachable. Scripts can use
 `Authorization: Bearer <token>` instead.
+
+The page then redirects to itself without the token, so the secret does not sit
+in the address bar, in history, in a bookmark, or in the `Referer` of every link
+you later click. The WebSocket is exempt: it cannot follow a redirect, and
+`?token=` is how it authenticates before any cookie exists.
 
 **Localhost stays tokenless.** A request that reached 127.0.0.1 came from the
 machine the vault is on, where the files are readable anyway.
@@ -207,26 +296,32 @@ one in front.
 No accounts. No user table. No telemetry. The token is a string you chose,
 compared in constant time, and forgotten when the process exits.
 
-## Build status
-Under construction with Claude Code, phase by phase per `SPEC.html` §08.
-
-## For contributors / agents
-Read `SPEC.html` end to end first, then `CLAUDE.md`. `register-prototype.html` is
-the visual + interaction reference. The build runs phase by phase per §08.
-
-```
-cargo run -- health                # server toolchain
-cd app && pnpm install && pnpm dev # UI toolchain
-```
-
 ## Contributing
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the v1 scope fence, the
+
+Under construction with Claude Code, phase by phase per `SPEC.html` §08. Read the
+spec end to end first, then `CLAUDE.md`; `register-prototype.html` is the visual
++ interaction reference.
+
+```sh
+cargo run -- health                  # server toolchain
+cargo run -- serve ./devvault        # server, with the UI built into it
+cd app && pnpm install && pnpm dev   # UI on :5173, /api proxied to :7777
+```
+
+`pnpm dev` serves the shell only. It proxies `/api` to a `register serve` on
+7777, so leave one running in another terminal or the page boots with an empty
+index and a dead status bar.
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) has the v1 scope fence, the
 park-and-promote process, and what "green" means.
 
 ## Fonts and licensing
 
-Three faces ship in this repository, all **SIL OFL 1.1**, each with its
-`OFL.txt` beside it:
+One family does the reading — Commit Mono at 400 and 700, which is what §02
+means by "one typeface family in two working weights". The other two are not a
+second body family: one draws the 11px micro layer, the other is a body theme
+you have to go and choose. Three faces ship in this repository, all **SIL OFL
+1.1**, each with its `OFL.txt` beside it:
 
 | Face | Role |
 |---|---|

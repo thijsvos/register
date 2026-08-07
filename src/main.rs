@@ -36,8 +36,20 @@ enum Command {
         #[arg(long, default_value_t = 7777)]
         port: u16,
         /// Require this token from anything that is not localhost (§08 P12).
-        #[arg(long)]
+        ///
+        /// Passing it here puts it in `ps` for every other user on the machine.
+        /// Prefer `--token-file`, or the environment variable.
+        #[arg(long, env = "REGISTER_TOKEN", hide_env_values = true)]
         token: Option<String>,
+        /// Read the token from a file, so it never appears in argv.
+        ///
+        /// Deliberately no `conflicts_with`: clap counts an env-sourced value as
+        /// present, so pairing it with `REGISTER_TOKEN` would make the two safe
+        /// routes refuse to run together — and anyone with the variable exported
+        /// in their shell could never use `--token-file` at all. Precedence is
+        /// resolved in `read_token` instead: the file wins.
+        #[arg(long, value_name = "FILE")]
+        token_file: Option<PathBuf>,
         /// Serve the UI from this directory instead of the copy built into the
         /// binary. For working on the UI: `--assets app/dist` means a
         /// `pnpm build` is enough, with no reinstall.
@@ -74,13 +86,20 @@ async fn main() -> ExitCode {
             host,
             port,
             token,
+            token_file,
             assets,
-        } => match serve(vault, &host, port, token, assets).await {
-            Ok(()) => ExitCode::SUCCESS,
+        } => match read_token(token, token_file.as_deref()) {
             Err(message) => {
                 eprintln!("{message}");
                 ExitCode::FAILURE
             }
+            Ok(token) => match serve(vault, &host, port, token, assets).await {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(message) => {
+                    eprintln!("{message}");
+                    ExitCode::FAILURE
+                }
+            },
         },
         Command::Init { path, git } => report(init(&path, git)),
         Command::New { title } => report(create(&title)),
@@ -101,6 +120,41 @@ fn report(outcome: Result<String, String>) -> ExitCode {
     }
 }
 
+/// The token, from whichever of the three routes was used.
+///
+/// A file is the one that leaks nothing: argv is world-readable through `ps`,
+/// and an environment variable is readable from `/proc/<pid>/environ` on Linux
+/// by the same user. The file wins when both are given, because it is the most
+/// deliberate of the three — nobody sets `--token-file` by accident, while
+/// `REGISTER_TOKEN` can be inherited from a shell nobody is thinking about.
+///
+/// Trailing newline trimmed, because every editor and every `openssl rand … >
+/// file` puts one there and a token that differs by one byte fails in a way
+/// nothing explains.
+fn read_token(token: Option<String>, file: Option<&Path>) -> Result<Option<String>, String> {
+    let Some(file) = file else {
+        return Ok(token);
+    };
+    let raw = std::fs::read_to_string(file)
+        .map_err(|error| format!("token file {}: {error}", file.display()))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        // Silently serving an unguarded vault because the file was empty is the
+        // one outcome nobody would notice.
+        return Err(format!("token file {} is empty", file.display()));
+    }
+    // Interior whitespace is the two-line file: it trims to something no header,
+    // cookie or query string can carry, so the server starts, announces remote
+    // mode, and refuses every credential anyone can actually send.
+    if trimmed.chars().any(char::is_whitespace) {
+        return Err(format!(
+            "token file {} has whitespace inside the token; it must be one word",
+            file.display()
+        ));
+    }
+    Ok(Some(trimmed.to_owned()))
+}
+
 fn init(path: &Path, git: bool) -> Result<String, String> {
     let made = scaffold::init(path, git).map_err(|error| format!("init: {error}"))?;
     let root = path
@@ -117,6 +171,9 @@ fn init(path: &Path, git: bool) -> Result<String, String> {
     // contract" look identical otherwise.
     for rel in &made.kept {
         lines.push(format!("  = {rel} (kept)"));
+    }
+    for note in &made.notes {
+        lines.push(format!("  ! {note}"));
     }
     lines.push(format!("next: register serve {root}"));
     Ok(lines.join("\n"))
@@ -194,4 +251,63 @@ async fn serve(
     server::serve(listener, state)
         .await
         .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::read_token;
+    use std::path::PathBuf;
+
+    /// A scratch file path unique to this process and call site.
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("register-token-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        dir.join(name)
+    }
+
+    #[test]
+    fn no_file_means_the_flag_or_the_environment_stands() {
+        assert_eq!(read_token(None, None), Ok(None));
+        assert_eq!(
+            read_token(Some("from-argv".to_owned()), None),
+            Ok(Some("from-argv".to_owned()))
+        );
+    }
+
+    #[test]
+    fn a_file_wins_over_the_flag_and_loses_its_trailing_newline() {
+        let path = scratch("good.txt");
+        std::fs::write(&path, "s3cret\n").expect("write");
+        assert_eq!(
+            read_token(Some("from-argv".to_owned()), Some(&path)),
+            Ok(Some("s3cret".to_owned()))
+        );
+    }
+
+    #[test]
+    fn an_unusable_file_is_refused_and_names_itself() {
+        let empty = scratch("empty.txt");
+        std::fs::write(&empty, "").expect("write");
+        let blank = scratch("blank.txt");
+        std::fs::write(&blank, "  \n\n").expect("write");
+        let two = scratch("two.txt");
+        std::fs::write(&two, "line1\nline2\n").expect("write");
+        let missing = scratch("nope.txt");
+        let _ = std::fs::remove_file(&missing);
+
+        for (path, expect) in [
+            (&empty, "is empty"),
+            (&blank, "is empty"),
+            (&two, "whitespace inside"),
+            (&missing, "token file"),
+        ] {
+            let error = read_token(None, Some(path)).expect_err("should refuse");
+            assert!(error.contains(expect), "{path:?}: {error}");
+            // Whatever went wrong, the message says which file to go and look at.
+            assert!(
+                error.contains(&path.display().to_string()),
+                "{path:?}: {error}"
+            );
+        }
+    }
 }

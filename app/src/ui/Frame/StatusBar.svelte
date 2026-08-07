@@ -1,8 +1,10 @@
 <script lang="ts">
 // §02b: "Chrome shows only derivable truth. No gauge may display a number the
-// system cannot measure." Watcher, render, files and vault are all reported by
-// the server. Git is not — it arrives with P12 — so it stays dashed rather than
-// inventing a value.
+// system cannot measure." Watcher, render, files, vault and git are all reported
+// by the server. Git dashes when the server cannot see a repository — either the
+// vault is not one, or nothing can answer: the container is `FROM scratch` and
+// has no git binary, so it dashes there however the vault is stored. Both are a
+// measured absence rather than a missing feature.
 let {
   renderMs = null,
   watcherLive = false,

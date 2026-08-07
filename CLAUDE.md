@@ -1,5 +1,10 @@
 # REGISTER — agent operating manual
 
+*Written by the maintainer to the coding agent working in this repository. "I"
+and "my" are the maintainer throughout. If you are a human contributor, the file
+you want is [`CONTRIBUTING.md`](CONTRIBUTING.md) — it says the same things
+without the imperative mood.*
+
 Read `SPEC.html` before any task. It is the contract. `register-prototype.html`
 is the visual + interaction reference for the UI (a static mock, not the
 implementation — rebuild it on the real stack in §04). Where the mock and a §02b

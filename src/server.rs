@@ -12,7 +12,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path, Request, State};
-use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
@@ -228,6 +228,17 @@ async fn token_gate(State(state): State<AppState>, request: Request, next: Next)
         request.uri(),
     );
 
+    // Captured before `next` consumes the request, for the redirect below.
+    let target = request.uri().clone();
+    // A navigation, and only a navigation. Excluding upgrades is not enough:
+    // `GET /api/tree?token=…` is a perfectly ordinary way for a script to read
+    // the vault, and answering it with a 303 replaces the JSON it asked for
+    // with a redirect it may not follow. The address bar — the thing this
+    // exists to clean — is only ever showing a document.
+    let redirectable = request.method() == Method::GET
+        && !request.headers().contains_key(header::UPGRADE)
+        && !request.uri().path().starts_with("/api/");
+
     if gate == Gate::Refuse {
         return (
             StatusCode::UNAUTHORIZED,
@@ -256,8 +267,49 @@ async fn token_gate(State(state): State<AppState>, request: Request, next: Next)
             format!("{TOKEN_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict").parse()
     {
         response.headers_mut().insert(header::SET_COOKIE, cookie);
+
+        // …and once it is a cookie, the copy in the address bar is a liability:
+        // it survives in history, in a bookmark, and in the `Referer` of every
+        // outbound link. Send the browser to the same page without it.
+        //
+        // Only for a document GET. A WebSocket upgrade cannot follow a redirect,
+        // and `/api/events?token=…` is exactly how the socket authenticates
+        // before the cookie exists.
+        if redirectable && let Ok(location) = without_token(&target).parse() {
+            *response.status_mut() = StatusCode::SEE_OTHER;
+            response.headers_mut().insert(header::LOCATION, location);
+        }
     }
     response
+}
+
+/// The same URI with `token=` dropped from the query.
+///
+/// Rebuilt rather than string-replaced: `?token=x&q=1`, `?q=1&token=x` and a
+/// bare `?token=x` all have to come out right, and a `q` value that happens to
+/// contain "token=" must survive.
+///
+/// The leading slashes are collapsed because this string becomes a `Location`.
+/// A path of `//evil.example/` is not a path at all — it is a scheme-relative
+/// URL, and a browser handed `Location: //evil.example/` leaves this origin
+/// entirely. `/\evil.example` is the same hole, since browsers normalise the
+/// backslash. Measured before the fix: `GET //evil.example/?token=…` answered
+/// `303` with `location: //evil.example/`.
+fn without_token(uri: &Uri) -> String {
+    let path = format!("/{}", uri.path().trim_start_matches(['/', '\\']));
+    let path = path.as_str();
+    let kept: Vec<&str> = uri
+        .query()
+        .unwrap_or_default()
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| pair.split_once('=').map(|(name, _)| name) != Some("token"))
+        .collect();
+    if kept.is_empty() {
+        path.to_owned()
+    } else {
+        format!("{path}?{}", kept.join("&"))
+    }
 }
 
 pub fn router(state: AppState) -> Router {

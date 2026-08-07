@@ -1,19 +1,53 @@
 name: Release
 on:
   push:
-    tags: ["v*"]
+    # `v*` also matches `vault-experiment` and `v2-spike`, and `git push --tags`
+    # pushes every local tag at once — one stray name would cut a release.
+    tags: ["v[0-9]*"]
 
-# The tag also triggers ci.yml (a bare `push` fires for tags), so the gates run
-# alongside this rather than being restated here.
+# The tag also triggers ci.yml, whose push filter names `tags:` for exactly this
+# reason, so the gates run against this commit rather than being restated here.
+#
+# Alongside, though — not in front. The two workflows are independent, so a
+# release can finish while CI is still running and can be published even if CI
+# goes red. What stops that in practice is that a tag is cut from a commit
+# already green on main. If that stops being true, this needs a real gate rather
+# than a longer comment.
+
+# Read by default; each job takes only what it needs. `ui` and `binaries` compile
+# and need nothing — and they are the jobs where a compromised dependency would
+# be running.
 permissions:
-  contents: write # create the release and attach binaries
-  packages: write # push the image to ghcr
+  contents: read
+
+# No `cancel-in-progress`: a half-published release — some assets uploaded, no
+# image, or an image with no release — is worse than one that queues.
+concurrency:
+  group: release-${{ github.ref }}
 
 jobs:
+  # Nothing below is worth building if the tag disagrees with the version the
+  # binaries will report. Seconds, before five runners spin up.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: The tag is the version in Cargo.toml
+        run: |
+          set -euo pipefail
+          MANIFEST=$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "Cargo.toml $MANIFEST · tag $TAG"
+          # `register --version` serves CARGO_PKG_VERSION, so a mismatch ships
+          # binaries and image tags that misreport themselves to every bug
+          # report and every digest that follows.
+          test "$MANIFEST" = "$TAG"
+
   # Built once and shared. Every platform binary embeds the UI, and they must
   # embed the *same* UI — five independent builds would be five chances for one
   # architecture to ship something the others did not.
   ui:
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -65,9 +99,28 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable # rust-toolchain.toml governs
-        with: { targets: "${{ matrix.target }}" }
+      # …and because it governs, the cross std has to be added to *it*. The
+      # action's `targets:` input installs into the toolchain the action names —
+      # `stable` — while the pin sends cargo to the channel in
+      # rust-toolchain.toml, a different toolchain directory that has never seen
+      # it. All three cross legs died there on E0463, "can't find crate for
+      # `std`", before compiling a line.
+      #
+      # `rustup target add` with no `+toolchain` resolves the active toolchain
+      # exactly as cargo does, so the std lands where the build looks for it. It
+      # names no version either, which is why this is a step and not a pin:
+      # rust-toolchain.toml stays the only copy (rule 11).
+      - name: The cross std, in the toolchain the pin selects
+        run: rustup target add ${{ matrix.target }}
       - uses: actions/download-artifact@v6
         with: { name: ui, path: app/dist }
+      # The embed is `allow_missing = true` so a fresh clone can `cargo check`
+      # before `pnpm build`. The cost lands here: if the artifact were to arrive
+      # anywhere but app/dist, every leg would build, pass its budget, and ship
+      # a binary that answers 404 at `/`.
+      - name: The UI actually arrived
+        shell: bash
+        run: test -f app/dist/index.html
 
       - name: musl linker
         if: contains(matrix.target, 'musl')
@@ -93,6 +146,13 @@ jobs:
           LIMIT=$((10 * 1024 * 1024))
           echo "${{ matrix.asset }}: $BYTES bytes of $LIMIT"
           test "$BYTES" -le "$LIMIT"
+          # And that the UI is really inside it, which is the failure worth
+          # catching: a binary that embedded nothing still builds, still starts,
+          # and answers 404 at `/`. A size floor cannot see it — measured, the
+          # no-UI build is 2.44 MiB and clears any floor low enough to be safe.
+          # `assets/shell-` is a Vite content-hashed chunk name, so it is in
+          # there only if the embed actually happened.
+          grep -aq 'assets/shell-' "${{ matrix.asset }}"
 
       - uses: actions/upload-artifact@v5
         with:
@@ -103,36 +163,69 @@ jobs:
   publish:
     needs: binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the release and attach binaries
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v6
         with: { pattern: bin-*, path: dist, merge-multiple: true }
       - name: Attach every binary to the release
-        env: { GH_TOKEN: "${{ github.token }}" }
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           ls -l dist
-          gh release create "${{ github.ref_name }}" dist/* \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          # Five targets, five assets. An unmatched glob is left as the literal
+          # `dist/*` by bash rather than erroring, so without this the failure
+          # arrives as gh complaining about a filename.
+          test "$(ls -1 dist | wc -l)" -eq 5
+          # Idempotent: a re-run after a dropped runner or a transient failure
+          # should converge rather than fail on "a release with that tag already
+          # exists" — after rebuilding everything.
+          #
+          # Branching on existence rather than `create || upload`, because that
+          # form swallows the reason create failed and would silently upload into
+          # a release made from a different commit.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+          fi
 
   container:
-    needs: ui
+    # `publish` too, not just `binaries`. With fail-fast disabled, a leg that
+    # busts its budget fails `binaries` and skips `publish` — but as siblings the
+    # image would still have been pushed in parallel, leaving a version that
+    # exists as a container and as nothing else. Depending on `publish` costs one
+    # job's latency and makes that impossible rather than unlikely.
+    needs: [ui, binaries, publish]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # push the image to ghcr
     steps:
       - uses: actions/checkout@v7
       - name: Log in to ghcr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
         run: |
-          echo "${{ github.token }}" \
-            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
       # Deliberately no floating tag. Rule 11 bans `latest` as a version, and
       # publishing one invites exactly the drift the rule exists to stop — so
       # the image is addressable only by the version that built it.
+      # Through the environment, not interpolated into the script. Git permits
+      # `$`, backticks and parentheses in a tag name, and such a tag still
+      # matches the trigger — `${{ }}` pastes it in as source text before bash
+      # ever sees it, so the tag would be running as the shell.
       - name: Build and push
+        env:
+          VERSION: ${{ github.ref_name }}
+          OWNER_RAW: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          VERSION="${{ github.ref_name }}"
+          OWNER=$(echo "$OWNER_RAW" | tr '[:upper:]' '[:lower:]')
           docker build -f deploy/Dockerfile \
             -t "ghcr.io/$OWNER/register:$VERSION" \
             -t "ghcr.io/$OWNER/register:${VERSION#v}" \

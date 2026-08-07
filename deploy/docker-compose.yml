@@ -3,7 +3,27 @@
 services:
   register:
     build: { context: .., dockerfile: deploy/Dockerfile }
-    ports: ["7777:7777"]
+    # Loopback only. `"7777:7777"` publishes on every interface, which makes
+    # putting your vault on the network the default — while the README calls it
+    # "a decision, not a default". One of the two had to change, and it was not
+    # going to be the README.
+    #
+    # To reach it from another machine, widen this AND set a token, because a
+    # tokenless request from off-box is refused by the Host guard anyway:
+    #   ports: ["7777:7777"]
+    #   command: ["--token", "<secret>"]     # appended to the image ENTRYPOINT
+    ports: ["127.0.0.1:7777:7777"]
+    # Who the server writes as. The image is `scratch` and has no /etc/passwd,
+    # so this can only be numeric — and without it the server is uid 0, which on
+    # a Linux host leaves every note it creates root-owned inside your own
+    # folder. Pass your own ids so the files come out yours:
+    #   REGISTER_UID=$(id -u) REGISTER_GID=$(id -g) VAULT_PATH=~/vault docker compose ... up -d --build
+    #
+    # Not `UID`/`GID`: bash and dash both make UID readonly, so that assignment
+    # fails and the command falls back to the default while looking like it
+    # worked. The default is the usual first-user pair on Linux; Docker Desktop
+    # on macOS and Windows maps ownership itself and ignores the mismatch.
+    user: "${REGISTER_UID:-1000}:${REGISTER_GID:-1000}"
     volumes:
       - ${VAULT_PATH:-./vault}:/vault
     restart: unless-stopped

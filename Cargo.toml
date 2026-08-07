@@ -5,6 +5,9 @@ edition = "2024"
 license = "MIT"
 description = "A file-native second brain: one binary serves a folder of markdown."
 readme = "README.md"
+repository = "https://github.com/thijsvos/register"
+keywords = ["notes", "markdown", "local-first", "knowledge-base", "zettelkasten"]
+categories = ["command-line-utilities", "text-processing"]
 
 [[bin]]
 name = "register"
@@ -12,7 +15,10 @@ path = "src/main.rs"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
-clap = { version = "4", features = ["derive"] }
+# `env` is a feature of a crate already here, not a new dependency: it lets the
+# token arrive as REGISTER_TOKEN instead of in argv, where `ps` shows it to
+# every other user on the machine.
+clap = { version = "4", features = ["derive", "env"] }
 notify = "8"
 rust-embed = { version = "8", features = ["mime-guess"] }
 serde = { version = "1", features = ["derive"] }

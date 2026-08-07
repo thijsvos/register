@@ -1,5 +1,29 @@
 name: CI
-on: [push, pull_request]
+# `on: [push, pull_request]` ran the whole matrix twice for any branch with a PR
+# open — same commit, same answer, twice the minutes. Pushes are checked on main;
+# everywhere else the pull_request event is the one that matters.
+on:
+  push:
+    branches: [main]
+    # release.yml states that the gates run alongside it rather than being
+    # restated there, and that is only true while a tag push reaches this
+    # workflow. A bare `push:` used to catch tags for free; a `branches:` filter
+    # does not, and would have cut a release with nothing checking it.
+    tags: ["v[0-9]*"]
+  pull_request:
+
+# This repository is public, so these jobs run code from strangers. Nothing here
+# writes anything back, and the default is whatever the repo setting happens to
+# be — which is not a thing to leave to a setting.
+permissions:
+  contents: read
+
+# A second push while the first is still building makes the first answer
+# irrelevant, not interesting.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ui:
     runs-on: ubuntu-latest
@@ -50,9 +74,13 @@ jobs:
       - name: no font outside app/public/fonts, and no licensed face anywhere
         run: |
           set -euo pipefail
+          # One pattern, used by both the check and its own proof. Writing the
+          # guard against `\.woff2$` while the check used the alternation meant a
+          # break in the alternation left the guard happy and the job green.
+          FONTS='\.(woff2?|ttf|otf|eot)$'
           # Tracked files, not the working tree: what a push carries is what is
           # tracked, and the working tree holds an ignored .register/fonts/.
-          STRAY=$(git ls-files | grep -iE '\.(woff2?|ttf|otf|eot)$' | grep -v '^app/public/fonts/' || true)
+          STRAY=$(git ls-files | grep -iE "$FONTS" | grep -v '^app/public/fonts/' || true)
           if [ -n "$STRAY" ]; then
             echo "font files outside app/public/fonts:"; echo "$STRAY"; exit 1
           fi
@@ -63,8 +91,9 @@ jobs:
             echo "a licensed face is tracked:"; echo "$LICENSED"; exit 1
           fi
           # A grep that finds nothing reads the same whether the rule holds or
-          # the pattern is broken. Prove the sanctioned faces are still matched.
-          SANCTIONED=$(git ls-files 'app/public/fonts/*' | grep -icE '\.woff2$' || true)
+          # the pattern is broken. Prove the same pattern still matches the
+          # faces that are supposed to be there.
+          SANCTIONED=$(git ls-files 'app/public/fonts/*' | grep -icE "$FONTS" || true)
           test "$SANCTIONED" -gt 0
           echo "PASS: $SANCTIONED sanctioned faces, no strays"
   e2e:
@@ -99,9 +128,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: app/package.json }
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc }
       # Installed rather than pulled from a third-party action: this repo has
       # four crate dependencies and the point of the job is supply chain.
       - run: cargo install cargo-audit --locked
       # The check that would have found RUSTSEC-2025-0068 — the unsound
       # `serde_yml` — without ADR-001 having to find it by reading advisories.
-      - run: cargo audit --deny warnings
+      #
+      # `unsound` and `yanked` rather than the blanket `warnings`: that also
+      # denies `unmaintained`, which fires on transitive crates nobody here can
+      # act on and turns every unrelated PR red. A gate that is red for reasons
+      # the contributor cannot fix is a gate people learn to ignore. Real
+      # vulnerabilities still fail the build — that is cargo-audit's default.
+      - run: cargo audit --deny unsound --deny yanked
+      # The 7 runtime npm packages ship inside the binary too, and nothing was
+      # checking them at all. Prod only: a dev-tree advisory is not in the
+      # artefact.
+      - run: pnpm audit --prod --audit-level high
+        working-directory: app
