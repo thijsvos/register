@@ -56,10 +56,20 @@ when you move away from it.
 
 ## If you expose it beyond localhost
 
-`--host 0.0.0.0` without `--token` is not a supported deployment. A tokenless
-request from off-box is refused by the `Host` guard, so it mostly fails closed —
-but the intended shape is a token, and behind Tailscale rather than the open
-internet.
+`--host 0.0.0.0` without a token is **refused at startup**, and the refusal is
+the point: the `Host` header the origin guard checks is chosen by the client. It
+stops DNS rebinding — a browser cannot lie about it — and it stops nothing at all
+from `curl`. This was measured, not assumed: before the refusal existed, one
+`-H 'Host: localhost'` from a LAN address gave a peer read, write and delete on
+the whole vault, and this file used to claim the opposite.
+
+`--allow-tokenless-network` overrides it, for the case where something else
+already decides who can reach the port — a container published to loopback, a
+firewall. The container ships with that flag for exactly that reason, and its
+compose file publishes on `127.0.0.1`. Widen that `ports:` line and the flag
+becomes a lie; add a token in the same edit.
+
+The intended shape is a token, behind Tailscale rather than the open internet.
 
 Pass the token as `--token-file` or `REGISTER_TOKEN`; `--token` on the command
 line is visible in `ps` to every other user on the machine.

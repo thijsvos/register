@@ -167,12 +167,13 @@ the machine it runs on and nowhere else. Three things before you widen it:
   still hold, and `/api/reveal` refuses outright on a non-loopback bind — but
   putting this on a network is a decision. Behind Tailscale is the intended
   shape.
-- Widening the `ports` line is not enough, because the refusal is in the server,
-  not in Docker: `http://localhost:7777` works, and the same container reached
-  by the host's LAN address answers **403**. The Host guard refuses a
-  non-loopback name from anyone who has not presented a token, so making this
-  genuinely reachable means setting one — `command: ["--token", "<secret>"]` in
-  the compose file, which is appended to the image ENTRYPOINT.
+- Widening the `ports` line means adding a token in the same edit. The container
+  runs with `--allow-tokenless-network`, which is safe only because compose
+  publishes to `127.0.0.1`; a browser reaching it by the host's LAN address gets
+  **403** from the Host guard, but that guard is a browser-integrity check and
+  any non-browser client simply sets the header. Give it a real credential:
+  `command: ["--token-file", "/vault/.register/token"]` in the compose file,
+  appended to the image ENTRYPOINT.
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
@@ -277,6 +278,12 @@ The page then redirects to itself without the token, so the secret does not sit
 in the address bar, in history, in a bookmark, or in the `Referer` of every link
 you later click. The WebSocket is exempt: it cannot follow a redirect, and
 `?token=` is how it authenticates before any cookie exists.
+
+Binding a real interface with no token is **refused at startup**, because the
+origin guard alone does not cover it: the `Host` header it checks is chosen by
+the client, which stops a browser being rebound onto your loopback but stops
+nothing that speaks HTTP directly. `--allow-tokenless-network` overrides the
+refusal when something else already limits who can reach the port.
 
 **Localhost stays tokenless.** A request that reached 127.0.0.1 came from the
 machine the vault is on, where the files are readable anyway.

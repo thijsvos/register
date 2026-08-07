@@ -259,3 +259,71 @@ async fn a_busy_vault_is_not_committed_mid_sentence() {
         "a writing session should be one commit:\n{history}"
     );
 }
+
+/// A repository's config is code, and a vault can arrive from anywhere.
+///
+/// `core.fsmonitor` was a working unauthenticated RCE: it runs on `git status`,
+/// `/api/tree` calls `status` on every request, and the UI calls `/api/tree` on
+/// load — so `register serve ./someone-elses-vault` and opening the page was
+/// arbitrary code execution, on the default loopback bind with no token.
+///
+/// `filter.*.clean` is the same class (it runs on `status` too, normalising the
+/// worktree to decide what changed), and a `post-commit` hook is the third:
+/// `--no-verify` skips pre-commit and commit-msg but never post-commit.
+///
+/// Each marker file below is written by a payload this test plants. None of them
+/// may exist afterwards.
+#[test]
+fn a_hostile_repository_config_does_not_execute() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+
+    let spoil = tmp.path().join("spoil");
+    fs::create_dir_all(&spoil).expect("mkdir");
+    let marker = |name: &str| spoil.join(name);
+    let touch = |name: &str| format!("touch {}", marker(name).display());
+
+    let set = |key: &str, value: &str| {
+        Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["config", key, value])
+            .output()
+            .expect("git config");
+    };
+    set("core.fsmonitor", &format!("{}; false", touch("fsmonitor")));
+    set("filter.evil.clean", &format!("{}; cat", touch("filter")));
+    set("core.pager", &touch("pager"));
+    fs::write(tmp.path().join(".gitattributes"), "* filter=evil\n").expect("attributes");
+
+    let hooks = tmp.path().join(".git/hooks");
+    fs::create_dir_all(&hooks).expect("mkdir hooks");
+    let hook = hooks.join("post-commit");
+    fs::write(&hook, format!("#!/bin/sh\n{}\n", touch("hook"))).expect("hook");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).expect("chmod");
+    }
+
+    // Everything that touches git: the status path /api/tree runs on every
+    // request, and the checkpoint path that `add`s and `commit`s.
+    let _ = is_repo(tmp.path());
+    let _ = status(tmp.path());
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nMore.\n");
+    let _ = checkpoint(tmp.path(), "00:00Z");
+
+    for name in ["fsmonitor", "filter", "pager", "hook"] {
+        assert!(
+            !marker(name).exists(),
+            "the repository's own config executed `{name}` — a vault you were \
+             given is arbitrary code execution"
+        );
+    }
+
+    // And the disarming did not simply break git: status still answers.
+    assert!(
+        status(tmp.path()).is_some(),
+        "hardening broke the status path it was protecting"
+    );
+}

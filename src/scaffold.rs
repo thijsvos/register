@@ -164,26 +164,14 @@ fn write_new(root: &Path, rel: &str, body: &str, report: &mut Report) -> io::Res
     Ok(())
 }
 
-/// A `git` child that ignores an inherited git environment.
+/// A `git` child for the scaffold, disarmed the same way the status path is.
 ///
-/// `GIT_DIR`, `GIT_WORK_TREE` and friends override `current_dir` entirely, so a
-/// `register init --git` run from inside a hook, a rebase, or any shell where
-/// they are exported would `add -A` and commit against *that* repository rather
-/// than the vault. Nothing in the vault's own scaffolding wants to inherit it.
-fn git_command() -> Command {
-    let mut command = Command::new("git");
-    for name in [
-        "GIT_DIR",
-        "GIT_WORK_TREE",
-        "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY",
-        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_COMMON_DIR",
-        "GIT_NAMESPACE",
-    ] {
-        command.env_remove(name);
-    }
-    command
+/// `init` and the baseline commit run against a directory the user pointed at,
+/// which may already carry someone else's `.git`. See [`crate::git::hardened`]:
+/// a repository's config is code, and `commit` in particular runs hooks that
+/// `--no-verify` does not cover.
+fn git_command(root: &Path) -> Command {
+    crate::git::hardened(root)
 }
 
 /// Make the vault a repository. `Ok(false)` when it already was one.
@@ -191,10 +179,9 @@ fn init_git(root: &Path) -> io::Result<bool> {
     if root.join(".git").exists() {
         return Ok(false);
     }
-    let status = git_command()
+    let status = git_command(root)
         .arg("init")
         .arg("--quiet")
-        .current_dir(root)
         .status()
         .map_err(|error| {
             io::Error::other(format!(
@@ -220,29 +207,23 @@ fn init_git(root: &Path) -> io::Result<bool> {
 fn commit_the_scaffold(root: &Path) -> Option<String> {
     // Only ever the repository we just made. A vault that already had history
     // is not ours to write to.
-    let head = git_command()
+    let head = git_command(root)
         .args(["rev-parse", "--verify", "HEAD"])
-        .current_dir(root)
         .output()
         .ok()?;
     if head.status.success() {
         return None;
     }
 
-    let staged = git_command()
-        .args(["add", "-A"])
-        .current_dir(root)
-        .status()
-        .ok()?;
+    let staged = git_command(root).args(["add", "-A"]).status().ok()?;
     if !staged.success() {
         return Some("git add failed, so the vault is uncommitted".to_owned());
     }
 
     // `--no-verify`: someone's global hooks template should not get a vote on
     // whether a new vault has a first commit.
-    let out = git_command()
+    let out = git_command(root)
         .args(["commit", "--no-verify", "-m", "vault: initial"])
-        .current_dir(root)
         .output()
         .ok()?;
     if out.status.success() {

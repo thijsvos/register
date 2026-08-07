@@ -40,13 +40,126 @@ pub struct Status {
     pub ahead: Option<u32>,
 }
 
-fn git(root: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
-        .arg("-C")
+/// Config keys whose values git executes as commands.
+///
+/// **A repository's `.git/config` is code.** Anyone who hands you a vault — a
+/// zip, a shared folder, an agent's output — also hands you these, and they run
+/// as you the moment git touches the repository. `core.fsmonitor` was a working
+/// unauthenticated RCE here: it fires on `git status`, which `/api/tree` calls
+/// on every request, so opening the UI on someone else's vault was enough.
+///
+/// A command-line `-c` outranks every config file, so setting each of these to
+/// something inert is what makes running git in a repository we did not create
+/// survivable. Ordered as git documents them, so the next reader can diff this
+/// against `git-config(1)` and see what is missing.
+const DISARM: &[&str] = &[
+    // Runs on `status` and `add` — the one that was exploitable.
+    "core.fsmonitor=",
+    // Hooks. `--no-verify` only skips pre-commit and commit-msg; post-commit
+    // still fires, which was the second working exploit.
+    "core.hooksPath=/dev/null",
+    // Pagers and editors are commands. No tty here, but that is a property of
+    // how we happen to call it, not a guarantee.
+    "core.pager=cat",
+    "core.editor=true",
+    "sequence.editor=true",
+    // Only reachable on network operations, which this never performs — set
+    // anyway, because "unreachable" is a claim about today's call sites.
+    "core.sshCommand=true",
+    "core.askPass=",
+    "credential.helper=",
+    // Diff drivers run on `add` and `status` when .gitattributes asks.
+    "core.externalDiff=",
+    "diff.external=",
+    // A signed checkpoint would run gpg.program; the vault chooses both.
+    "commit.gpgsign=false",
+    "gpg.program=true",
+];
+
+/// `git`, with everything that would let the repository run code turned off.
+///
+/// See [`DISARM`]. `filter.*` is handled separately in [`disarm_filters`],
+/// because those keys are named by the attacker and cannot be listed in advance.
+pub(crate) fn hardened(root: &Path) -> Command {
+    let mut command = Command::new("git");
+    command.arg("--no-pager");
+    for setting in DISARM {
+        command.arg("-c").arg(setting);
+    }
+    for setting in disarm_filters(root) {
+        command.arg("-c").arg(setting);
+    }
+    // Ambient git state overrides `-C` entirely, so a server started from inside
+    // a rebase or a hook would otherwise operate on that repository instead.
+    for name in [
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_NAMESPACE",
+        "GIT_CONFIG",
+        "GIT_ASKPASS",
+        "GIT_SSH",
+        "GIT_SSH_COMMAND",
+        "GIT_EXTERNAL_DIFF",
+        "GIT_PAGER",
+        "GIT_EDITOR",
+    ] {
+        command.env_remove(name);
+    }
+    command.arg("-C").arg(root);
+    command
+}
+
+/// `-c` settings that neutralise every clean/smudge/process filter the
+/// repository defines.
+///
+/// `filter.<name>.clean` runs on `git add` **and on `git status`**, which
+/// normalises the worktree through it to decide whether a file is modified. The
+/// name is chosen by whoever wrote the config, so unlike [`DISARM`] it cannot be
+/// a constant — it has to be read back. Reading configuration executes nothing,
+/// so this lookup is itself safe, and it runs with `--no-pager` and no ambient
+/// git environment for the same reasons as everything else.
+fn disarm_filters(root: &Path) -> Vec<String> {
+    let Ok(out) = Command::new("git")
+        .args(["--no-pager", "-C"])
         .arg(root)
-        .args(args)
+        .args(["config", "--local", "--name-only", "--list"])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
-        .ok()?;
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|key| {
+            key.starts_with("filter.")
+                && (key.ends_with(".clean")
+                    || key.ends_with(".smudge")
+                    || key.ends_with(".process"))
+        })
+        // `cat` for clean/smudge is the identity filter, so a repository that
+        // legitimately uses one still reports honest status rather than errors.
+        // `.process` has no inert value, so it is emptied and git falls back.
+        .map(|key| {
+            if key.ends_with(".process") {
+                format!("{key}=")
+            } else {
+                format!("{key}=cat")
+            }
+        })
+        .collect()
+}
+
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    let out = hardened(root).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }

@@ -50,6 +50,15 @@ enum Command {
         /// resolved in `read_token` instead: the file wins.
         #[arg(long, value_name = "FILE")]
         token_file: Option<PathBuf>,
+        /// Bind a non-loopback address with no token.
+        ///
+        /// Refused by default: the origin guard's Host check is a browser
+        /// integrity signal, not a credential, so a tokenless port on a network
+        /// is readable and writable by anyone who can reach it. Pass this only
+        /// when something else already limits that — a container whose port is
+        /// published to loopback, or a firewall.
+        #[arg(long)]
+        allow_tokenless_network: bool,
         /// Serve the UI from this directory instead of the copy built into the
         /// binary. For working on the UI: `--assets app/dist` means a
         /// `pnpm build` is enough, with no reinstall.
@@ -87,19 +96,22 @@ async fn main() -> ExitCode {
             port,
             token,
             token_file,
+            allow_tokenless_network,
             assets,
         } => match read_token(token, token_file.as_deref()) {
             Err(message) => {
                 eprintln!("{message}");
                 ExitCode::FAILURE
             }
-            Ok(token) => match serve(vault, &host, port, token, assets).await {
-                Ok(()) => ExitCode::SUCCESS,
-                Err(message) => {
-                    eprintln!("{message}");
-                    ExitCode::FAILURE
+            Ok(token) => {
+                match serve(vault, &host, port, token, allow_tokenless_network, assets).await {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(message) => {
+                        eprintln!("{message}");
+                        ExitCode::FAILURE
+                    }
                 }
-            },
+            }
         },
         Command::Init { path, git } => report(init(&path, git)),
         Command::New { title } => report(create(&title)),
@@ -200,6 +212,7 @@ async fn serve(
     host: &str,
     port: u16,
     token: Option<String>,
+    allow_tokenless_network: bool,
     assets: Option<PathBuf>,
 ) -> Result<(), String> {
     let vault =
@@ -218,6 +231,35 @@ async fn serve(
         .await
         .map_err(|error| format!("bind {host}:{port}: {error}"))?;
     let addr = server::local_addr(&listener).map_err(|error| error.to_string())?;
+
+    // Before the banner, so a refusal never follows a line announcing the very
+    // thing being refused.
+    //
+    // Fail closed on the one signal that cannot be forged: the address actually
+    // bound. The origin guard's first test reads the `Host` *request header*,
+    // which is chosen by the client — it stops DNS rebinding, because a browser
+    // cannot lie about it, and stops nothing at all from `curl`. Measured on a
+    // tokenless `--host 0.0.0.0`: one `-H 'Host: localhost'` and a LAN peer had
+    // read, write and delete on the whole vault.
+    if !addr.ip().is_loopback() && token.is_none() && !allow_tokenless_network {
+        let where_ = vault.root().display();
+        return Err(format!(
+            "refusing to serve {where_} on {addr} without a token.
+
+Anything that can reach this port needs only a `Host: localhost` header to pass
+the origin guard, and that header is chosen by the client — it is not a
+credential. Give it a real one:
+
+    openssl rand -hex 24 > ~/.register-token
+    register serve {where_} --host {host} --token-file ~/.register-token
+
+If something else already decides who can reach this port — a container
+published to loopback, a firewall — then say so explicitly:
+
+    --allow-tokenless-network"
+        ));
+    }
+
     println!(
         "register · vault {} · http://{addr}",
         vault.root().display()
@@ -247,6 +289,11 @@ async fn serve(
         .with_assets(assets);
     if state.guarded() {
         println!("register · remote mode: a token is required from anything but localhost");
+    } else if !addr.ip().is_loopback() {
+        println!(
+            "register · WARNING: serving {addr} with no token. Anything that can reach \
+             this port can read and write the vault."
+        );
     }
     server::serve(listener, state)
         .await

@@ -496,3 +496,45 @@ fn settings_persist_where_04_says_they_do() {
     // Config is a vault file and belongs in a commit; only fonts and trash do not.
     assert!(!stored.contains("licensed"));
 }
+
+/// A tokenless bind on a real interface must refuse to start.
+///
+/// The origin guard's first test reads the `Host` request header. That is a
+/// browser-integrity signal — a browser cannot lie about it, which is what
+/// closes DNS rebinding — and it is nothing at all to a client that simply sets
+/// it. Measured before this refusal existed: `--host 0.0.0.0` with no token, one
+/// `-H 'Host: localhost'` from a LAN address, and the peer had read, write and
+/// delete on the whole vault. The docs claimed the opposite.
+///
+/// The bound address is the signal that cannot be forged, so that is what this
+/// decides on.
+#[test]
+fn a_tokenless_bind_on_a_real_interface_is_refused() {
+    let root = scratch("failclosed");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+    let vault_arg = vault.to_str().expect("utf-8");
+
+    let refused = Command::new(BINARY)
+        .args(["serve", vault_arg, "--host", "0.0.0.0", "--port", "7889"])
+        .current_dir(&root)
+        .output()
+        .expect("run register");
+    assert!(
+        !refused.status.success(),
+        "a tokenless 0.0.0.0 bind started; stdout: {}",
+        String::from_utf8_lossy(&refused.stdout)
+    );
+    let said = String::from_utf8_lossy(&refused.stderr);
+    assert!(said.contains("without a token"), "{said}");
+    // The message has to say what to do, not only what it would not do (§01).
+    assert!(said.contains("--token-file"), "{said}");
+    assert!(said.contains("--allow-tokenless-network"), "{said}");
+
+    // …and it must not have announced itself as serving before refusing.
+    let banner = String::from_utf8_lossy(&refused.stdout);
+    assert!(
+        !banner.contains("http://"),
+        "it printed a serving banner and then refused: {banner}"
+    );
+}

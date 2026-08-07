@@ -36,8 +36,14 @@ FROM scratch
 COPY --from=server /build/target/release/register /register
 VOLUME /vault
 EXPOSE 7777
-# 0.0.0.0 because the port is published from a container, not because the
-# server is meant to be reachable off the machine. §04 refuses /api/reveal on a
-# non-loopback bind for exactly this case, and the Origin and Host guards still
-# stand — but publishing this port to a network is a decision, not a default.
-ENTRYPOINT ["/register","serve","/vault","--host","0.0.0.0","--port","7777"]
+# 0.0.0.0 because a published port needs it, not because the server is meant to
+# be reachable off the machine — inside the container it is the only way the
+# published port reaches anything.
+#
+# `--allow-tokenless-network` is required because the binary now refuses that
+# combination outright: the Host header the origin guard checks is chosen by the
+# client, so on a real network a tokenless port is readable and writable by
+# anyone who can reach it. What makes it safe *here* is the compose file, which
+# publishes to 127.0.0.1 only. Widen that `ports:` line and this flag becomes a
+# lie — add `--token-file` in the same edit.
+ENTRYPOINT ["/register","serve","/vault","--host","0.0.0.0","--port","7777","--allow-tokenless-network"]
