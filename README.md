@@ -104,8 +104,17 @@ typing, `pnpm dev` is still faster — this is for seeing the *built* UI without
 paying for a reinstall.
 
 From v1.0 onward: prebuilt binaries on the GitHub release page for macOS
-(arm64/x64), Linux (x64/arm64, musl) and Windows x64, or `cargo install
-register-notes`.
+(arm64/x64), Linux (x64/arm64, musl) and Windows x64. Until then, and from
+source at any time:
+
+```sh
+cargo install --git https://github.com/thijsvos/register --locked
+```
+
+There is deliberately no `cargo install register-notes` line to copy: the name
+is not claimed on crates.io, and printing an install command for a package
+someone else could publish is how you get a supply-chain incident with your own
+README as the delivery mechanism.
 
 ### Container
 
@@ -134,10 +143,14 @@ Two things worth knowing before you publish that port:
   still hold, and `/api/reveal` refuses outright on a non-loopback bind — but
   putting this on a network is a decision. Behind Tailscale is the intended
   shape.
+- Which is enforced, not just advised: `http://localhost:7777` works, and the
+  same container reached by the host's LAN address answers **403**. The Host
+  guard refuses a non-loopback name from anyone who has not presented a token,
+  so making this genuinely reachable means setting one — see below.
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
-Images are published to `ghcr.io/OWNER/register` on tags, addressable by version
+Images are published to `ghcr.io/thijsvos/register` on tags, addressable by version
 only — there is no `latest`, deliberately, because nothing should depend on a
 tag that moves under it.
 

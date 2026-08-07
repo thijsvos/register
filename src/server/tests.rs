@@ -98,6 +98,28 @@ async fn start_with(tmp: &TempVault, token: Option<&str>) -> SocketAddr {
     addr
 }
 
+/// A server that never tells the gate who the peer is — which is precisely how
+/// the gate sees anything that is not this machine.
+///
+/// `serve` attaches `ConnectInfo`; serving the router without it leaves the
+/// extension absent, and `token_gate` reads absent as "not loopback" because a
+/// missing peer must fail closed. So this is a real socket carrying the real
+/// middleware stack, with the one bit flipped that a LAN peer would flip — and
+/// it needs no second network interface on the machine running the suite.
+async fn start_as_stranger(tmp: &TempVault, token: Option<&str>) -> SocketAddr {
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state = AppState::new(vault, events).with_token(token.map(str::to_owned));
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        // Deliberately not `into_make_service_with_connect_info`.
+        let _ = axum::serve(bound, router(state)).await;
+    });
+    addr
+}
+
 const NOTE: &str = "---\nid: 01J2ZK7Q8W3E5R9T\nref: 003\ntitle: Terminal aesthetics\ncreated: 2026-07-28\nmodified: 2026-08-04T13:47:00Z\ntags: [design, research]\n---\nBody.\n";
 
 // ------------------------------------------------------------------ wiring
@@ -720,7 +742,7 @@ fn a_tokenless_remote_request_is_refused_and_localhost_is_not() {
             REMOTE,
             &bearer,
             &plain,
-            Gate::Allow,
+            Gate::Authenticated,
         ),
         (
             "token, remote, cookie",
@@ -728,7 +750,7 @@ fn a_tokenless_remote_request_is_refused_and_localhost_is_not() {
             REMOTE,
             &cookie,
             &plain,
-            Gate::Allow,
+            Gate::Authenticated,
         ),
         (
             "token, remote, query",
@@ -737,11 +759,159 @@ fn a_tokenless_remote_request_is_refused_and_localhost_is_not() {
             &none,
             &carrying,
             // Remembered, because the WebSocket that follows can send no header.
-            Gate::AllowAndRemember,
+            Gate::AuthenticatedAndRemember,
         ),
     ] {
         assert_eq!(decide(expected, peer, headers, uri), want, "{label}");
     }
+}
+
+/// The Host and Origin rules are waived for one reason only: the request proved
+/// it holds the token. This pins who earns that waiver.
+///
+/// It is the composition that broke. `decide` was always right; the gate then
+/// ignored it and set the marker from the peer address alone — `!peer_is_loopback`
+/// — so on a `--host 0.0.0.0` bind with **no token configured at all**, every
+/// stranger on the network was handed the exemption and could drive the API
+/// from any origin, WebSocket included. The tokenless-remote row below is that
+/// bug; it fails against the old code.
+#[test]
+fn only_a_presented_token_waives_the_host_rule() {
+    let plain: Uri = "/api/tree".parse().expect("uri");
+    let carrying: Uri = "/?token=hunter2".parse().expect("uri");
+    let none = HeaderMap::new();
+    let mut bearer = HeaderMap::new();
+    bearer.insert(header::AUTHORIZATION, "Bearer hunter2".parse().unwrap());
+
+    const REMOTE: bool = false;
+    const LOCAL: bool = true;
+
+    for (label, expected, peer, headers, uri, waived) in [
+        // The bug. No token configured, so nothing was ever asked for and
+        // nothing can have been proved — whoever the peer is.
+        ("no token, remote peer", None, REMOTE, &none, &plain, false),
+        ("no token, local peer", None, LOCAL, &none, &plain, false),
+        // Exempt from the token by §08 P12, but not from the Host rule: a
+        // rebinding attack runs as a loopback peer, which is the whole point.
+        (
+            "token, local peer",
+            Some("hunter2"),
+            LOCAL,
+            &none,
+            &plain,
+            false,
+        ),
+        // Refused outright, so there is nothing to waive.
+        (
+            "token, remote, none",
+            Some("hunter2"),
+            REMOTE,
+            &none,
+            &plain,
+            false,
+        ),
+        // Earned it.
+        (
+            "token, remote, bearer",
+            Some("hunter2"),
+            REMOTE,
+            &bearer,
+            &plain,
+            true,
+        ),
+        (
+            "token, remote, query",
+            Some("hunter2"),
+            REMOTE,
+            &none,
+            &carrying,
+            true,
+        ),
+    ] {
+        // Through `earned_by`, not `proved_the_token`, because that is the call
+        // the gate itself makes — testing the rule without testing its use is
+        // how the original bug survived a green suite.
+        let mark = super::Authenticated::earned_by(decide(expected, peer, headers, uri));
+        assert_eq!(mark.is_some(), waived, "{label}");
+    }
+}
+
+/// The bug, on the wire: a stranger reaching a **tokenless** bind used to be
+/// handed the waiver meant for someone who presented a credential, because the
+/// gate keyed it off the peer address alone.
+///
+/// That is the `--host 0.0.0.0` shape `deploy/Dockerfile` ships, so it was not
+/// hypothetical. The unit test above proves the rule; this proves the gate
+/// obeys it, which is the half that was broken.
+#[tokio::test]
+async fn a_stranger_on_a_tokenless_bind_keeps_the_host_and_origin_rules() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start_as_stranger(&tmp, None).await;
+
+    // Sanity first: this server does answer, so the refusals below mean the
+    // guards fired rather than that nothing is listening.
+    let ok = request(addr, "GET", "/api/tree", &[], "").await;
+    assert_eq!(
+        ok.status, 200,
+        "the stranger server refused a plain request"
+    );
+
+    let rebound = request(addr, "GET", "/api/tree", &[("Host", "evil.example")], "").await;
+    assert_eq!(rebound.status, 403, "a stranger was waived the Host rule");
+
+    let cross = request(
+        addr,
+        "GET",
+        "/api/tree",
+        &[("Origin", "https://evil.example")],
+        "",
+    )
+    .await;
+    assert_eq!(cross.status, 403, "a stranger was waived the Origin rule");
+
+    // The event stream matters most: a WebSocket is not bound by CORS, so it is
+    // the one route a hostile page could read from even without the response
+    // headers a `fetch` needs.
+    let socket = request(
+        addr,
+        "GET",
+        "/api/events",
+        &[
+            ("Origin", "https://evil.example"),
+            ("Connection", "Upgrade"),
+            ("Upgrade", "websocket"),
+            ("Sec-WebSocket-Version", "13"),
+            ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(
+        socket.status, 403,
+        "a hostile origin opened the event stream"
+    );
+
+    // And a stranger who *does* hold the token still gets in, so the fix did
+    // not simply close remote mode.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let guarded = start_as_stranger(&tmp, Some("hunter2")).await;
+    let carrying = request(
+        guarded,
+        "GET",
+        "/api/tree",
+        &[
+            ("Host", "vault.example"),
+            ("Authorization", "Bearer hunter2"),
+        ],
+        "",
+    )
+    .await;
+    assert_eq!(
+        carrying.status, 200,
+        "remote mode stopped working for a valid token"
+    );
 }
 
 #[tokio::test]

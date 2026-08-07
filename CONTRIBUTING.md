@@ -58,8 +58,15 @@ feature for a different product.
 
 `app/src/doctrine.test.ts` enforces this rather than asking politely. It fails
 the build on a hardcoded colour, a hardcoded length, an untokenised font
-family, any transition, any keyframe outside the status bar, a font fetched over
-the network, and a licensed face committed to the repository.
+family, any transition, any keyframe outside the status bar, and a font fetched
+over the network.
+
+It cannot see a font file committed outside `app/public/fonts/`, because every
+glob it uses is rooted there. The `fonts` job in CI covers that case: it greps
+`git ls-files` for any `.woff`/`.woff2`/`.ttf`/`.otf`/`.eot` outside that one
+directory, and for `berkeley` or `tx-02` in a tracked path under any extension
+at all. A licensed face belongs in the vault you licensed it for — §03 is
+bring-your-own-font, and nothing a `git push` carries may contain one.
 
 ## Hard rules
 

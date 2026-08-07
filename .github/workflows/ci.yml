@@ -39,6 +39,34 @@ jobs:
           # that measured nothing. Refuse to call that green.
           test -n "$KB" && test "$KB" -gt 0
           test "$KB" -lt 5120
+  fonts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # §03 and CLAUDE.md rule 7: "CI greps for strays". `app/src/doctrine.test.ts`
+      # polices the inside of app/public/fonts and cannot see a face committed
+      # anywhere else, which is the case that matters — BYOF means a licensed
+      # font belongs in the user's vault and nowhere a `git push` can take it.
+      - name: no font outside app/public/fonts, and no licensed face anywhere
+        run: |
+          set -euo pipefail
+          # Tracked files, not the working tree: what a push carries is what is
+          # tracked, and the working tree holds an ignored .register/fonts/.
+          STRAY=$(git ls-files | grep -iE '\.(woff2?|ttf|otf|eot)$' | grep -v '^app/public/fonts/' || true)
+          if [ -n "$STRAY" ]; then
+            echo "font files outside app/public/fonts:"; echo "$STRAY"; exit 1
+          fi
+          # By name as well as by extension: a licensed face arrives as a .zip or
+          # a glyph dump long before it arrives as a .otf.
+          LICENSED=$(git ls-files | grep -iE 'berkeley|tx-?02' || true)
+          if [ -n "$LICENSED" ]; then
+            echo "a licensed face is tracked:"; echo "$LICENSED"; exit 1
+          fi
+          # A grep that finds nothing reads the same whether the rule holds or
+          # the pattern is broken. Prove the sanctioned faces are still matched.
+          SANCTIONED=$(git ls-files 'app/public/fonts/*' | grep -icE '\.woff2$' || true)
+          test "$SANCTIONED" -gt 0
+          echo "PASS: $SANCTIONED sanctioned faces, no strays"
   e2e:
     runs-on: ubuntu-latest
     steps:

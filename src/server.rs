@@ -158,12 +158,32 @@ fn query_token(uri: &Uri) -> Option<String> {
 /// be tested — a real remote peer is not something a unit test has.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Gate {
-    /// No token configured, or the peer is this machine, or it presented one.
+    /// Nothing was asked for: no token is configured, or the peer is this
+    /// machine, which §08 P12 exempts.
+    ///
+    /// Deliberately distinct from the two below. A request that was never asked
+    /// for a credential has not presented one, and must not inherit anything
+    /// that presenting one earns.
     Allow,
-    /// Allowed, and the token arrived in the URL — so hand back a cookie, which
-    /// is the only way the WebSocket can carry it afterwards.
-    AllowAndRemember,
+    /// The token was presented and matched.
+    Authenticated,
+    /// Authenticated, and the token arrived in the URL — so hand back a cookie,
+    /// which is the only way the WebSocket can carry it afterwards.
+    AuthenticatedAndRemember,
     Refuse,
+}
+
+impl Gate {
+    /// Whether the request proved it holds the token.
+    ///
+    /// The one source of the `Authenticated` marker, and the reason these are
+    /// separate variants rather than a bool beside `Allow`. Keying the marker
+    /// off the peer address instead — `if !peer_is_loopback` — handed the Host
+    /// and Origin exemption to every stranger reaching a `--host 0.0.0.0` bind,
+    /// token configured or not, which is exactly backwards.
+    fn proved_the_token(self) -> bool {
+        matches!(self, Gate::Authenticated | Gate::AuthenticatedAndRemember)
+    }
 }
 
 /// The whole of remote mode's access rule (§08 P12).
@@ -186,9 +206,9 @@ pub fn decide(
         return Gate::Refuse;
     }
     if query_token(uri).is_some() {
-        return Gate::AllowAndRemember;
+        return Gate::AuthenticatedAndRemember;
     }
-    Gate::Allow
+    Gate::Authenticated
 }
 
 async fn token_gate(State(state): State<AppState>, request: Request, next: Next) -> Response {
@@ -219,17 +239,18 @@ async fn token_gate(State(state): State<AppState>, request: Request, next: Next)
 
     // Only a presented credential authenticates. A loopback peer is exempt from
     // the token but is exactly who a rebinding attack runs as, so it keeps the
-    // Host rule.
+    // Host rule — and so does a stranger on a tokenless `--host 0.0.0.0` bind,
+    // who has proved nothing at all.
     let mut request = request;
-    if !peer_is_loopback {
-        request.extensions_mut().insert(Authenticated);
+    if let Some(mark) = Authenticated::earned_by(gate) {
+        request.extensions_mut().insert(mark);
     }
 
     let mut response = next.run(request).await;
     // Presenting it once is enough. HttpOnly so a script cannot read it back
     // out, SameSite=Strict so another site cannot ride it, and no Secure flag
     // because a tailnet is plain HTTP by default.
-    if gate == Gate::AllowAndRemember
+    if gate == Gate::AuthenticatedAndRemember
         && let Some(token) = state.token.as_deref()
         && let Ok(cookie) =
             format!("{TOKEN_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict").parse()
@@ -611,6 +632,19 @@ async fn asset(State(state): State<AppState>, uri: Uri) -> Response {
 /// are about different attackers and only one of them applies at a time.
 #[derive(Clone, Copy)]
 struct Authenticated;
+
+impl Authenticated {
+    /// The only way to make one, and it takes the gate's own answer.
+    ///
+    /// The point is that a peer address cannot reach this. The bug was a
+    /// `request.extensions_mut().insert(Authenticated)` guarded by
+    /// `!peer_is_loopback`, which reads plausibly and is wrong; routing every
+    /// marker through here means the next person has to pass a `Gate` that
+    /// already said the token was proved.
+    fn earned_by(gate: Gate) -> Option<Self> {
+        gate.proved_the_token().then_some(Self)
+    }
+}
 
 async fn same_origin_only(request: Request, next: Next) -> Result<Response, Response> {
     // A request that presented the token is authenticated, and the Host rule

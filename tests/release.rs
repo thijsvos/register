@@ -101,6 +101,30 @@ fn the_build_context_carries_no_licensed_font_bytes() {
 }
 
 #[test]
+fn ci_greps_for_stray_fonts() {
+    // §03's last line and CLAUDE.md rule 7 both promise this grep, and
+    // CONTRIBUTING.md tells contributors a licensed face cannot be committed.
+    // For a while all three were true only as prose: `doctrine.test.ts` globs
+    // `../public/fonts/**`, so it polices the sanctioned directory and is blind
+    // to a face committed anywhere else. This pins the step that closed it.
+    let ci = strip_comments(&read(".github/workflows/ci.yml"));
+    assert!(
+        ci.contains("git ls-files"),
+        "the font job no longer reads what is tracked"
+    );
+    assert!(
+        ci.contains("app/public/fonts/"),
+        "the font job no longer names the one sanctioned directory"
+    );
+    for face in ["berkeley", "tx-?02"] {
+        assert!(
+            ci.contains(face),
+            "the font job stopped naming `{face}`, which §03 bans outright"
+        );
+    }
+}
+
+#[test]
 fn compose_mounts_a_vault_and_publishes_one_port() {
     let compose = read("deploy/docker-compose.yml");
     assert!(compose.contains("${VAULT_PATH:-./vault}:/vault"));
