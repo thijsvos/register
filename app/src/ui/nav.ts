@@ -61,4 +61,9 @@ export const go = {
   settings(): void {
     chrome.showSettings()
   },
+
+  /** §02b Screen 4, over one `*.conflict-<ts>.md` copy. */
+  conflict(copy: string): void {
+    chrome.showConflict(copy)
+  },
 }

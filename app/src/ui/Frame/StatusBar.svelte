@@ -15,6 +15,8 @@ let {
   dirty = false,
   externalEdit = false,
   words = null,
+  unresolved = 0,
+  onresolve,
 }: {
   renderMs?: number | null
   watcherLive?: boolean
@@ -25,6 +27,9 @@ let {
   dirty?: boolean
   externalEdit?: boolean
   words?: number | null
+  /** Unresolved `*.conflict-<ts>.md` copies in the vault (§02b Screen 4). */
+  unresolved?: number
+  onresolve?: () => void
 } = $props()
 
 const dash = '—'
@@ -55,6 +60,16 @@ const dash = '—'
     <div class="cell"><b>{words}</b> <span class="lab">words</span></div>
   {/if}
   <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
+  {#if unresolved > 0}
+    <!-- Vault-wide and latched, so it sits with FILES and GIT rather than in the
+         status cell above — that one is about the open note and is cleared by
+         the next save, which is exactly how a conflict used to go unannounced. -->
+    <div class="cell">
+      <button class="resolve" onclick={() => onresolve?.()}>
+        <b class="alert">{unresolved} unresolved</b>
+      </button>
+    </div>
+  {/if}
   <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
 </footer>
 
@@ -93,6 +108,23 @@ footer {
 }
 .alert {
   color: var(--signal);
+}
+
+/* Text that is a control, as TODAY's row jumps already are: no box in a 30px
+   rail, but the state matrix's hover-inverse and dashed focus ring both hold. */
+.resolve {
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+.resolve:hover {
+  background: var(--sel-bg);
+}
+.resolve:hover .alert {
+  color: var(--sel-fg);
+}
+.resolve:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 
 /* Label demoted, readout in full ink — otherwise the bar is a flat wall of

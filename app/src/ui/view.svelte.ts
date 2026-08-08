@@ -34,6 +34,16 @@ class ChromeState {
    */
   today = $state(false)
 
+  /**
+   * §02b Screen 4 is showing instead of the note, resolving this copy.
+   *
+   * A path rather than a boolean, because the screen is *about* one conflict and
+   * a vault can hold several. Null means it is not up. Like `today`, it is a
+   * property of this window: the conflict itself is two files, and those are the
+   * vault's.
+   */
+  conflict = $state<string | null>(null)
+
   /** Resolved on first use: constructing it eagerly would touch the DOM at
    *  module scope, which is what made this module unimportable in a test. */
   #scheme: MediaQueryList | null = null
@@ -143,18 +153,35 @@ class ChromeState {
   }
 
   showSettings(): void {
-    this.settings = true
-    this.today = false
+    this.#only('settings')
   }
 
   showToday(): void {
-    this.settings = false
-    this.today = true
+    this.#only('today')
+  }
+
+  /** Raise §02b Screen 4 over `copy`, the parked revision being merged back. */
+  showConflict(copy: string): void {
+    this.#only('conflict')
+    this.conflict = copy
   }
 
   showNotes(): void {
-    this.today = false
-    this.settings = false
+    this.#only(null)
+  }
+
+  /**
+   * Raise one main view and lower the rest.
+   *
+   * §02b draws one main region, so two flags true renders whichever the template
+   * happens to test first. With two views "also clear the other one" was reliable
+   * by inspection; with three it is the kind of thing that gets forgotten in the
+   * fourth, so the exclusion lives in one place instead of in every setter.
+   */
+  #only(view: 'settings' | 'today' | 'conflict' | null): void {
+    this.settings = view === 'settings'
+    this.today = view === 'today'
+    if (view !== 'conflict') this.conflict = null
   }
 
   toggleInspector(): void {

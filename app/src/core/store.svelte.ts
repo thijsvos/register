@@ -1,6 +1,7 @@
 import { isoStamp } from '../lib/time'
 import {
   ApiError,
+  deleteNote,
   type Entry,
   type GitStatus,
   getNote,
@@ -10,6 +11,7 @@ import {
   putNote,
   type VaultEvent,
 } from './api'
+import { type Conflict, conflicts, originalOf } from './conflict'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
 import { DAILY_TEMPLATE, isListed } from './paths'
@@ -207,6 +209,18 @@ class VaultStore {
   words(path: string): number | null {
     const held = this.corpus[path]
     return held ? wordCount(held.body) : null
+  }
+
+  /**
+   * Every unresolved conflict in the vault (§02b Screen 4).
+   *
+   * Derived from the tree, not remembered from the moment the conflict happened.
+   * `notice` is cleared by the very next save, and `#writeConflictCopy` skips it
+   * entirely when the user has navigated away — so the announcement has to come
+   * from the thing that persists, which is the file.
+   */
+  get unresolved(): Conflict[] {
+    return conflicts(this.tree)
   }
 
   async start(): Promise<void> {
@@ -548,6 +562,74 @@ class VaultStore {
       this.notice = describe(error)
     }
     this.#scheduleRefresh()
+  }
+
+  /**
+   * Write a merged note over the original and retire the copy (§02b Screen 4).
+   *
+   * Returns whether the vault now holds the merge. The order is the whole
+   * safety property: the merge is durable *before* the copy is deleted, so a
+   * failure between the two leaves both revisions on disk. The other order
+   * leaves neither, and "no revision is destroyed" is the frame's own promise.
+   */
+  async resolveConflict(copy: string, merged: string): Promise<boolean> {
+    const path = originalOf(copy)
+    if (path === null) {
+      this.notice = `${basename(copy)} is not a conflict copy.`
+      return false
+    }
+
+    // Same rule as #writeOnce: without If-Match, §04's PUT writes
+    // unconditionally, so a note we never read must not be written. A note that
+    // is not in the tree is the exception — there the copy is the only surviving
+    // revision, and the merge is a create.
+    const etag = this.corpus[path]?.etag
+    if (etag === undefined && this.tree.some((entry) => entry.path === path)) {
+      this.notice = `${basename(path)} is not loaded. Refusing to overwrite it.`
+      return false
+    }
+
+    let result: Awaited<ReturnType<typeof putNote>>
+    try {
+      result = await putNote(path, merged, etag)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+    if (!result.ok) {
+      // The original moved again while the merge was being chosen. Nothing is
+      // lost — both files are still there — but the table the user read it from
+      // is stale, so it has to be rebuilt rather than written over.
+      this.notice = `${basename(path)} changed again. Nothing merged.`
+      await this.refresh()
+      return false
+    }
+
+    const written: Loaded = { body: merged, etag: result.etag }
+    this.corpus[path] = written
+    if (this.openPath === path) this.#adopt(path, written)
+
+    try {
+      await deleteNote(copy)
+    } catch (error) {
+      // The merge is on disk; only the cleanup failed. Say both halves, because
+      // "merged" alone would leave a copy in the list with nothing explaining it.
+      this.notice = `Merged into ${basename(path)}. ${basename(copy)} remains: ${describe(error)}`
+      await this.refresh()
+      return true
+    }
+
+    // The copy is gone, so a buffer still bound to it has nothing behind it.
+    if (this.openPath === copy) {
+      this.openPath = null
+      this.buffer = ''
+      this.etag = null
+      this.dirty = false
+      this.externalEdit = false
+    }
+    this.notice = `Merged into ${basename(path)}.`
+    await this.refresh()
+    return true
   }
 
   #adopt(path: string, loaded: Loaded): void {

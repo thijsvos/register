@@ -302,6 +302,145 @@ describe('conflict', () => {
   })
 })
 
+describe('resolving a conflict (§02b Screen 4)', () => {
+  /** Drive the real 409 path, and hand back the copy it parked. */
+  async function conflict(): Promise<string> {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    server.seed('notes/003-a.md', `${NOTE}from the agent\n`)
+    vault.edit(`${NOTE}from the human\n`)
+    await vault.save()
+    // The store schedules its own refresh on a zero-delay timer, so let that run
+    // rather than calling refresh() here: the tree arriving on its own is what
+    // makes the copy discoverable without anyone being told about it.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await settle()
+
+    const copy = [...server.files.keys()].find((path) => path.includes('.conflict-'))
+    // The rest of this block is meaningless if the 409 path did not run.
+    expect(copy).toBeDefined()
+    return copy ?? ''
+  }
+
+  it('lists the copy as unresolved, without being told one happened', async () => {
+    const copy = await conflict()
+    // Derived from the tree, so it survives what `notice` does not.
+    vault.notice = null
+    expect(vault.unresolved.map((one) => one.copy.path)).toEqual([copy])
+    expect(vault.unresolved[0]?.from).toBe('notes/003-a.md')
+  })
+
+  it('writes the merge over the original and retires the copy', async () => {
+    const copy = await conflict()
+    const merged = `${NOTE}from the human\nfrom the agent\n`
+    // So the empty list below is a change of state, not a list that was empty
+    // all along.
+    expect(vault.unresolved).toHaveLength(1)
+
+    expect(await vault.resolveConflict(copy, merged)).toBe(true)
+    await settle()
+
+    expect(server.files.get('notes/003-a.md')?.body).toBe(merged)
+    expect(server.files.has(copy)).toBe(false)
+    expect(vault.unresolved).toEqual([])
+  })
+
+  it('writes the merge before deleting the copy, never the other way round', async () => {
+    const copy = await conflict()
+    server.requests.length = 0
+    await vault.resolveConflict(copy, 'merged\n')
+
+    const put = server.requests.indexOf('PUT /api/note/notes/003-a.md')
+    const del = server.requests.findIndex((one) => one.startsWith('DELETE'))
+    expect(put).toBeGreaterThanOrEqual(0)
+    expect(del).toBeGreaterThanOrEqual(0)
+    // A failure between the two must leave both revisions, not neither.
+    expect(put).toBeLessThan(del)
+  })
+
+  it('updates the open buffer when the note being merged into is the open one', async () => {
+    const copy = await conflict()
+    expect(vault.openPath).toBe('notes/003-a.md')
+
+    await vault.resolveConflict(copy, 'merged\n')
+    expect(vault.buffer).toBe('merged\n')
+    expect(vault.dirty).toBe(false)
+  })
+
+  it('merges nothing when the original moved again while it was being chosen', async () => {
+    const copy = await conflict()
+    // A third write lands after the table was built: our etag is stale again.
+    server.seed('notes/003-a.md', `${NOTE}moved again\n`)
+
+    expect(await vault.resolveConflict(copy, 'merged\n')).toBe(false)
+    await settle()
+
+    expect(server.files.get('notes/003-a.md')?.body).toContain('moved again')
+    // Above all, the copy survives — it is still the only home of that text.
+    expect(server.files.has(copy)).toBe(true)
+    expect(vault.notice).toContain('changed again')
+  })
+
+  it('keeps the merge when the copy cannot be deleted', async () => {
+    const copy = await conflict()
+    const realFetch = globalThis.fetch
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
+      (init?.method ?? 'GET') === 'DELETE'
+        ? Promise.resolve(new Response('busy', { status: 500 }))
+        : realFetch(input, init)) as typeof fetch
+
+    expect(await vault.resolveConflict(copy, 'merged\n')).toBe(true)
+    globalThis.fetch = realFetch
+    await settle()
+
+    expect(server.files.get('notes/003-a.md')?.body).toBe('merged\n')
+    expect(server.files.has(copy)).toBe(true)
+    expect(vault.notice).toContain('remains')
+  })
+
+  it('refuses a path that is not a conflict copy, before writing anything', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    server.requests.length = 0
+
+    expect(await vault.resolveConflict('notes/003-a.md', 'anything\n')).toBe(false)
+    expect(server.files.get('notes/003-a.md')?.body).toBe(NOTE)
+    // Returning false is not enough: without the guard the call still reaches
+    // `putNote` and fails there by accident, on a malformed URL. The refusal has
+    // to be the reason, so nothing may go out at all.
+    expect(server.requests).toEqual([])
+    expect(vault.notice).toContain('not a conflict copy')
+  })
+
+  it('refuses to overwrite an original whose body it never read', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    server.seed('notes/003-a.conflict-20260808T172820123Z.md', 'mine\n')
+    await vault.refresh()
+    // The tree has both, but no body has landed — an unconditional PUT here
+    // would replace a note this client has never seen.
+    vault.corpus = {}
+
+    const copy = 'notes/003-a.conflict-20260808T172820123Z.md'
+    expect(await vault.resolveConflict(copy, 'merged\n')).toBe(false)
+    expect(server.files.get('notes/003-a.md')?.body).toBe(NOTE)
+    expect(vault.notice).toContain('Refusing')
+  })
+
+  it('creates the original when it has been removed, rather than refusing', async () => {
+    // The copy is the only surviving revision at that point, so the merge has
+    // nowhere to go but a fresh file.
+    server.seed('notes/003-a.conflict-20260808T172820123Z.md', 'mine\n')
+    await vault.refresh()
+    await settle()
+
+    const copy = 'notes/003-a.conflict-20260808T172820123Z.md'
+    expect(vault.unresolved[0]?.original).toBeNull()
+    expect(await vault.resolveConflict(copy, 'restored\n')).toBe(true)
+    expect(server.files.get('notes/003-a.md')?.body).toBe('restored\n')
+  })
+})
+
 describe('live socket', () => {
   /** Let a zero-delay timer run, then drain the promise chain it starts. */
   async function tick(): Promise<void> {

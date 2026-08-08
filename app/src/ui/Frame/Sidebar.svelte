@@ -1,5 +1,5 @@
 <script lang="ts">
-import { isListed } from '../../core/paths'
+import { isConflictCopy, isListed } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
 import { go, traverse } from '../nav'
@@ -16,6 +16,10 @@ let tags = $derived(tagCounts(vault.tree))
 // where nothing is tagged twice should read as a flat row of equals, not as
 // twenty bars all one pixel wide.
 let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
+
+function basename(path: string): string {
+  return path.split('/').pop() ?? path
+}
 </script>
 
 <aside class="side" aria-label="Index">
@@ -27,16 +31,27 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
     <nav>
       {#each notes as entry (entry.path)}
         {@const words = vault.words(entry.path)}
+        {@const artefact = isConflictCopy(entry.path)}
+        <!-- §04: a conflict copy is "an artefact to merge, not a note". It
+             carries the original's ref and title verbatim, so drawn as a note it
+             is indistinguishable from the note it came from — which is how one
+             sat in this list announced by nothing. It reads as what it is, and
+             it opens §02b Screen 4 rather than the editor. -->
         <button
           class="row"
           class:active={entry.path === vault.openPath}
           aria-current={entry.path === vault.openPath ? 'page' : undefined}
-          onclick={() => go.note(entry.path)}
+          title={artefact ? entry.path : undefined}
+          onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
           onkeydown={traverse}
         >
-          <span class="ref">{entry.ref ?? '—'}</span>
-          <span class="name">{entry.title ?? entry.path}</span>
-          <span class="count">{words ?? '—'}</span>
+          <span class="ref">{artefact ? '—' : (entry.ref ?? '—')}</span>
+          <span class="name">{artefact ? basename(entry.path) : (entry.title ?? entry.path)}</span>
+          {#if artefact}
+            <span class="unresolved">Unresolved</span>
+          {:else}
+            <span class="count">{words ?? '—'}</span>
+          {/if}
         </button>
       {/each}
     </nav>
@@ -117,6 +132,19 @@ nav {
 }
 .row.active .ref,
 .row.active .count {
+  color: var(--sel-fg);
+}
+
+/* The one word that separates an artefact from a note, in the field the word
+   count would otherwise occupy — a copy has no reading length worth reporting. */
+.unresolved {
+  color: var(--signal);
+  font-family: var(--font-micro);
+  font-size: var(--text-micro);
+  letter-spacing: var(--track-micro);
+  text-transform: uppercase;
+}
+.row.active .unresolved {
   color: var(--sel-fg);
 }
 
