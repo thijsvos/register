@@ -1,4 +1,4 @@
-import { go } from './nav'
+import { enterIndex, go } from './nav'
 import { chrome } from './view.svelte'
 
 /** How long a `G` stays armed waiting for the second key of a chord. */
@@ -87,6 +87,34 @@ export function escapeAction(where: {
  */
 export function entersEditor(where: { onBody: boolean; paletteOpen: boolean }): boolean {
   return where.onBody && !where.paletteOpen
+}
+
+/** Which end of the index a traversal key reaches into, or neither. */
+export type IndexEntry = 'first' | 'last' | 'nothing'
+
+/**
+ * Whether a bare traversal key should move focus into the index, and where.
+ *
+ * §02b gives a nav row "↑↓ / j–k traversal", and until now that traversal could
+ * only be *entered* by pressing Tab three times past the theme button. So the
+ * index — the frame's primary navigation — was the one surface §01's mouse-free
+ * promise did not really cover, and ⌘K was the only fast route to a note.
+ *
+ * `j` and `↓` arrive at the top, `k` and `↑` at the bottom: each key keeps the
+ * direction it has everywhere else, so entering the list is the same gesture as
+ * moving through it rather than a separate rule to remember.
+ *
+ * Only from `<body>`, which is the same rule `entersEditor` follows and for the
+ * same reason. On a row, the row's own `traverse` owns these keys — and it
+ * declines at the ends, so a global handler that also fired would turn the last
+ * row's `j` into a jump back to the first.
+ */
+export function entersIndex(where: { key: string; onBody: boolean }): IndexEntry {
+  if (!where.onBody) return 'nothing'
+  const key = where.key.toLowerCase()
+  if (key === 'j' || key === 'arrowdown') return 'first'
+  if (key === 'k' || key === 'arrowup') return 'last'
+  return 'nothing'
 }
 
 /**
@@ -179,6 +207,17 @@ export function installKeymap(): () => void {
         event.preventDefault()
         go.today()
       }
+      return
+    }
+
+    // After the chord branch, so an armed `g` still owns the key that follows it.
+    const into = entersIndex({
+      key: event.key,
+      onBody: document.activeElement === document.body,
+    })
+    if (into !== 'nothing') {
+      event.preventDefault()
+      enterIndex(into)
       return
     }
 

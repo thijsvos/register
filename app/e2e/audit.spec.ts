@@ -112,14 +112,82 @@ test('every focusable control shows a focus ring', async ({ page }) => {
   ).toBeGreaterThan(1)
 })
 
-test('the index is traversable with j and k', async ({ page }) => {
+test('the index is reachable and traversable with j and k', async ({ page }) => {
   await page.goto(server.url)
   const rows = page.getByRole('complementary', { name: 'Index' }).getByRole('button')
-  await rows.first().focus()
+  await expect(rows.first()).toBeVisible()
+
+  // This used to call rows.first().focus() and start from there, which proved
+  // the traversal and quietly assumed the hard part. Getting *into* the list
+  // took three Tab presses past the theme button, so §02b's "↑↓ / j–k traversal"
+  // was only reachable by the mouse's own affordance.
+  await page.keyboard.press('j')
+  await expect(rows.first()).toBeFocused()
 
   await page.keyboard.press('j')
   await expect(rows.nth(1)).toBeFocused()
   await page.keyboard.press('k')
+  await expect(rows.first()).toBeFocused()
+
+  // Each key keeps its direction: from the frame, `k` arrives at the bottom.
+  await page.locator('body').press('Escape')
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur())
+  await page.keyboard.press('k')
+  await expect(rows.last()).toBeFocused()
+})
+
+test('a note opens from the index without the mouse or a single Tab', async ({
+  page,
+}) => {
+  await page.goto(server.url)
+  await expect(
+    page.getByRole('complementary', { name: 'Index' }).getByRole('button').first(),
+  ).toBeVisible()
+
+  await page.keyboard.press('j')
+  await page.keyboard.press('Enter')
+  // Enter on a row opens it and hands the caret straight to the note, so the
+  // whole route is j · Enter · type.
+  await expect(page.locator('.cm-content')).toBeFocused()
+})
+
+test('j and k are letters wherever someone is typing', async ({ page }) => {
+  await page.goto(server.url)
+  const rows = page.getByRole('complementary', { name: 'Index' }).getByRole('button')
+  await expect(rows.first()).toBeVisible()
+
+  // The whole hazard of binding two letters at the window: in the editor they
+  // are prose, and a handler that took them would throw the caret into the
+  // sidebar mid-word. Nothing else in the suite types a j or a k into a note.
+  await page.getByRole('button', { name: /Alpha/ }).click()
+  await expect(page.locator('.cm-content')).toBeFocused()
+  await page.keyboard.type('jack kept jokes')
+  await expect(page.locator('.cm-content')).toBeFocused()
+  await expect(page.locator('.cm-content')).toContainText('jack kept jokes')
+
+  // And in the palette's own box, where they are a query.
+  await page.keyboard.press('ControlOrMeta+k')
+  const box = page.getByRole('combobox')
+  await box.fill('')
+  await page.keyboard.type('jk')
+  await expect(box).toBeFocused()
+  await expect(box).toHaveValue('jk')
+})
+
+test('FOCUS · INDEX in the palette survives the palette restoring focus', async ({
+  page,
+}) => {
+  await page.goto(server.url)
+  const rows = page.getByRole('complementary', { name: 'Index' }).getByRole('button')
+  await expect(rows.first()).toBeVisible()
+
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('focus index')
+  await page.keyboard.press('Enter')
+
+  // The palette puts focus back where it found it on close. A command whose
+  // whole effect is where focus lands has to stand that down, or it is undone a
+  // microtask after it runs and reads as a dead row.
   await expect(rows.first()).toBeFocused()
 })
 

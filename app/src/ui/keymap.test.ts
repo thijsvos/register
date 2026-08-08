@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { entersEditor, escapeAction } from './keymap'
+import { entersEditor, entersIndex, escapeAction } from './keymap'
 
 /**
  * The Escape rule, without a DOM.
@@ -58,5 +58,48 @@ describe('entersEditor', () => {
 
   it('never takes Enter from the palette, where it runs the selection', () => {
     expect(entersEditor({ onBody: true, paletteOpen: true })).toBe(false)
+  })
+})
+
+describe('entersIndex', () => {
+  it('reaches the top of the list with the key that means down', () => {
+    expect(entersIndex({ key: 'j', onBody: true })).toBe('first')
+    expect(entersIndex({ key: 'ArrowDown', onBody: true })).toBe('first')
+  })
+
+  it('reaches the bottom with the key that means up', () => {
+    // Each key keeps the direction it has inside the list, so entering is the
+    // same gesture as moving rather than a second rule.
+    expect(entersIndex({ key: 'k', onBody: true })).toBe('last')
+    expect(entersIndex({ key: 'ArrowUp', onBody: true })).toBe('last')
+  })
+
+  it('stands down anywhere but <body>', () => {
+    // On a row, `traverse` owns these keys — and it declines at the ends, so a
+    // global handler firing too would turn the last row's `j` into a jump back
+    // to the first. Both directions, or the guard only half exists.
+    expect(entersIndex({ key: 'j', onBody: false })).toBe('nothing')
+    expect(entersIndex({ key: 'k', onBody: false })).toBe('nothing')
+    expect(entersIndex({ key: 'ArrowDown', onBody: false })).toBe('nothing')
+  })
+
+  it('leaves every other key alone, including the ones that contain a j or a k', () => {
+    // The positive control for the cases above: this runs on every keystroke
+    // that reaches the frame, so a pattern that matched loosely would swallow
+    // N, I, [, ] and the G-chords.
+    //
+    // `Backspace` earns its place — it contains a `k`, so a substring match
+    // instead of an equality one compiles, passes every other case here, and
+    // eats the delete key. `ArrowLeft` and `ArrowRight` are the same trap one
+    // token along.
+    const untouched = ['n', 'i', '[', ']', 'g', 'Enter', 'h', 'l', 'Escape']
+    for (const key of [...untouched, 'Backspace', 'ArrowLeft', 'ArrowRight', 'Tab']) {
+      expect(entersIndex({ key, onBody: true }), `${key} was taken`).toBe('nothing')
+    }
+  })
+
+  it('matches the key whatever case it arrives in', () => {
+    expect(entersIndex({ key: 'J', onBody: true })).toBe('first')
+    expect(entersIndex({ key: 'arrowup', onBody: true })).toBe('last')
   })
 })

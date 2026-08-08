@@ -75,6 +75,10 @@ function choose(index: number) {
 
   const command: Command | undefined = commands[index - notes.length]
   if (command !== undefined) {
+    // A command whose whole effect is where focus lands has to stand the restore
+    // down for the same reason a note navigation does, or it is undone by the
+    // teardown one microtask after it runs.
+    if (command.takesFocus === true) navigated = true
     chrome.closePalette()
     void command.run()
     return
