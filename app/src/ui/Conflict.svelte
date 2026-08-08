@@ -1,6 +1,7 @@
 <script lang="ts">
 import { untrack } from 'svelte'
 import { diffLines, merge, pending, type Side } from '../core/diff'
+import { basename } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import { go } from './nav'
 
@@ -52,10 +53,6 @@ let merged = $derived(merge(rows, chosen))
 
 /** What the action button points at — the ref if the note has one. */
 let target = $derived(pair === null ? '' : (pair.original?.ref ?? basename(pair.from)))
-
-function basename(path: string): string {
-  return path.split('/').pop() ?? path
-}
 
 function pick(at: number, side: Side): void {
   const next = [...chosen]

@@ -35,11 +35,6 @@ let gitLabel = $derived.by(() => {
 /** Newest first, so the status bar's route lands on the one that just happened. */
 let unresolved = $derived(vault.unresolved)
 
-function resolveNewest(): void {
-  const first = unresolved[0]
-  if (first !== undefined) go.conflict(first.copy.path)
-}
-
 let crumb = $derived(
   chrome.settings
     ? 'CONFIG / SETTINGS'
@@ -148,7 +143,7 @@ $effect(() => {
     dirty={vault.dirty}
     externalEdit={vault.externalEdit}
     unresolved={unresolved.length}
-    onresolve={resolveNewest}
+    onresolve={() => go.newestConflict()}
   />
 </div>
 

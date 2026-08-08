@@ -88,7 +88,11 @@ export function allCommands(): Command[] {
       keys: 'J',
       enabled: () => chrome.index && vault.tree.some((entry) => isListed(entry.path)),
       takesFocus: true,
-      run: () => enterIndex('first'),
+      // `enterIndex` reports whether focus moved; the palette has already
+      // decided it can, via `enabled`, so the answer is discarded here.
+      run: () => {
+        enterIndex('first')
+      },
     },
     {
       id: 'copy',
@@ -117,10 +121,7 @@ export function allCommands(): Command[] {
       label: 'RESOLVE · CONFLICT',
       keys: '',
       enabled: () => vault.unresolved.length > 0,
-      run: () => {
-        const first = vault.unresolved[0]
-        if (first !== undefined) go.conflict(first.copy.path)
-      },
+      run: () => go.newestConflict(),
     },
     {
       id: 'reveal',

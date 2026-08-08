@@ -31,13 +31,17 @@ export function traverse(event: KeyboardEvent): void {
  * the caller is a window-level key handler with no component to ask — and the
  * index's accessible name is already the contract two e2e specs select it by.
  *
- * Silent when there is nothing to focus: an index toggled off with `[` is not
- * rendered, and below 760px it is display:none, where `focus()` is a no-op.
+ * Returns whether focus actually moved. An index toggled off with `[` is not
+ * rendered, and below 760px it is display:none where `focus()` is a no-op — and
+ * the caller has to know, or it swallows the keystroke on behalf of a pane that
+ * is not there. The palette's own `FOCUS · INDEX` row hides itself in that state;
+ * the key had no equivalent and just went quiet.
  */
-export function enterIndex(end: 'first' | 'last'): void {
+export function enterIndex(end: 'first' | 'last'): boolean {
   const rows = document.querySelectorAll<HTMLElement>('[aria-label="Index"] nav button')
   const row = end === 'first' ? rows[0] : rows[rows.length - 1]
   row?.focus()
+  return row !== undefined && document.activeElement === row
 }
 
 /**
@@ -82,5 +86,20 @@ export const go = {
   /** §02b Screen 4, over one `*.conflict-<ts>.md` copy. */
   conflict(copy: string): void {
     chrome.showConflict(copy)
+  },
+
+  /**
+   * §02b Screen 4 over the newest unresolved conflict, or nowhere if there is
+   * none.
+   *
+   * Here rather than at the call sites for the reason this module exists: the
+   * status bar and the palette both offer "resolve the conflict", and both had
+   * their own copy of "take `unresolved[0]`, guard it, route to it". Two copies
+   * of a selection rule is how the two surfaces start disagreeing about which
+   * conflict they mean.
+   */
+  newestConflict(): void {
+    const first = vault.unresolved[0]
+    if (first !== undefined) chrome.showConflict(first.copy.path)
   },
 }

@@ -1,0 +1,8 @@
+# The compatibility fixture is a byte-frozen artefact, not source.
+#
+# `core.autocrlf` is `input` on the maintainer's machine and unset on the CI
+# runners, so without this git would normalise `notes/005-crlf.md` to LF on the
+# way in and the test that exists to prove CRLF survives a round trip would be
+# testing LF. `-text` turns off end-of-line conversion and diffing heuristics for
+# the whole tree, which is what "frozen" has to mean if it means anything.
+tests/fixtures/vault-v1/** -text

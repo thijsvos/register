@@ -14,7 +14,7 @@ import {
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
-import { DAILY_TEMPLATE, isListed } from './paths'
+import { basename, DAILY_TEMPLATE, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
 
@@ -220,8 +220,19 @@ class VaultStore {
    * from the thing that persists, which is the file.
    */
   get unresolved(): Conflict[] {
-    return conflicts(this.tree)
+    return this.#unresolved
   }
+
+  /**
+   * Memoised, because `enabled()` runs per command per keystroke.
+   *
+   * `matchCommands` calls every command's `enabled` and `Palette.svelte` re-runs
+   * it on each key, so a plain getter rebuilt a Map over the whole tree, filtered
+   * and sorted it, once per keypress — against §06's 16 ms interaction budget, on
+   * a vault that can hold a thousand notes. `$derived` recomputes when `tree`
+   * moves, which is the only thing that can change the answer.
+   */
+  #unresolved = $derived(conflicts(this.tree))
 
   async start(): Promise<void> {
     this.#stopped = false
@@ -619,6 +630,11 @@ class VaultStore {
       return true
     }
 
+    // The ledger `#park` maintains has to hear about this too: it exists so two
+    // conflicts in the same millisecond cannot pick one filename, and a name
+    // that is no longer on disk should stop reserving itself.
+    this.#parked.delete(copy)
+
     // The copy is gone, so a buffer still bound to it has nothing behind it.
     if (this.openPath === copy) {
       this.openPath = null
@@ -771,10 +787,6 @@ class VaultStore {
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-function basename(path: string): string {
-  return path.split('/').pop() ?? path
 }
 
 export const vault = new VaultStore()

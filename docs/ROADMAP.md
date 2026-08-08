@@ -135,6 +135,21 @@ screens make v1", built last because nothing scheduled it. What it left behind:
 | **The vault contract still describes the manual route** | `src/scaffold.rs` tells an agent to "merge into the original, then delete the conflict file". True, and now not the only way. Changing it is a §04 edit under hard rule 1 with byte-exact scaffold tests behind it, so it is not a side effect of a UI phase. | My call; it is one line and a test update. |
 | **A conflict of a conflict is refused, not merged** | Resolving takes the original's etag from the corpus. If the note moved again while you were choosing, the merge is refused and the table rebuilt — nothing is lost, both files stay, but you choose again from scratch. Re-deriving while preserving decisions means matching old rows to new ones, which is a merge problem inside a merge tool. | Anyone hitting it twice in a row. |
 
+## Parked during P14 (the compatibility fixture)
+
+§09's fourth testing layer — *"Compat · fixture vaults: a vault written by v1
+opens unchanged in every later minor — §04 is the contract"* — was the one layer
+that was neither built nor parked. It is built now: `tests/fixtures/vault-v1/` is
+frozen and read by both parsers, and it found two live divergences on arrival.
+What it left behind:
+
+| Item | Why it is parked | Trigger |
+|---|---|---|
+| **An unreadable note is indistinguishable from an untitled one** | The other half of ADR-001, amended in this phase. A note whose frontmatter does not parse degrades to `title: null, tags: []` — which is right, since one bad note must not take `/api/tree` down, and is now a pinned contract. What is missing is any way to learn of it. Saying so in the tree means a new field in §04's envelope, a contract change under hard rule 1; saying so at startup means reading every note before the server binds, against §06's 500 ms start-to-editable budget. Both are real designs, neither is a decision to make in passing. | A §02b state for what an unreadable note looks like in the index — which would settle the envelope question at the same time. |
+| **The fixture only covers what someone thought to break** | Seventeen notes now: loose fences at both ends, CRLF, a BOM, unknown keys, a duplicate key, a numeric tag, an unquoted date title, a quoted colon, a four-digit ref, no trailing newline, a frontmatter ref disagreeing with its filename, a bare note, a nested folder, a conflict copy and a populated trash bucket. Widening it after the fence bug found **no** further breakage, which is the good news and also the limit of the method: it proves what it contains. | A real vault from a real user, or any bug whose reproduction is a file rather than a sequence. |
+| **§06's latency assertions inside vitest are load-sensitive** | `search.test.ts::costs one document to fold in a single edit` asserts wall-clock `< 16 ms` in a unit test. It failed once in this phase and passed 8 runs out of 8 afterwards, in isolation and in the full suite. Nothing in its import graph changed — but adding a test *file* adds parallel load, so every new file makes it a little likelier. `budgets.spec.ts` already solved this for the e2e side by scaling with `BUDGET_FACTOR`; the unit side has no equivalent. | The first time it fails CI. The cheapest answer is probably that a wall-clock budget belongs in the e2e suite, where one already exists. |
+| **§06's idle-RAM budget measures the process that holds no notes** | §06 says "Idle RAM (1k-note vault) ≤ 50 MB" with no process qualifier. `budgets.spec.ts:164` measures `rss(server.pid)` — the Rust server, which reads a file per request and forgets it — while the browser tab holds every body twice, verbatim in `corpus` and tokenised in the search index. `harness.ts:16` settles the interpretation in a code comment ("about this process and not the page") that §06 does not support. Found while looking for this phase's subject and left alone rather than folded in. | Measuring it. Chromium's CDP gives `JSHeapUsedSize` without touching what ships; the number then decides whether this is a §06 wording fix or a real bound on the corpus. |
+
 ## Decided after v0.3.1 (first use in anger)
 
 Entries here were raised by someone using the app rather than by a phase, and

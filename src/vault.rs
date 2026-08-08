@@ -797,18 +797,50 @@ fn frontmatter_block(body: &str) -> Option<&str> {
     // A BOM is preserved byte-for-byte on write, per §04's losslessness
     // invariant, so it has to be stepped over here rather than stripped there.
     let body = body.strip_prefix('\u{feff}').unwrap_or(body);
-    let rest = body
-        .strip_prefix("---\n")
-        .or_else(|| body.strip_prefix("---\r\n"))?;
+    let rest = after_fence(body)?;
 
     let mut offset = 0usize;
     for line in rest.split_inclusive('\n') {
-        if line.trim_end() == "---" {
+        if is_fence(line) {
             return Some(&rest[..offset]);
         }
         offset += line.len();
     }
     None
+}
+
+/// What a fence line is — stated here because §04 has two readers.
+///
+/// `app/src/core/frontmatter.ts` matches `/^---[ \t]*\r?\n/` to open and
+/// `/^---[ \t]*\r?\n?$/` to close. These two functions are that rule in Rust,
+/// and `tests/compat.rs` reads one frozen fixture through both parsers so they
+/// cannot quietly stop agreeing.
+///
+/// They had stopped. This side opened on a byte-exact `---\n` while the client
+/// allowed trailing blanks, so a note beginning `--- ` — which any editor or
+/// agent emits without thinking — was frontmatter to the editor and metadata to
+/// nobody: `/api/tree` reported it with no title and no tags, permanently, with
+/// nothing on screen saying so. `frontmatter.ts` already names that outcome for
+/// a different route to it — "a note loses its identity" — and there is no
+/// client-side fallback, because `tags.ts` reads tags straight off this envelope.
+///
+/// One deliberate narrowing came with the fix: closing used to be
+/// `line.trim_end() == "---"`, and `trim_end` strips every Unicode space, so a
+/// fence padded with U+00A0 closed here and not in the client. Both now say
+/// spaces and tabs, which is what the format means and what a person can see.
+fn after_fence(body: &str) -> Option<&str> {
+    let rest = body.strip_prefix("---")?.trim_start_matches([' ', '\t']);
+    rest.strip_prefix('\n')
+        .or_else(|| rest.strip_prefix("\r\n"))
+}
+
+/// Whether one line — terminator included, as `split_inclusive` yields it — is a
+/// fence. The last line of a file carries no terminator, hence the empty arm.
+fn is_fence(line: &str) -> bool {
+    let Some(rest) = line.strip_prefix("---") else {
+        return false;
+    };
+    matches!(rest.trim_start_matches([' ', '\t']), "" | "\n" | "\r\n")
 }
 
 /// Parse a frontmatter block, tolerantly.

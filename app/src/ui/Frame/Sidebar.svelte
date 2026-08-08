@@ -1,5 +1,5 @@
 <script lang="ts">
-import { isConflictCopy, isListed } from '../../core/paths'
+import { basename, isConflictCopy, isListed } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
 import { go, traverse } from '../nav'
@@ -16,10 +16,6 @@ let tags = $derived(tagCounts(vault.tree))
 // where nothing is tagged twice should read as a flat row of equals, not as
 // twenty bars all one pixel wide.
 let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
-
-function basename(path: string): string {
-  return path.split('/').pop() ?? path
-}
 </script>
 
 <aside class="side" aria-label="Index">
