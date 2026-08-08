@@ -55,6 +55,20 @@ test('a chosen scheme survives a reload, however it was chosen', async ({ page }
   // And back again by the button, still persisting.
   await page.getByRole('button', { name: 'INV' }).click()
   await expect.poll(dark, { timeout: 2000 }).toBe(false)
+
+  // Wait for the vault, not just the class — the same race this file already
+  // guards twice above and did not guard here. `invert()` flips the class
+  // synchronously and fires the PUT without awaiting it, so reloading on the
+  // strength of the class alone races the write: fine on a laptop, and on a
+  // shared runner the reload wins and the reloaded page reads the *old* scheme.
+  // It failed exactly that way on CI.
+  await expect
+    .poll(storedScheme, {
+      timeout: 3000,
+      message: 'the INV button did not reach the vault',
+    })
+    .toBe('light')
+
   await page.reload()
   await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
   await expect.poll(dark, { timeout: 3000 }).toBe(false)
