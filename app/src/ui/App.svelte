@@ -4,6 +4,7 @@ import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
 import { render } from '../lib/render.svelte'
+import Conflict from './Conflict.svelte'
 import Editor from './Editor.svelte'
 import Crosses from './Frame/Crosses.svelte'
 import Header from './Frame/Header.svelte'
@@ -11,6 +12,7 @@ import Inspector from './Frame/Inspector.svelte'
 import Sidebar from './Frame/Sidebar.svelte'
 import StatusBar from './Frame/StatusBar.svelte'
 import { installKeymap } from './keymap'
+import { go } from './nav'
 import Palette from './Palette/Palette.svelte'
 import Settings from './Settings.svelte'
 import Today from './Today.svelte'
@@ -30,14 +32,24 @@ let gitLabel = $derived.by(() => {
   return state.clean ? 'Clean' : 'Dirty'
 })
 
+/** Newest first, so the status bar's route lands on the one that just happened. */
+let unresolved = $derived(vault.unresolved)
+
+function resolveNewest(): void {
+  const first = unresolved[0]
+  if (first !== undefined) go.conflict(first.copy.path)
+}
+
 let crumb = $derived(
   chrome.settings
     ? 'CONFIG / SETTINGS'
     : chrome.today
       ? 'AGGREGATE / TODAY'
-      : vault.active
-        ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
-        : 'INDEX',
+      : chrome.conflict !== null
+        ? 'CONFLICT / UNRESOLVED'
+        : vault.active
+          ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
+          : 'INDEX',
 )
 
 $effect(() => {
@@ -109,6 +121,8 @@ $effect(() => {
         <Settings />
       {:else if chrome.today}
         <Today />
+      {:else if chrome.conflict !== null}
+        <Conflict copy={chrome.conflict} />
       {:else if vault.openPath === null}
         <p class="empty">
           {vault.files === 0
@@ -133,6 +147,8 @@ $effect(() => {
     notice={vault.notice}
     dirty={vault.dirty}
     externalEdit={vault.externalEdit}
+    unresolved={unresolved.length}
+    onresolve={resolveNewest}
   />
 </div>
 

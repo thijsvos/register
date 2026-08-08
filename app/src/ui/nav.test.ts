@@ -55,6 +55,17 @@ describe('go', () => {
     expect(chrome.today).toBe(false)
   })
 
+  it.each(ROUTES_TO_A_NOTE)('%s also comes back from a conflict', (_case, route) => {
+    chrome.showConflict('notes/003-a.conflict-20260808T172820123Z.md')
+    expect(chrome.conflict, 'precondition: Screen 4 is up').not.toBeNull()
+
+    route()
+
+    expect(chrome.conflict, 'a note opened behind the conflict screen').toBeNull()
+    expect(chrome.today).toBe(false)
+    expect(chrome.settings).toBe(false)
+  })
+
   it('still reaches the store, so the routes above are not merely flag-setters', () => {
     // The positive control. Every assertion above is about what `go` turns
     // *off*; without this they would all pass against a `go` that navigated
@@ -72,15 +83,24 @@ describe('go', () => {
     expect(vault.follow).toHaveBeenCalledWith('003')
   })
 
-  it('today and settings are the two routes that do not open a note', () => {
+  it('today, settings and conflict are the routes that do not open a note', () => {
+    const copy = 'notes/003-a.conflict-20260808T172820123Z.md'
+
     go.today()
     expect(chrome.today).toBe(true)
     expect(chrome.settings).toBe(false)
+    expect(chrome.conflict).toBeNull()
 
     go.settings()
     expect(chrome.settings).toBe(true)
-    // The two are mutually exclusive: §02b has one main region, and both
+    // The three are mutually exclusive: §02b has one main region, and two
     // claiming it would render whichever the template happens to test first.
+    expect(chrome.today).toBe(false)
+    expect(chrome.conflict).toBeNull()
+
+    go.conflict(copy)
+    expect(chrome.conflict).toBe(copy)
+    expect(chrome.settings).toBe(false)
     expect(chrome.today).toBe(false)
   })
 })

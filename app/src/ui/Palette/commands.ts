@@ -89,6 +89,19 @@ export function allCommands(): Command[] {
       enabled: () => vault.openPath !== null,
       run: () => vault.reloadFromDisk(),
     },
+    // §02b Screen 4. Hidden with nothing to resolve, like every other command
+    // that cannot act — and the newest first, because that is the one that just
+    // happened.
+    {
+      id: 'resolve',
+      label: 'RESOLVE · CONFLICT',
+      keys: '',
+      enabled: () => vault.unresolved.length > 0,
+      run: () => {
+        const first = vault.unresolved[0]
+        if (first !== undefined) go.conflict(first.copy.path)
+      },
+    },
     {
       id: 'reveal',
       label: 'OPEN VAULT IN FILE MANAGER',
