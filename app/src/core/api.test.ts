@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { openEvents } from './api'
+import { getNote, openEvents, putNote } from './api'
 
 /**
  * `openEvents`' reconnect loop, which is the only state machine in the client
@@ -220,5 +220,124 @@ describe('the socket URL', () => {
       openEvents(handlers().spec)
       expect(Socket.live[0]?.url).toBe(expected)
     }
+  })
+})
+
+/**
+ * `etagOf` and `noteUrl` are private, so they are reached through the two
+ * functions that expose their results. Both carry a documented contract that
+ * nothing exercised.
+ */
+const realFetch = globalThis.fetch
+
+/** Serve one response and record the URL and headers the client sent. */
+function serveOnce(response: Response) {
+  // `undefined` rather than optional keys: `exactOptionalPropertyTypes` is on,
+  // and "the header was absent" is a value this test asserts on rather than a
+  // property that happens to be missing.
+  const seen: { url: string | undefined; headers: HeadersInit | undefined } = {
+    url: undefined,
+    headers: undefined,
+  }
+  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+    seen.url = String(input)
+    seen.headers = init?.headers
+    return Promise.resolve(response)
+  }) as typeof fetch
+  return seen
+}
+
+afterEach(() => {
+  globalThis.fetch = realFetch
+})
+
+describe('etagOf', () => {
+  it.each([
+    ['a quoted etag', '"abc123"', 'abc123'],
+    ['a weak etag', 'W/"abc123"', 'abc123'],
+    ['a bare etag', 'abc123', 'abc123'],
+  ])('unwraps %s', async (_case, header, expected) => {
+    // The weak form has never executed under test: `store.test.ts`'s FakeVault
+    // only ever sends `"etag-N"`. A server that starts answering `W/"…"` — any
+    // proxy that transforms bodies will — would otherwise hand the client an
+    // etag with three extra characters, and every conditional write would 409.
+    serveOnce(new Response('body', { status: 200, headers: { etag: header } }))
+    await expect(getNote('notes/003-a.md')).resolves.toEqual({
+      body: 'body',
+      etag: expected,
+    })
+  })
+
+  it('refuses a note with no etag rather than returning an empty one', async () => {
+    // `null`, not `''`. The docstring argues this at length: an empty string
+    // would flow into `putNote`'s optional parameter, and a falsy check there
+    // would drop the `If-Match` header — downgrading a guarded write to an
+    // unconditional one at exactly the moment the guard matters.
+    serveOnce(new Response('body', { status: 200 }))
+    await expect(getNote('notes/003-a.md')).rejects.toThrow(/no etag/)
+  })
+
+  it('reports a conflict as a value, with whatever etag came back', async () => {
+    // A 409 must not throw: the store branches on it to write a conflict copy.
+    serveOnce(new Response('stale', { status: 409, headers: { etag: 'W/"current"' } }))
+    await expect(putNote('notes/003-a.md', 'body', 'mine')).resolves.toEqual({
+      ok: false,
+      conflict: true,
+      etag: 'current',
+    })
+  })
+
+  it('reports a conflict even when the server sends no etag', async () => {
+    serveOnce(new Response('stale', { status: 409 }))
+    await expect(putNote('notes/003-a.md', 'body', 'mine')).resolves.toEqual({
+      ok: false,
+      conflict: true,
+      etag: null,
+    })
+  })
+})
+
+describe('noteUrl', () => {
+  it.each([
+    ['a space', 'notes/a b.md', '/api/note/notes/a%20b.md'],
+    ['a hash', 'notes/a#b.md', '/api/note/notes/a%23b.md'],
+    ['a percent', 'notes/100%.md', '/api/note/notes/100%25.md'],
+    ['a question mark', 'notes/a?b.md', '/api/note/notes/a%3Fb.md'],
+    ['non-ascii', 'notes/ünïcode.md', '/api/note/notes/%C3%BCn%C3%AFcode.md'],
+  ])('encodes %s', async (_case, path, expected) => {
+    const seen = serveOnce(new Response('x', { status: 200, headers: { etag: 'e' } }))
+    await getNote(path)
+    expect(seen.url).toBe(expected)
+  })
+
+  it('encodes each segment but never the separators', async () => {
+    // The whole point, per the docstring: a whole-path `encodeURIComponent`
+    // would turn every `/` into `%2F` and break every path with a folder in it —
+    // which is all of them, since §04 puts notes under `notes/`.
+    const seen = serveOnce(new Response('x', { status: 200, headers: { etag: 'e' } }))
+    await getNote('daily/2026-08-08.md')
+    expect(seen.url).toBe('/api/note/daily/2026-08-08.md')
+    expect(seen.url).not.toContain('%2F')
+  })
+})
+
+describe('putNote conditional writes', () => {
+  it('sends If-Match when it holds an etag, and omits it when it does not', async () => {
+    // The difference between "save this version" and "save over whatever is
+    // there", which is the whole of §04's conflict story.
+    const guarded = serveOnce(new Response('', { status: 200, headers: { etag: 'new' } }))
+    await putNote('notes/003-a.md', 'body', 'held')
+    expect(guarded.headers).toEqual({ 'If-Match': 'held' })
+
+    const unguarded = serveOnce(
+      new Response('', { status: 200, headers: { etag: 'new' } }),
+    )
+    await putNote('notes/003-a.md', 'body')
+    expect(unguarded.headers).toEqual({})
+  })
+
+  it('refuses a write that came back with no etag', async () => {
+    serveOnce(new Response('', { status: 200 }))
+    await expect(putNote('notes/003-a.md', 'body')).rejects.toThrow(/no etag/)
   })
 })
