@@ -1,0 +1,88 @@
+name: Mutants
+# Mutation testing over the server (ADR-006).
+#
+# `cargo test` answers "did the code run". This answers "if the code were wrong,
+# would anything fail" — which is the question this repository keeps getting
+# wrong. Its first run found that swapping `|` for `^` in `constant_time_eq`
+# survived the whole suite, and that is a token bypass.
+#
+# Weekly, and on demand. Deliberately NOT on a pull request: a full run is tens
+# of minutes because every mutant is its own build, and most survivors are noise
+# that needs a person. A slow, noisy gate gets disabled; a report gets read.
+on:
+  schedule:
+    # Mondays, early UTC — the same slot renovate.json uses, so the week starts
+    # with one batch of housekeeping rather than two.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants
+  cancel-in-progress: true
+
+jobs:
+  mutants:
+    runs-on: ubuntu-latest
+    # Comfortably over the ~20 minutes observed locally, well under the point
+    # where a stuck run burns a day.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable # rust-toolchain.toml governs
+      - uses: pnpm/action-setup@v6
+        with: { package_json_file: app/package.json }
+      - uses: actions/setup-node@v7
+        with: { node-version-file: .nvmrc }
+
+      # The UI is embedded at compile time, and `allow_missing` means a build
+      # without it succeeds. Every mutant would then run against a binary that
+      # serves nothing, which changes what the tests are measuring.
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm build
+        working-directory: app
+
+      # Pinned, and tracked by the custom manager in renovate.json — a tool that
+      # judges the test suite should not change underneath it unannounced.
+      - run: cargo install cargo-mutants --version 27.1.0 --locked
+
+      # `--in-place` is wrong here (it edits the checkout); the default copies to
+      # a scratch tree. `|| true` because a surviving mutant is a finding to read,
+      # not a build to fail — see ADR-006 on why this does not gate.
+      - name: Mutate the server
+        run: cargo mutants --no-shuffle --timeout 120 -j 2 || true
+
+      - name: Summarise
+        if: always()
+        run: |
+          set -euo pipefail
+          caught=$(wc -l < mutants.out/caught.txt || echo 0)
+          missed=$(wc -l < mutants.out/missed.txt || echo 0)
+          total=$((caught + missed))
+          # A run that mutated nothing reads the same as a run that caught
+          # everything. Refuse to call that a result.
+          test "$total" -gt 100
+          {
+            echo "### Mutation report"
+            echo
+            echo "**$caught caught · $missed missed** of $total mutants."
+            echo
+            if [ "$missed" -gt 0 ]; then
+              echo 'Survivors — each is either a test worth writing or a reasoned'
+              echo 'entry for ADR-006. Neither is "ignore it".'
+              echo
+              echo '```'
+              cat mutants.out/missed.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: mutants-out
+          path: mutants.out/
+          retention-days: 30

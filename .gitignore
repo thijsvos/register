@@ -18,3 +18,7 @@ deploy/vault/
 
 # OS
 .DS_Store
+
+# cargo-mutants' scratch trees and report (ADR-006). Regenerated every run and
+# large; the report that matters is the CI job summary and its artifact.
+mutants.out/

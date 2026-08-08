@@ -113,6 +113,15 @@ test('a document switch costs under 16 ms', async ({ page }) => {
     const readout = await page.getByText(/ms$/).first().textContent()
     const rendered = Number((readout ?? '').replace('ms', ''))
     const { limit, label } = budget(16, 'document switch')
+
+    // A number was actually read. `Number('')` is 0, so a RENDER field that
+    // rendered its unit with no figure — or a locator that matched some other
+    // element ending in "ms" — reported a 0 ms render and cleared §06's budget
+    // forever. The gauge has to be shown to be a gauge before it is believed.
+    expect(readout, `RENDER showed nothing on ${ref}`).toMatch(/\d/)
+    expect(Number.isFinite(rendered), `RENDER read ${readout} on ${ref}`).toBe(true)
+    expect(rendered, `RENDER read a suspiciously exact 0 on ${ref}`).toBeGreaterThan(0)
+
     expect(rendered, `${label}; RENDER read ${readout} on ${ref}`).toBeLessThan(limit)
   }
 

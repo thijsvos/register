@@ -187,6 +187,16 @@ test('the frame’s vertical rules are continuous through the header', async ({ 
       }
     })
 
+    // Both edges had to be found. `edge()` returns null for a missing or hidden
+    // element, and `null === null` passes — so at the narrow end of this loop,
+    // where the inspector and the header's stats cell can hide together, the
+    // alignment was silently not compared at all. The 15px misalignment this
+    // test exists for lived twelve phases; this is how it could come back at
+    // one breakpoint.
+    for (const [name, value] of Object.entries(rules)) {
+      expect(value, `${name} was not measurable at ${width}px`).not.toBeNull()
+    }
+
     expect(rules.brand, `left rule at ${width}px`).toBe(rules.index)
     expect(rules.stats, `right rule at ${width}px`).toBe(rules.inspector)
   }

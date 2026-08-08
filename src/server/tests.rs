@@ -646,6 +646,19 @@ fn a_token_is_compared_whole_and_in_constant_time() {
     assert!(!constant_time_eq(b"hunter2", b"hunter22"));
     assert!(!constant_time_eq(b"", b"x"));
     assert!(constant_time_eq(b"", b""));
+
+    // Differences must ACCUMULATE, not cancel. The fold is `acc | (x ^ y)`, and
+    // `cargo-mutants` found on its first run that swapping the `|` for a `^`
+    // survived every test above: with XOR the accumulator is a parity, so two
+    // differing byte-pairs whose deltas match cancel to zero and a wrong token
+    // authenticates. Transposed bytes are the cheapest way to produce that —
+    // `uhnter…` against `hunter…` differs in exactly two positions by the same
+    // delta, and would have been accepted.
+    assert!(!constant_time_eq(b"uhnter2xxxxxxxxx", b"hunter2xxxxxxxxx"));
+    // Same shape, further apart, so it is the arithmetic being pinned rather
+    // than one lucky string.
+    assert!(!constant_time_eq(b"abcdefgh", b"badcfehg"));
+    assert!(!constant_time_eq(&[0x01, 0x02], &[0x02, 0x01]));
 }
 
 #[test]

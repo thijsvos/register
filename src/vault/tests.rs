@@ -715,3 +715,72 @@ fn a_symlinked_app_file_is_refused_rather_than_followed() {
         );
     }
 }
+
+/// The vault root can be renamed or deleted while the server runs.
+///
+/// `require_root` exists so a write after that fails instead of succeeding:
+/// without it `create_dir_all` cheerfully resurrects the old tree and the server
+/// answers 200 while writing into a ghost directory nobody is watching, and the
+/// user's actual vault — the one they moved — never sees the note.
+///
+/// Found by `cargo-mutants`: replacing the whole function with `Ok(())` survived
+/// the entire suite. Deleting a guard should never be invisible.
+#[test]
+fn a_write_after_the_vault_moves_fails_rather_than_resurrecting_it() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault
+        .write("notes/003-a.md", NOTE, None)
+        .expect("first write");
+
+    // The user renames the folder out from under the running server.
+    let moved = tmp.path().with_extension("moved");
+    fs::rename(tmp.path(), &moved).expect("rename the vault");
+
+    let after = vault.write("notes/004-b.md", NOTE, None);
+    assert!(
+        after.is_err(),
+        "a write succeeded into a vault that is no longer there"
+    );
+    assert!(
+        !tmp.path().exists(),
+        "the old root was recreated — the note went somewhere nobody is watching"
+    );
+
+    // Put it back so TempVault's Drop can clean up.
+    fs::rename(&moved, tmp.path()).expect("restore");
+}
+
+/// A write must not follow a symlink out of the vault.
+///
+/// Honest about which guard earns this: `verify_contained` does, by walking every
+/// component before anything is created. `verify_parent` is the *second* look,
+/// after `create_dir_all`, and it only matters when the link appears between the
+/// two calls — a race a test cannot open on demand. `cargo-mutants` shows that
+/// by surviving `verify_parent -> Ok(())` while this test still passes, and
+/// ADR-006 records it as a reasoned survivor rather than an oversight.
+#[cfg(unix)]
+#[test]
+fn a_symlink_cannot_smuggle_a_parent_directory_out_of_the_vault() {
+    use std::os::unix::fs::symlink;
+
+    let tmp = TempVault::new();
+    let outside = tmp.path().parent().expect("parent").join("smuggled");
+    fs::create_dir_all(&outside).expect("mkdir outside");
+    let vault = tmp.open();
+
+    // `notes/away` is a link out. A write beneath it must not land outside.
+    fs::create_dir_all(tmp.path().join("notes")).expect("mkdir notes");
+    symlink(&outside, tmp.path().join("notes/away")).expect("symlink");
+
+    let escaped = vault.write("notes/away/005-e.md", NOTE, None);
+    assert!(
+        escaped.is_err(),
+        "a write followed a symlink out of the vault"
+    );
+    assert!(
+        !outside.join("005-e.md").exists(),
+        "the note landed outside the vault: {}",
+        outside.display()
+    );
+}

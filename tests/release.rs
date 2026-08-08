@@ -52,6 +52,12 @@ fn the_image_pins_the_same_toolchains_the_repo_does() {
         .and_then(|(_, rest)| rest.split_once("-alpine"))
         .map(|(tag, _)| tag.to_owned())
         .expect("a rust image tag in the Dockerfile");
+    // Both ends non-empty first. `"1.97.1".starts_with("")` is `true`, so a
+    // Dockerfile line reading `FROM rust:-alpine` — or any future edit that
+    // makes the split yield nothing — satisfied this comparison unconditionally.
+    // An always-true assertion inside a test about version pinning.
+    assert!(!tag.is_empty(), "no rust tag in the Dockerfile");
+    assert!(!channel.is_empty(), "no channel in rust-toolchain.toml");
     assert!(
         channel.starts_with(&tag),
         "Dockerfile pins rust {tag}, rust-toolchain.toml pins {channel}"
@@ -354,21 +360,59 @@ fn nothing_consumes_a_tag_that_moves() {
 fn ci_runs_the_same_gates_a_phase_is_judged_by() {
     // CLAUDE.md rule 10 lists them. A CI that runs a weaker set is a CI that
     // reports green for a phase that is not done.
-    let ci = read(".github/workflows/ci.yml");
-    for gate in [
-        "cargo fmt --check",
-        "cargo clippy --locked --all-targets -- -D warnings",
-        "cargo test --locked",
-        "pnpm check",
-        "pnpm test",
-        "pnpm build",
-        "pnpm size",
+    //
+    // Per job, not per file, and comments stripped. Searching the whole text
+    // meant a gate could be satisfied from anywhere: `pnpm build` appears in
+    // both `ui` and `e2e`, so deleting it from `ui` — where the size budget
+    // depends on it — left this assertion green on the `e2e` job's copy. Every
+    // other gate was comment-satisfiable for the same reason.
+    let ci = strip_comments(&read(".github/workflows/ci.yml"));
+
+    for (job, gates) in [
+        (
+            "server",
+            &[
+                "cargo fmt --check",
+                "cargo clippy --locked --all-targets -- -D warnings",
+                "cargo test --locked",
+            ][..],
+        ),
+        (
+            "ui",
+            &["pnpm check", "pnpm test", "pnpm build", "pnpm size"][..],
+        ),
     ] {
-        assert!(ci.contains(gate), "ci.yml does not run `{gate}`");
+        let block = job_block(&ci, job);
+        for gate in gates {
+            assert!(
+                block.contains(gate),
+                "the `{job}` job does not run `{gate}`"
+            );
+        }
     }
+
     // `pnpm test -- --run` looks like it passes a flag and does not: pnpm
     // forwards the `--`, and the script has been plain `vitest run` since P1.
     assert!(!ci.contains("pnpm test --"), "stale flag in the test step");
+}
+
+/// One job's steps, from `  <name>:` to the next key at the same indent.
+///
+/// A hand-rolled slice rather than a YAML parser: §04's dependency list has no
+/// room for one, and what this needs is "the lines belonging to this job",
+/// which two indent rules describe completely.
+fn job_block(ci: &str, job: &str) -> String {
+    let header = format!("  {job}:");
+    let mut lines = ci.lines().skip_while(|line| !line.starts_with(&header));
+    let first = lines.next().unwrap_or_else(|| panic!("no `{job}` job"));
+
+    std::iter::once(first)
+        .chain(lines.take_while(|line| {
+            // Deeper than the job key, or blank. A new `  name:` ends the block.
+            line.trim().is_empty() || line.starts_with("   ")
+        }))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[test]
@@ -393,4 +437,46 @@ fn the_documented_compose_command_rebuilds() {
             "the README teaches a compose command that reuses a stale image: {line}"
         );
     }
+}
+
+#[test]
+fn mutation_testing_reports_rather_than_gates() {
+    // ADR-006. `cargo test` answers "did the code run"; this answers "if the
+    // code were wrong, would anything fail" — and its first run found that
+    // swapping `|` for `^` in `constant_time_eq` survived the whole suite,
+    // which is a token bypass.
+    let mutants = strip_comments(&read(".github/workflows/mutants.yml"));
+
+    // Scheduled and manual, never on a pull request: a full run is tens of
+    // minutes and most survivors are noise. A slow noisy gate gets disabled.
+    assert!(mutants.contains("schedule:"), "no schedule");
+    assert!(
+        mutants.contains("workflow_dispatch:"),
+        "cannot be run on demand"
+    );
+    assert!(
+        !mutants.contains("pull_request"),
+        "mutation testing must not gate a pull request (ADR-006)"
+    );
+
+    // Pinned, like every other tool this repo installs, and tracked by the
+    // custom manager in renovate.json.
+    assert!(
+        mutants.contains("cargo install cargo-mutants --version"),
+        "cargo-mutants is unpinned; the tool judging the suite would drift"
+    );
+
+    // The UI is built first. `allow_missing` means a server built without it
+    // still compiles, so every mutant would otherwise run against a binary that
+    // serves nothing — measuring something other than the product.
+    assert!(
+        mutants.contains("pnpm build"),
+        "the UI is not built, so the mutants run against an empty shell"
+    );
+
+    // And the summary refuses to call an empty run a clean one.
+    assert!(
+        mutants.contains("test \"$total\" -gt 100"),
+        "a run that mutated nothing would read as a run that caught everything"
+    );
 }
