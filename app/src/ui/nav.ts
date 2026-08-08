@@ -24,6 +24,23 @@ export function traverse(event: KeyboardEvent): void {
 }
 
 /**
+ * Reach the index, at one end or the other.
+ *
+ * The counterpart to `traverse`: that one moves within the list, this one gets
+ * you to it. Queried from the document rather than held as a reference, because
+ * the caller is a window-level key handler with no component to ask — and the
+ * index's accessible name is already the contract two e2e specs select it by.
+ *
+ * Silent when there is nothing to focus: an index toggled off with `[` is not
+ * rendered, and below 760px it is display:none, where `focus()` is a no-op.
+ */
+export function enterIndex(end: 'first' | 'last'): void {
+  const rows = document.querySelectorAll<HTMLElement>('[aria-label="Index"] nav button')
+  const row = end === 'first' ? rows[0] : rows[rows.length - 1]
+  row?.focus()
+}
+
+/**
  * Every route into a note, in one place.
  *
  * The store does not know TODAY exists — it is chrome, and core has no business

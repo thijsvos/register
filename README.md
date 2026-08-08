@@ -199,6 +199,7 @@ own key — so this table is a convenience, not a manual.
 | `Esc` | Leave the editor — the caret vanishing is the mode indicator |
 | `↵` | Back into the editor |
 | `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
+| `j` · `k` | From the frame, step into the index — `j` at the top, `k` at the bottom |
 | `↑` `↓` · `Tab` | Move within the palette — `j` and `k` are letters while you are typing |
 
 ⌘K is the whole navigation surface. It runs real full-text search over the note

@@ -1,7 +1,7 @@
 import { revealVault } from '../../core/api'
-import { isTemplate } from '../../core/paths'
+import { isListed, isTemplate } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
-import { go } from '../nav'
+import { enterIndex, go } from '../nav'
 import { chrome } from '../view.svelte'
 
 /**
@@ -16,6 +16,15 @@ export interface Command {
   run: () => void | Promise<void>
   /** Hidden when it cannot do anything, rather than shown and inert. */
   enabled?: () => boolean
+  /**
+   * This command puts focus somewhere itself.
+   *
+   * The palette restores focus to wherever it came from when it closes, which is
+   * right for a command that only changes state and wrong for one whose entire
+   * effect is where the focus lands — the restore would undo it a microtask later
+   * and the command would look dead.
+   */
+  takesFocus?: boolean
 }
 
 export function allCommands(): Command[] {
@@ -69,6 +78,17 @@ export function allCommands(): Command[] {
       label: 'TOGGLE INDEX',
       keys: '[',
       run: () => chrome.toggleIndex(),
+    },
+    // §01: "every control shows its key". The traversal keys are §02b's, but
+    // reaching the list with them is new, and a binding with nothing on screen
+    // naming it is a binding only its author knows about.
+    {
+      id: 'focus-index',
+      label: 'FOCUS · INDEX',
+      keys: 'J',
+      enabled: () => chrome.index && vault.tree.some((entry) => isListed(entry.path)),
+      takesFocus: true,
+      run: () => enterIndex('first'),
     },
     {
       id: 'copy',
