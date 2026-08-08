@@ -215,9 +215,11 @@ export function installKeymap(): () => void {
       key: event.key,
       onBody: document.activeElement === document.body,
     })
-    if (into !== 'nothing') {
+    // Only claim the key if it actually went somewhere. With the index toggled
+    // off there is nothing to focus, and swallowing `j` there would be a key
+    // that does nothing and says nothing.
+    if (into !== 'nothing' && enterIndex(into)) {
       event.preventDefault()
-      enterIndex(into)
       return
     }
 

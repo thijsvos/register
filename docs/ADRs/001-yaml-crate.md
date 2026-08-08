@@ -57,10 +57,31 @@ Add it in P2, when there is code that uses it. It is deliberately not in
 - Costs ~711 KiB and 19 locked packages, against ~149 KiB and 14 for the
   runner-up. Both are immaterial against the §06 10 MB binary budget.
 - Duplicate keys become a hard error instead of last-write-wins. This is a
-  behaviour change from `serde_yaml`: a note with two `id:` lines will surface
-  an error from `/api/tree`. Keep it — silently discarding half of a conflicting
-  frontmatter key is worse than saying so. `DuplicateKeyPolicy` relaxes it if
-  real vaults prove otherwise.
+  behaviour change from `serde_yaml`, and keeping it is right: silently
+  discarding half of a conflicting frontmatter key is worse than refusing the
+  key. `DuplicateKeyPolicy` relaxes it if real vaults prove otherwise.
+
+  **Amended after P14.** This bullet used to end "a note with two `id:` lines
+  will surface an error from `/api/tree`", and that never happened. The crate
+  does reject the document; `entry_for` then calls `.ok()` and
+  `.unwrap_or_default()`, so the note reaches the tree untitled and untagged —
+  indistinguishable from a note nobody titled. The rejection was real and the
+  surfacing was not.
+
+  Degrading rather than failing is the correct half: §04's tree has to survive a
+  note an agent is halfway through writing, and one unparseable file must not
+  take down `GET /api/tree`. That is now a pinned contract
+  (`tests/compat.rs::frontmatter_that_does_not_parse_degrades_without_taking_the_tree_down`)
+  rather than an accident, tested against a frozen vault that actually contains
+  such a note.
+
+  What is still missing is the other half — any way for the user to learn of it.
+  Saying so in the tree means a new field in §04's envelope, which is a contract
+  change under hard rule 1 and wants a §02b state for what an unreadable note
+  looks like in the index; saying so at startup means reading every note before
+  the server binds, against §06's 500 ms start-to-editable budget. Neither is a
+  decision to make in passing, so it is parked with a trigger in
+  `docs/ROADMAP.md` rather than guessed at here.
 - Licensing stays clean: MIT OR Apache-2.0, and we take the MIT arm. Two
   transitive crates (`encoding_rs`, `unicode-ident`) carry conjunctive
   attribution terms, which belong in a third-party notice if releases ever ship

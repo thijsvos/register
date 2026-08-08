@@ -17,6 +17,17 @@
  *   only place you would ever find one.
  */
 
+/**
+ * The last segment of a path.
+ *
+ * Here rather than in each caller because there were four copies of it — three
+ * identical and one that also stripped `.md`, which is the point at which a
+ * one-liner starts being a decision rather than an expression.
+ */
+export function basename(path: string): string {
+  return path.split('/').pop() ?? path
+}
+
 /** The agent contract §04 puts at the vault root. */
 export const CONTRACT = 'CLAUDE.md'
 /** §04's stencil folder; `GO · DAILY LOG` cuts today's note from this one. */
