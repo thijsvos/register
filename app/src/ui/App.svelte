@@ -157,8 +157,17 @@ $effect(() => {
   grid-template-rows: var(--frame-header) minmax(0, 1fr) var(--frame-foot);
   /* dvh, not vh: on mobile Safari 100vh exceeds the visual viewport and pushes
      the status bar under the browser chrome, which html{overflow:hidden} then
-     makes unreachable. */
-  height: 100dvh;
+     makes unreachable.
+     Divided by the plate scale for the same reason: viewport units resolve
+     against the unzoomed viewport, so an undivided 100dvh at 2x makes .app
+     twice the viewport tall — measured, that puts the status bar off-screen
+     behind the same overflow:hidden, with no scrollbar to reach it. */
+  height: calc(100dvh / var(--ui-scale));
+  /* The breakpoints below ask the frame how wide it is in plate units. A media
+     query would answer with the raw viewport, which at 2x is twice the room the
+     frame actually has. */
+  container-type: inline-size;
+  container-name: frame;
 }
 .mid {
   display: grid;
@@ -186,13 +195,13 @@ main {
   color: var(--dim);
 }
 
-@media (max-width: 1080px) {
+@container frame (max-width: 1080px) {
   .mid,
   .app.no-index .mid {
     grid-template-columns: var(--frame-side) minmax(0, 1fr);
   }
 }
-@media (max-width: 760px) {
+@container frame (max-width: 760px) {
   .mid,
   .app.no-index .mid,
   .app.no-inspector .mid {

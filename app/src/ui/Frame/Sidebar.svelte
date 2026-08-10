@@ -183,7 +183,7 @@ nav {
 
 /* Below 760px the frame collapses to a single column. The index returns as a
    toggled drawer with the IDX key in P5, when there is a keymap to hang it on. */
-@media (max-width: 760px) {
+@container frame (max-width: 760px) {
   .side {
     display: none;
   }

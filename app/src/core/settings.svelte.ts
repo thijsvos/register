@@ -14,12 +14,29 @@ export type Scheme = 'system' | 'light' | 'dark'
 /** §02b Screen 6: "BODY FACE [ Default·Commit ][ Teletype·Server ]". */
 export type BodyFace = 'default' | 'teletype'
 
+/**
+ * §02 "Plate": the frame renders at whole multiples of the specified size.
+ *
+ * `'auto'` is the default and lets the canvas decide — 2× only where there is
+ * room for it (tokens.css). The two pins are the way in and the way back: a
+ * user on a 3440 panel who finds 2× too large needs `1` to mean *never*, not
+ * "unless the window is wide", or the setting has no off.
+ *
+ * A closed union of two numbers and a word rather than a percentage or a
+ * range. It is JSON-native, so an agent hand-editing config.json reads
+ * `"scale": 2` and understands it; and it cannot express a fractional scale,
+ * which on a DPR-1 panel puts Departure Mono's 11-design-pixel em on a
+ * fractional device pixel and aliases the micro layer.
+ */
+export type Scale = 'auto' | 1 | 2
+
 export interface Config {
   scheme: Scheme
   bodyFace: BodyFace
+  scale: Scale
 }
 
-const DEFAULTS: Config = { scheme: 'system', bodyFace: 'default' }
+const DEFAULTS: Config = { scheme: 'system', bodyFace: 'default', scale: 'auto' }
 
 /**
  * The family §03 registers a licensed face under.
@@ -36,6 +53,7 @@ export type FontState = 'none' | 'loading' | 'loaded' | 'error'
 class Settings {
   scheme = $state<Scheme>(DEFAULTS.scheme)
   bodyFace = $state<BodyFace>(DEFAULTS.bodyFace)
+  scale = $state<Scale>(DEFAULTS.scale)
   font = $state<FontState>('none')
   /** One line of instrument-voiced trouble, or nothing. */
   notice = $state<string | null>(null)
@@ -58,6 +76,7 @@ class Settings {
       const stored = asConfig(await getConfig())
       this.scheme = stored.scheme
       this.bodyFace = stored.bodyFace
+      this.scale = stored.scale
     } catch {
       // Defaults already hold.
     }
@@ -70,6 +89,11 @@ class Settings {
   apply(): void {
     if (typeof document === 'undefined') return
     document.documentElement.classList.toggle('teletype', this.bodyFace === 'teletype')
+    // `auto` sets neither class, because auto is the classless case in
+    // tokens.css: a plain media query, which therefore holds from the first
+    // frame instead of waiting for this config to arrive over HTTP.
+    document.documentElement.classList.toggle('scale-1', this.scale === 1)
+    document.documentElement.classList.toggle('scale-2', this.scale === 2)
   }
 
   async setScheme(scheme: Scheme): Promise<void> {
@@ -79,6 +103,12 @@ class Settings {
 
   async setBodyFace(face: BodyFace): Promise<void> {
     this.bodyFace = face
+    this.apply()
+    await this.#save()
+  }
+
+  async setScale(scale: Scale): Promise<void> {
+    this.scale = scale
     this.apply()
     await this.#save()
   }
@@ -155,7 +185,14 @@ class Settings {
 
   async #save(): Promise<void> {
     try {
-      await putConfig({ scheme: this.scheme, bodyFace: this.bodyFace })
+      // Every field, explicitly. A spread of `this` would carry the transient
+      // ones (font state, notice) into the vault's config; naming them means a
+      // new setting that is not added here is silently never persisted.
+      await putConfig({
+        scheme: this.scheme,
+        bodyFace: this.bodyFace,
+        scale: this.scale,
+      })
       this.notice = null
     } catch (error) {
       this.notice = describe(error)
@@ -171,6 +208,7 @@ export function asConfig(value: unknown): Config {
   return {
     scheme: isScheme(record.scheme) ? record.scheme : DEFAULTS.scheme,
     bodyFace: isBodyFace(record.bodyFace) ? record.bodyFace : DEFAULTS.bodyFace,
+    scale: isScale(record.scale) ? record.scale : DEFAULTS.scale,
   }
 }
 
@@ -180,6 +218,18 @@ function isScheme(value: unknown): value is Scheme {
 
 function isBodyFace(value: unknown): value is BodyFace {
   return value === 'default' || value === 'teletype'
+}
+
+/**
+ * Identity against a closed set, which is the whole defence.
+ *
+ * `1.5`, `0`, `3`, `-1`, `NaN`, `Infinity`, `'2'` and `null` are all false here
+ * without a single range check — and they have to be, because the server treats
+ * config.json as opaque JSON (it validates that it parses, nothing more), so
+ * this function is the only thing between a hand-edited file and the frame.
+ */
+function isScale(value: unknown): value is Scale {
+  return value === 'auto' || value === 1 || value === 2
 }
 
 function describe(error: unknown): string {

@@ -41,6 +41,14 @@
 html {
   background: var(--bg);
   color-scheme: light;
+  /* §02 "Plate": the whole instrument at a whole multiple. On <html> rather
+     than on .app because the ⌘K palette renders as .app's sibling and has to
+     scale with it. `zoom` and not `transform: scale()` — transform paints
+     larger without reflowing, so the layout keeps its unscaled geometry and
+     hit-testing and CodeMirror's caret arithmetic both desync from what is
+     drawn. zoom reflows, which is why measured click-to-caret lands on the
+     same character at 1x and 2x. */
+  zoom: var(--ui-scale);
 }
 
 html.dark {

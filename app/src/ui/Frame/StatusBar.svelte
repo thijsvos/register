@@ -93,6 +93,16 @@ footer {
   height: 100%;
   padding: 0 var(--s3);
   border-right: var(--hairline) solid var(--line);
+  /* The bar clips at `overflow: hidden` above, and a flex item's default
+     min-width:auto refuses to shrink — so in a narrow frame the rightmost cells
+     were pushed past the edge whole rather than tightening: WORDS, FILES, GIT
+     and the `N unresolved` button, which is the only route from the bar to
+     conflict resolution, all silently gone with no scrollbar to reach them.
+     This is reachable today at a narrow window; offering 2x makes a narrow
+     PLATE reachable on a desktop, which is how it got here. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cell.grow {
   flex: 1;

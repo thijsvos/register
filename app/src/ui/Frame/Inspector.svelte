@@ -187,7 +187,7 @@ nav {
   padding: var(--s1) 0;
 }
 
-@media (max-width: 1080px) {
+@container frame (max-width: 1080px) {
   .insp { display: none; }
 }
 </style>

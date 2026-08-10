@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { BodyFace, Scheme } from '../core/settings.svelte'
+import type { BodyFace, Scale, Scheme } from '../core/settings.svelte'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
 
@@ -14,6 +14,13 @@ function chooseScheme(wanted: Scheme) {
 
 function chooseFace(wanted: BodyFace) {
   void settings.setBodyFace(wanted)
+}
+
+// Unlike SCHEME, pressing the lit key does not toggle back: `auto` is a button
+// of its own here, so there is already a way back and making the pins toggle
+// would give two.
+function chooseScale(wanted: Scale) {
+  void settings.setScale(wanted)
 }
 
 function pick(event: Event) {
@@ -48,6 +55,28 @@ function pick(event: Event) {
         onclick={() => chooseFace('default')}>Default · Commit</button>
       <button class="opt" aria-pressed={settings.bodyFace === 'teletype'}
         onclick={() => chooseFace('teletype')}>Teletype · Server</button>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="key">Scale</div>
+    <div class="controls">
+      <button class="opt" aria-pressed={settings.scale === 'auto'}
+        onclick={() => chooseScale('auto')}>Auto</button>
+      <button class="opt" aria-pressed={settings.scale === 1}
+        onclick={() => chooseScale(1)}>1×</button>
+      <button class="opt" aria-pressed={settings.scale === 2}
+        onclick={() => chooseScale(2)}>2×</button>
+      <!-- The thresholds themselves stay in tokens.css and are deliberately not
+           restated here: copy that repeats a constant is copy that lies the day
+           the constant moves. -->
+      <span class="note">
+        {settings.scale === 'auto'
+          ? 'Follows the canvas — 2× where there is room'
+          : settings.scale === 1
+            ? 'Pinned — never scales'
+            : '2× wherever the frame fits'}
+      </span>
     </div>
   </div>
 

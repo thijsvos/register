@@ -73,7 +73,11 @@ const LENGTH = /\b\d+(?:\.\d+)?px\b/g
  * are stripped because they legitimately quote the spec's own numbers and names
  * (§02's "44px", "one ink"), and a scanner that reads prose reports the
  * documentation as a violation. Media-query preludes are stripped because
- * breakpoints cannot be custom properties — @media cannot read them.
+ * breakpoints cannot be custom properties — @media cannot read them. Container
+ * queries are stripped for exactly the same reason: the frame's breakpoints
+ * moved to @container so they measure the plate rather than the viewport
+ * (§02 "Plate"), and a container prelude can no more read a var() than a media
+ * one can.
  */
 const code = (text: string) =>
   text
@@ -81,6 +85,7 @@ const code = (text: string) =>
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1')
     .replace(/@media[^{]*\{/g, '{')
+    .replace(/@container[^{]*\{/g, '{')
 
 describe('design tokens (rule 2)', () => {
   it('actually reads every source, so no assertion below passes vacuously', () => {
@@ -230,6 +235,88 @@ describe('frame geometry (§02 component doctrine)', () => {
   it('puts the brand rule on the same vertical line as the sidebar rule', () => {
     expect(sources['./ui/Frame/Header.svelte']).toMatch(
       /min-width:\s*var\(--frame-side\)/,
+    )
+  })
+})
+
+describe('plate scale (§02 "Plate")', () => {
+  const tokens = sources[TOKENS] ?? ''
+
+  it('scales the plate by whole multiples only', () => {
+    // The pixel grid enforcing itself, not a preference: Departure Mono's em is
+    // exactly 11 design pixels, so a fractional multiple puts every design pixel
+    // on a fractional device pixel and the micro layer aliases. Measured on a
+    // DPR-1 panel: 11px and 22px are crisp; 16px, 16.5px and 19px are not, and
+    // rounding a fractional size to a whole pixel does not recover it.
+    const declared = [...tokens.matchAll(/--ui-scale:\s*([^;]+);/g)].map((m) =>
+      (m[1] ?? '').trim(),
+    )
+    expect(declared.length).toBeGreaterThan(1)
+    for (const value of declared) {
+      expect(Number.isInteger(Number(value)), `--ui-scale: ${value}`).toBe(true)
+    }
+  })
+
+  it('leaves every §02 value at its specified size', () => {
+    // The mechanism is `zoom` on the root, so the tokens are never rewritten and
+    // 1x is byte-identical. If this ever became `calc(13px * var(--ui-scale))`
+    // the frame-geometry assertions above would go with it — and the type scale
+    // would be multiplied twice over, because --measure is in ch and the
+    // trackings are in em.
+    expect(tokens).toMatch(/--text-body:\s*13px;/)
+    expect(tokens).not.toMatch(/--text-[a-z]+:\s*calc\(/)
+    expect(tokens).not.toMatch(/--frame-[a-z]+:\s*calc\(/)
+    expect(sources[BASE]).toMatch(/zoom:\s*var\(--ui-scale\)/)
+  })
+
+  it('measures the frame’s breakpoints in plate units, not viewport pixels', () => {
+    // A media query answers with the raw viewport, which at 2x is twice the room
+    // the frame actually has. All four files move together or the header rules
+    // fall out of register with the panes at one scale and not the other.
+    for (const path of [
+      './ui/App.svelte',
+      './ui/Frame/Header.svelte',
+      './ui/Frame/Sidebar.svelte',
+      './ui/Frame/Inspector.svelte',
+    ]) {
+      const source = sources[path] ?? ''
+      expect(source, `${path} read as empty`).not.toHaveLength(0)
+      expect(source, `${path} still asks the viewport`).not.toMatch(
+        /@media\s*\(max-width/,
+      )
+      expect(source, `${path} has no frame breakpoint`).toMatch(
+        /@container\s+frame\s*\(max-width/,
+      )
+    }
+    expect(sources['./ui/App.svelte']).toMatch(/container-name:\s*frame/)
+  })
+
+  it('divides every viewport unit by the plate scale', () => {
+    // vh/vw resolve against the UNZOOMED viewport, so inside a scaled plate they
+    // measure --ui-scale times what they say. Measured: an undivided 100dvh at
+    // 2x puts the status bar off-screen behind html{overflow:hidden}, with no
+    // scrollbar to reach it.
+    const viewportUnits = /\b\d+(?:\.\d+)?(?:d?v(?:h|w|min|max))\b/g
+    for (const [path, text] of entries) {
+      for (const hit of code(text).match(viewportUnits) ?? []) {
+        const context = code(text).slice(
+          Math.max(0, code(text).indexOf(hit) - 60),
+          code(text).indexOf(hit) + hit.length + 40,
+        )
+        expect(context, `${path}: ${hit} is not divided by the plate scale`).toMatch(
+          /var\(--ui-scale\)/,
+        )
+      }
+    }
+  })
+
+  it('strips container preludes so the length gate reads declarations only', () => {
+    // The same positive control the media-query strip has: without it this
+    // reads identically whether the strip works or silently swallows the block
+    // it was meant to open.
+    expect(code('@container frame (max-width: 900px) { width: 40px; }')).toContain('40px')
+    expect(code('@container frame (max-width: 900px) { width: 40px; }')).not.toContain(
+      '900px',
     )
   })
 })
