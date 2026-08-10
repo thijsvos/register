@@ -29,6 +29,14 @@ test.beforeAll(async () => {
         title: 'Launch plan',
         body: 'Three deep.\n',
       }),
+      // Deep enough that its crumb cannot fit a narrow header, which is the
+      // only way to test which half gives way — and it compacts twice, so the
+      // tree has to get that right in two places at once.
+      'notes/projects/apollo/guidance/navigation/012-deep.md': note({
+        ref: '012',
+        title: 'Deep note',
+        body: 'Five deep.\n',
+      }),
     }),
   )
 })
@@ -67,10 +75,12 @@ test('draws the folders the vault actually has', async ({ page }) => {
   // `projects/apollo` is one row: a chain holding a single folder earns one
   // level of indent, not two.
   expect(await rows(page)).toEqual([
-    '▾ NOTES 3',
+    '▾ NOTES 4',
     '▾ ARCHIVE 1',
     '018 Retired 2',
-    '▾ PROJECTS/APOLLO 1',
+    '▾ PROJECTS/APOLLO 2',
+    '▾ GUIDANCE/NAVIGATION 1',
+    '012 Deep note 2',
     '010 Launch plan 2',
     '001 Alpha 3',
     '000 Inbox 4',
@@ -262,4 +272,71 @@ test('h and l alias the arrows, and → on a note does nothing', async ({ page }
   const before = await focused()
   await page.keyboard.press('ArrowRight')
   expect(await focused()).toBe(before)
+})
+
+test('the crumb names the whole path to the open note', async ({ page }) => {
+  await page.goto(server.url)
+  const crumb = () =>
+    page
+      .locator('header')
+      .first()
+      .locator('.crumb')
+      .innerText()
+      .then((text) => text.replace(/\s+/g, ' ').trim())
+
+  await page.getByRole('button', { name: /Launch plan/ }).click()
+  await expect(page.locator('.cm-content')).toContainText('Three deep')
+  // Every folder, uncompacted — the tree draws `projects/apollo` as one row, but
+  // the crumb answers "where is this file" and both folders are real.
+  expect(await crumb()).toBe('INDEX / NOTES / PROJECTS / APOLLO / 010 / LAUNCH PLAN')
+
+  // A note at the root has no trail to name.
+  await page.getByRole('button', { name: /Inbox/ }).click()
+  await expect(page.locator('.cm-content')).toContainText('Loose at the root')
+  expect(await crumb()).toBe('INDEX / 000 / INBOX')
+})
+
+test('the crumb gives way at the trail, never at the note', async ({ page }) => {
+  // The mechanism, not the outcome — deliberately.
+  //
+  // Measured: in the band where the crumb is drawn at all (it is display:none
+  // below 760, and the header stops narrowing around 1080) the crumb slot never
+  // falls below ~577px while the deepest trail in this fixture is ~457px. So
+  // nothing clips at any reachable width, and a test asserting "the trail is
+  // clipped and the title is not" could never fail — the same unfalsifiable
+  // shape as the depth guard removed from `treeTraverse`.
+  //
+  // What IS falsifiable is which half is allowed to shrink. `flex: none` on the
+  // note is the whole rule: without it the browser shrinks both, and the ellipsis
+  // lands in the title.
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Deep note/ }).click()
+  await expect(page.locator('.cm-content')).toContainText('Five deep')
+
+  const rule = await page.evaluate(() => {
+    const trail = document.querySelector('header .trail')
+    const here = document.querySelector('header .here')
+    if (trail === null || here === null) return null
+    return {
+      trailShrink: getComputedStyle(trail).flexShrink,
+      trailEllipsis: getComputedStyle(trail).textOverflow,
+      hereShrink: getComputedStyle(here).flexShrink,
+      here: here.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      trail: trail.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    }
+  })
+  expect(rule).not.toBeNull()
+  expect(rule?.hereShrink).toBe('0')
+  expect(rule?.trailShrink).not.toBe('0')
+  expect(rule?.trailEllipsis).toBe('ellipsis')
+
+  // And the split is where it should be: folders in the part that yields, the
+  // note's own identity in the part that does not.
+  // Compared lowercased: the UPPERCASE is a CSS text-transform, so the DOM
+  // carries the real folder names — which is right, and is also why the rows
+  // themselves are matched case-insensitively above.
+  expect(rule?.trail.toLowerCase()).toBe(
+    'index / notes / projects / apollo / guidance / navigation / 012',
+  )
+  expect(rule?.here).toMatch(/deep note/i)
 })

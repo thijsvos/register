@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  folders,
   isConflictCopy,
   isContract,
   isDaily,
@@ -67,5 +68,31 @@ describe('the four kinds of file a vault holds', () => {
     for (const [path, listed, derivedFrom] of kinds) {
       expect([isListed(path), isDerived(path)], path).toEqual([listed, derivedFrom])
     }
+  })
+})
+
+describe('folders', () => {
+  it('names the directories a note sits in, outermost first', () => {
+    expect(folders('notes/archive/018-old.md')).toEqual(['notes', 'archive'])
+  })
+
+  it('names nothing for a note at the vault root', () => {
+    expect(folders('000-inbox.md')).toEqual([])
+  })
+
+  it('does not compact the way the tree does', () => {
+    // The INDEX draws `projects/apollo` as one row because a level offering no
+    // choice does not earn indentation. A crumb answers "where is this file",
+    // and eliding a real folder would make that answer wrong to save characters.
+    expect(folders('notes/projects/apollo/010-launch.md')).toEqual([
+      'notes',
+      'projects',
+      'apollo',
+    ])
+  })
+
+  it('survives a path someone else wrote', () => {
+    expect(folders('a//b.md')).toEqual(['a'])
+    expect(folders('')).toEqual([])
   })
 })

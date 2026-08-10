@@ -1,6 +1,7 @@
 <script lang="ts">
 import { untrack } from 'svelte'
 import { gitLabel } from '../core/git'
+import { basename, folders } from '../core/paths'
 import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
@@ -30,17 +31,25 @@ let gitField = $derived(gitLabel(vault.git))
 /** Newest first, so the status bar's route lands on the one that just happened. */
 let unresolved = $derived(vault.unresolved)
 
-let crumb = $derived(
-  chrome.settings
-    ? 'CONFIG / SETTINGS'
-    : chrome.today
-      ? 'AGGREGATE / TODAY'
-      : chrome.conflict !== null
-        ? 'CONFLICT / UNRESOLVED'
-        : vault.active
-          ? `INDEX / ${vault.active.ref ?? '—'} / ${vault.active.title ?? vault.active.path}`
-          : 'INDEX',
-)
+// Segments rather than one string, so the header can decide what to drop when
+// there is not room: the folders shrink and the note's own identity does not.
+// Uppercased by CSS, as chrome is throughout (§02).
+let crumb = $derived.by(() => {
+  if (chrome.settings) return ['Config', 'Settings']
+  if (chrome.today) return ['Aggregate', 'Today']
+  if (chrome.conflict !== null) return ['Conflict', 'Unresolved']
+  const open = vault.active
+  if (open === null) return ['Index']
+  // The full folder trail, so the crumb answers where the file is and not only
+  // which one it is — the index draws that structure now, and a breadcrumb that
+  // disagreed with the tree beside it would be worse than one that said nothing.
+  return [
+    'Index',
+    ...folders(open.path),
+    open.ref ?? '—',
+    open.title ?? basename(open.path),
+  ]
+})
 
 $effect(() => {
   void vault.start()

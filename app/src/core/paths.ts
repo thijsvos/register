@@ -39,6 +39,21 @@ export function basename(path: string): string {
   return path.split('/').pop() ?? path
 }
 
+/**
+ * The directory segments of a path, outermost first.
+ *
+ * `notes/archive/018-old.md` → `['notes', 'archive']`. Not compacted the way the
+ * INDEX tree compacts a single-child chain into one row: a crumb is the answer
+ * to "where is this file", and eliding a real folder from it would make the
+ * answer wrong to save a few characters.
+ */
+export function folders(path: string): string[] {
+  return path
+    .split('/')
+    .slice(0, -1)
+    .filter((segment) => segment !== '')
+}
+
 /** The agent contract §04 puts at the vault root. */
 export const CONTRACT = 'CLAUDE.md'
 /** §04's stencil folder; `GO · DAILY LOG` cuts today's note from this one. */

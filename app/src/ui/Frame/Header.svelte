@@ -2,12 +2,12 @@
 import { utcStamp } from '../../lib/time'
 
 let {
-  crumb = 'INDEX',
+  crumb = ['Index'],
   pressed = false,
   oninvert,
   onpalette,
 }: {
-  crumb?: string
+  crumb?: string[]
   pressed?: boolean
   oninvert: () => void
   onpalette: () => void
@@ -35,7 +35,15 @@ $effect(() => {
     <h1 class="mark"><span aria-hidden="true">■</span> REGISTER</h1>
     <div class="sub">Second brain system</div>
   </div>
-  <div class="crumb">{crumb}</div>
+  <!-- Split so the two halves shrink differently. With one string and a plain
+       ellipsis the header truncated the END, which is the note's own title —
+       the one part of a crumb that says which file you are looking at. The
+       trail gives way instead, because "somewhere under notes/…" is a survivable
+       loss and "…AND INVERSE VID" is not. -->
+  <div class="crumb">
+    <span class="trail">{crumb.slice(0, -1).join(' / ')}</span>
+    {#if crumb.length > 1}<span class="here">&nbsp;/ {crumb[crumb.length - 1]}</span>{/if}
+  </div>
   <div class="stats">
     <time datetime={clock.replace(' ', 'T')}>{clock}</time>
     <button class="key" aria-pressed={pressed} title="Switch light or dark" onclick={oninvert}>
@@ -91,7 +99,19 @@ header {
   color: var(--dim);
   white-space: nowrap;
   overflow: hidden;
+  min-width: 0;
+}
+/* The part that gives way. `min-width: 0` because a flex item refuses to shrink
+   below its content by default, which is what makes overflow:hidden clip the
+   row rather than this. */
+.trail {
+  overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
+}
+/* The part that does not. */
+.here {
+  flex: none;
 }
 
 /* The same rule as .brand, on the other side: --frame-insp so the header's
