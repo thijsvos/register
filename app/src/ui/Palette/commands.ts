@@ -33,7 +33,7 @@ export function allCommands(): Command[] {
       id: 'new',
       label: 'NEW · NOTE',
       keys: 'N',
-      run: () => go.create('Untitled note'),
+      run: () => go.create(UNTITLED),
     },
     // §02b Screen 2 draws this row with [⌘D] against it.
     {
@@ -147,24 +147,34 @@ export interface TemplateChoice {
   title: string
 }
 
+/** What a note gets called when it is cut from a stencil with nothing typed. */
+export const UNTITLED = 'Untitled note'
+
 /**
  * The templates a new note can be cut from (§08 P7: "notes in templates/ appear
  * under NEW FROM TEMPLATE").
  *
  * Deliberately not filtered by the query, unlike notes and commands: the query
  * IS the new note's title, so filtering would hide every template the moment you
- * typed a name for the thing you wanted to create. When the box is empty the
- * template's own title is used instead.
+ * typed a name for the thing you wanted to create.
+ *
+ * With the box empty this used to fall back to the stencil's own title, and a
+ * stencil's title is a placeholder — `templates/daily.md` is titled `TEMPLATE`,
+ * so pressing Enter on an empty box produced a note called TEMPLATE, sitting in
+ * the index next to real notes. A stencil's title names the stencil, not the
+ * thing you are about to write, so it is never the new note's title now: the
+ * fallback is what `N` already calls a note nobody has named.
  */
 export function templateChoices(query: string): TemplateChoice[] {
   const wanted = query.trim()
 
   return vault.tree
     .filter((entry) => isTemplate(entry.path))
-    .map((entry) => {
-      const name = entry.title ?? basename(entry.path)
-      return { path: entry.path, name, title: wanted === '' ? name : wanted }
-    })
+    .map((entry) => ({
+      path: entry.path,
+      name: entry.title ?? basename(entry.path),
+      title: wanted === '' ? UNTITLED : wanted,
+    }))
 }
 
 function basename(path: string): string {

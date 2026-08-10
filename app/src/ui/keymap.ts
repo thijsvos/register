@@ -1,4 +1,5 @@
 import { enterIndex, go } from './nav'
+import { UNTITLED } from './Palette/commands'
 import { chrome } from './view.svelte'
 
 /** How long a `G` stays armed waiting for the second key of a chord. */
@@ -247,7 +248,7 @@ export function installKeymap(): () => void {
       }
       case 'n':
         event.preventDefault()
-        go.create('Untitled note')
+        go.create(UNTITLED)
         return
       case 'i':
         event.preventDefault()
