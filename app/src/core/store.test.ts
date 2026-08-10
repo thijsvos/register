@@ -25,7 +25,7 @@ class FakeVault {
   #broken = new Map<string, number>()
 
   /** What §08 P12's git field reports, or null for a vault that is not a repo. */
-  git: { clean: boolean; ahead: number | null } | null = null
+  git: Record<string, unknown> | null = null
 
   seed(path: string, body: string): void {
     this.files.set(path, { body, etag: `etag-${++this.#version}` })
@@ -937,13 +937,56 @@ describe('new note', () => {
     await vault.refresh()
     expect(vault.git).toBeNull()
 
-    server.git = { clean: false, ahead: 3 }
+    server.git = {
+      branch: 'main',
+      clean: false,
+      staged: 1,
+      modified: 2,
+      untracked: 0,
+      ahead: 3,
+    }
     await vault.refresh()
-    expect(vault.git).toEqual({ clean: false, ahead: 3 })
+    expect(vault.git).toEqual({
+      branch: 'main',
+      clean: false,
+      staged: 1,
+      modified: 2,
+      untracked: 0,
+      ahead: 3,
+    })
 
-    server.git = { clean: true, ahead: null }
+    // A server that predates the counts, or an envelope that is half
+    // unreadable: the field degrades to a branchless, markless "there is a
+    // repository here" rather than breaking the tree that carries it.
+    server.git = { clean: true }
     await vault.refresh()
-    expect(vault.git).toEqual({ clean: true, ahead: null })
+    expect(vault.git).toEqual({
+      branch: null,
+      clean: true,
+      staged: 0,
+      modified: 0,
+      untracked: 0,
+      ahead: null,
+    })
+
+    // Counts that are not counts. `-1` and `NaN` must not reach the label,
+    // where they would render as `+-1` and `~NaN`.
+    server.git = {
+      branch: '',
+      clean: false,
+      staged: -1,
+      modified: Number.NaN,
+      untracked: 2.7,
+    }
+    await vault.refresh()
+    expect(vault.git).toEqual({
+      branch: null,
+      clean: false,
+      staged: 0,
+      modified: 0,
+      untracked: 2,
+      ahead: null,
+    })
   })
 
   it('reports the vault path for the status bar', async () => {

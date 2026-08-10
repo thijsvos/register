@@ -33,11 +33,64 @@ const IDLE: Duration = Duration::from_secs(90);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    /// The branch HEAD is on, or `None` when detached.
+    ///
+    /// `symbolic-ref` rather than `rev-parse --abbrev-ref`, which answers with
+    /// the literal string "HEAD" on a detached head — a branch name that looks
+    /// real, sorts oddly and is not one.
+    pub branch: Option<String>,
     /// Nothing uncommitted.
     pub clean: bool,
+    /// Paths with an index entry that differs from HEAD — `git status --short`'s
+    /// first column, drawn as `+`.
+    pub staged: u32,
+    /// Paths whose worktree differs from the index — the second column, `~`.
+    /// A path can be both: `MM` is staged *and* modified, and counting it once
+    /// in each is what makes the marks add up to what git shows.
+    pub modified: u32,
+    /// Paths git is not tracking — `??`, drawn as `?`.
+    pub untracked: u32,
     /// Commits this branch has that its upstream does not. `None` when there is
     /// no upstream — which is the normal case, since checkpoints never push.
     pub ahead: Option<u32>,
+}
+
+/// Count `git status --porcelain` lines by which column carries the change.
+///
+/// Returns `(staged, modified, untracked)`. The format is two status columns
+/// then a space then the path: `X` is the index against HEAD, `Y` is the
+/// worktree against the index, and `??` is untracked.
+///
+/// Anything that is not a space counts, rather than a list of the letters we
+/// expect. `R` (rename), `C` (copy) and `U` (unmerged) are all real states, and
+/// a whitelist would silently drop the ones nobody thought of — reporting a
+/// clean-looking `MAIN` for a vault mid-rename. An unmerged `UU` therefore
+/// counts in both columns, which is honest: it needs work on both sides.
+fn tally(porcelain: &str) -> (u32, u32, u32) {
+    let mut staged = 0;
+    let mut modified = 0;
+    let mut untracked = 0;
+
+    for line in porcelain.lines() {
+        // Not `trim()`: a leading space is the first status column, and
+        // trimming it turns ` M` (worktree-modified) into `M ` (staged).
+        let mut columns = line.chars();
+        let (Some(x), Some(y)) = (columns.next(), columns.next()) else {
+            continue;
+        };
+        if x == '?' && y == '?' {
+            untracked += 1;
+            continue;
+        }
+        if x != ' ' {
+            staged += 1;
+        }
+        if y != ' ' {
+            modified += 1;
+        }
+    }
+
+    (staged, modified, untracked)
 }
 
 /// Config keys whose values git executes as commands.
@@ -211,9 +264,24 @@ pub fn status(root: &Path) -> Option<Status> {
     // that has never been given a remote has nothing to be ahead of.
     let ahead = git(root, &["rev-list", "--count", "@{u}..HEAD"])
         .and_then(|count| count.trim().parse().ok());
+    // Fails on a detached head, which is what `None` is for. An unborn branch —
+    // `git init` with no commit yet — still answers, so a fresh vault reads as
+    // its branch rather than as nothing.
+    let branch = git(root, &["symbolic-ref", "--short", "HEAD"])
+        .map(|name| name.trim().to_owned())
+        .filter(|name| !name.is_empty());
+
+    let (staged, modified, untracked) = tally(&dirty);
 
     Some(Status {
+        branch,
+        // Still derived from the raw output rather than from the tally, so
+        // "clean" cannot start disagreeing with the marks if `tally` ever drops
+        // a state it does not recognise.
         clean: dirty.trim().is_empty(),
+        staged,
+        modified,
+        untracked,
         ahead,
     })
 }
