@@ -56,6 +56,13 @@ Everything else is ordinary markdown.
 2. id   = fresh ULID
 3. file = notes/NNN-kebab-slug.md with full frontmatter
 
+## Creating a daily log
+daily/YYYY-MM-DD.md, and it takes no ref — a date is not one.
+Otherwise the same header: fresh id, title AND created = the date.
+Never copy templates/daily.md as-is. Its fields all read TEMPLATE
+and stay that way; the app shows what the file says, not what you
+meant. Fill them in, or let the app cut it for you.
+
 ## Rules
 - Never touch .register/ .
 - *.conflict-*.md are unresolved conflicts: merge into the

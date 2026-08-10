@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev I</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev J</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -153,14 +153,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="mast">
   <div class="mast-top">
     <span class="co">Register Project · Engineering Document</span>
-    <span class="no">RG-SPEC-001 · REV F <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+    <span class="no">RG-SPEC-001 · REV J <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
   </div>
   <div class="mast-mid">
     <h1>Register RG-1<br>Build Specification</h1>
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-07 · Rev I</span></div>
+    <div><label>Issued</label><span>2026-08-10 · Rev J</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -184,6 +184,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="callout warn"><span class="chip">Rev H</span><div><strong>Changes from Rev G — §04's API table again, and §06 gains a hardware note.</strong> §08 P12 puts git state in the status bar, so <code>GET /api/tree</code>'s envelope carries <code>git</code>: <code>{clean, ahead}</code>, or <code>null</code> for a vault that is not a repository of its own — which is most of them. It rides the existing endpoint rather than adding a ninth, because the status bar already reads that envelope for <code>vault</code>. Remote mode adds no endpoint at all: <code>--token</code> is a gate in front of the whole surface, and localhost stays exempt. §06 now states which machine its latency budgets describe, after CI measured a shared runner ~2.4× slower across all three at once. The note format is untouched.</div></div>
 
 <div class="callout warn"><span class="chip">Rev I</span><div><strong>Changes from Rev H — §02's theme clause, corrected against what shipped.</strong> Two things it described are no longer true. The pre-paint scheme bootstrap is a same-origin <code>boot.js</code> loaded synchronously in <code>&lt;head&gt;</code> rather than an inline script: the server now sends a Content-Security-Policy, and <code>default-src 'self'</code> forbids inline execution — v0.3.0 shipped with the policy and the inline script together, so every load logged a violation and booted in the wrong scheme. And <strong>INV chooses rather than previews</strong>: it writes the scheme to <code>.register/config.json</code> like Screen 6, because flipping the display and having a reload undo it reads as a broken button. The key is lit when the display differs from the OS, which keeps the property the old wording protected — a dark-OS user who has chosen nothing does not boot with it lit. No other section changes; the note format is untouched.</div></div>
+
+<div class="callout warn"><span class="chip">Rev J</span><div><strong>Changes from Rev I — §04's agent contract gains a daily log; the note format is untouched.</strong> The contract gave an agent the complete rules for creating a <em>note</em> — ref allocation, ULID, filename, every frontmatter field — and about daily logs it said one thing: <code>daily/YYYY-MM-DD.md   # daily logs</code>. An agent reading that literally has no header to write, and a real vault duly filled with copies of <code>templates/daily.md</code> carrying <code>title: TEMPLATE</code>, because copying the stencil is the reasonable guess when nothing says otherwise. <strong>Creating a daily log is now written down</strong>: no ref, because a date is not one; a fresh <code>id</code>; <code>title</code> and <code>created</code> are the date; and never copy the stencil as-is, because its fields all read TEMPLATE and stay that way. This documents what <code>dailyFrom</code> already produced rather than changing it — no file written by an earlier version becomes invalid and no reader moves, so it is an amendment to the contract's prose in the shape of Rev G and Rev H, not a format change. The masthead and end-of-record strings are corrected here too: both had read REV F since Rev G while the title said otherwise.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
 <div class="toc">
@@ -538,6 +540,13 @@ Everything else is ordinary markdown.
    .register/trash/ — never reuse a deleted ref
 2. id   = fresh ULID
 3. file = notes/NNN-kebab-slug.md with full frontmatter
+
+## Creating a daily log
+daily/YYYY-MM-DD.md, and it takes no ref — a date is not one.
+Otherwise the same header: fresh id, title AND created = the date.
+Never copy templates/daily.md as-is. Its fields all read TEMPLATE
+and stay that way; the app shows what the file says, not what you
+meant. Fill them in, or let the app cut it for you.
 
 ## Rules
 - Never touch .register/ .
@@ -1049,7 +1058,7 @@ Tailscale pattern from §07. No accounts, no telemetry. Commit
 <p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
 
 <div class="barcode"></div>
-<div class="eor">RG-SPEC-001 · REV F · End of record</div>
+<div class="eor">RG-SPEC-001 · REV J · End of record</div>
 
 </div>
 
