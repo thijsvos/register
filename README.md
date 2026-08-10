@@ -181,6 +181,12 @@ Images are published to `ghcr.io/thijsvos/register` on tags, addressable by vers
 only — there is no `latest`, deliberately, because nothing should depend on a
 tag that moves under it.
 
+They are multi-platform: one manifest carrying `linux/amd64` and `linux/arm64`,
+so `docker pull` gets the right one on an Apple Silicon machine or a Pi without
+being asked. The image is assembled from the binaries the release matrix already
+cross-builds on native runners rather than compiled under emulation, which is why
+adding the second platform cost no build time.
+
 ## Using it
 
 Everything is reachable from the keyboard, and every control on screen prints its
