@@ -340,3 +340,53 @@ test('the crumb gives way at the trail, never at the note', async ({ page }) => 
   )
   expect(rule?.here).toMatch(/deep note/i)
 })
+
+test('the frame fits the window, and the right edge stays reachable', async ({
+  page,
+}) => {
+  // Lives here, not in audit.spec.ts, because it needs this fixture: measured,
+  // the small flat vault there does not reproduce it at any width, and the test
+  // passed with the fix removed. A regression test that cannot see the
+  // regression is the thing being guarded against.
+  //
+  // Every other spec loads at one size and stays there, and at 1400 there is
+  // room for everything — which is why nothing caught this.
+  //
+  // `.app` is a grid with only its rows declared, so its single implicit column
+  // was `auto` and sized to the widest row's min-content — and the header and
+  // status bar are `white-space: nowrap`, measured at 1095px and 1728px. Every
+  // row then stretched to that, so the frame drew 1080px wide inside a 900px
+  // window with the clock, INV and ⌘K past the right edge. `html{overflow:hidden}`
+  // meant no scrollbar could reach them: the controls were simply gone.
+  for (const width of [1400, 1080, 900, 800, 780]) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(server.url)
+    await page.getByRole('button', { name: /Deep note/ }).click()
+    await expect(page.locator('.cm-content')).toBeVisible()
+
+    const frame = await page.evaluate(() => {
+      const rect = (selector: string) =>
+        document.querySelector(selector)?.getBoundingClientRect()
+      const key = [...document.querySelectorAll('header button')].find((element) =>
+        element.textContent?.includes('⌘K'),
+      )
+      return {
+        header: Math.round(rect('header')?.width ?? 0),
+        footer: Math.round(rect('footer')?.width ?? 0),
+        keyRight: Math.round(key?.getBoundingClientRect().right ?? 0),
+        viewport: window.innerWidth,
+        overflowX:
+          document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+
+    expect(frame.header, `header at ${width}px`).toBe(frame.viewport)
+    expect(frame.footer, `status bar at ${width}px`).toBe(frame.viewport)
+    expect(frame.overflowX, `overflow at ${width}px`).toBe(0)
+    // The one that matters: ⌘K is the rightmost control, so if anything has been
+    // pushed off the edge it is this.
+    expect(frame.keyRight, `⌘K is off-screen at ${width}px`).toBeLessThanOrEqual(
+      frame.viewport,
+    )
+  }
+})

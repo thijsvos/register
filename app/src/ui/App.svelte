@@ -159,6 +159,16 @@ $effect(() => {
 .app {
   display: grid;
   grid-template-rows: var(--frame-header) minmax(0, 1fr) var(--frame-foot);
+  /* The column, declared, for the same reason `.mid` declares its own: an
+     implicit `auto` track sizes to its contents, and the header and the status
+     bar are both `white-space: nowrap` rows whose min-content runs past any
+     narrow viewport — measured at 1095px and 1728px against an 800px window.
+     Every row then stretched to the widest of them, so the frame drew 1080px
+     wide inside 800px of screen with the clock, INV and ⌘K off the right edge —
+     and `html { overflow: hidden }` meant no scrollbar could reach them.
+     `minmax(0, 1fr)` lets the track shrink to the frame, and each row clips
+     inside its own `overflow: hidden` instead of pushing the frame out. */
+  grid-template-columns: minmax(0, 1fr);
   /* dvh, not vh: on mobile Safari 100vh exceeds the visual viewport and pushes
      the status bar under the browser chrome, which html{overflow:hidden} then
      makes unreachable.
