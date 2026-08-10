@@ -14,6 +14,7 @@ import Inspector from './Frame/Inspector.svelte'
 import Sidebar from './Frame/Sidebar.svelte'
 import StatusBar from './Frame/StatusBar.svelte'
 import { installKeymap } from './keymap'
+import Media from './Media.svelte'
 import { go } from './nav'
 import Palette from './Palette/Palette.svelte'
 import Settings from './Settings.svelte'
@@ -38,6 +39,11 @@ let crumb = $derived.by(() => {
   if (chrome.settings) return ['Config', 'Settings']
   if (chrome.today) return ['Aggregate', 'Today']
   if (chrome.conflict !== null) return ['Conflict', 'Unresolved']
+  // The file's own trail, so the crumb answers where it is exactly as it does
+  // for a note — `MEDIA / NOTES / DIAGRAM.PNG`.
+  if (chrome.media !== null) {
+    return ['Media', ...folders(chrome.media), basename(chrome.media)]
+  }
   const open = vault.active
   if (open === null) return ['Index']
   // The full folder trail, so the crumb answers where the file is and not only
@@ -122,6 +128,8 @@ $effect(() => {
         <Today />
       {:else if chrome.conflict !== null}
         <Conflict copy={chrome.conflict} />
+      {:else if chrome.media !== null}
+        <Media path={chrome.media} />
       {:else if vault.openPath === null}
         <p class="empty">
           {vault.files === 0

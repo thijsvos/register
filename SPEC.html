@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev N</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev O</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -153,14 +153,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="mast">
   <div class="mast-top">
     <span class="co">Register Project · Engineering Document</span>
-    <span class="no">RG-SPEC-001 · REV N <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+    <span class="no">RG-SPEC-001 · REV O <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
   </div>
   <div class="mast-mid">
     <h1>Register RG-1<br>Build Specification</h1>
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-10 · Rev N</span></div>
+    <div><label>Issued</label><span>2026-08-10 · Rev O</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -194,6 +194,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="callout warn"><span class="chip">Rev M</span><div><strong>Changes from Rev L — §04 says who scaffolds a vault, because it is no longer only <code>init</code>. The note format is untouched and every scaffolded file is byte-identical.</strong> Pointing the app at a folder is now the whole of setup: <code>serve</code> scaffolds when the target holds no vault, so <code>docker run -v ~/vault:/vault</code> is a complete install rather than the first of two steps nothing on screen mentioned. Before this it started cleanly on an empty folder and served a vault with no agent contract, no daily stencil and no inbox — <code>G D</code> and NEW FROM TEMPLATE pointing at nothing, the §04 premise quietly absent, on a screen that looked correct — and on a folder that did not exist it failed with <code>no such note</code>, which tells a beginner nothing. Both were the same missing instruction. "Holds no vault" means no <code>.register/</code> and no markdown at any depth, so a folder carrying <code>.git</code> or <code>.DS_Store</code> is still scaffolded while a folder carrying somebody's writing is never touched; <code>init</code> never overwrites, so the operation cannot damage a vault even if that test were wrong. It says which files it wrote, because a command that writes files should. <code>register init</code> is unchanged and still the way to scaffold with <code>--git</code>.</div></div>
 
 <div class="callout warn"><span class="chip">Rev N</span><div><strong>Changes from Rev M — §02b Screen 1's INDEX becomes a folder tree. No format change; the note format and the API are untouched.</strong> The pane drew one flat list sorted by path, which reads as a numbered register only while every note is one level down. Nesting has always worked underneath — measured, a note three folders deep is indexed, searched, tag-counted and resolves as a backlink, and <code>notes/archive/018-nested.md</code> has been in the frozen §09 fixture since P14 — so a vault with structure looked like a vault with a shuffled list, and at a thousand notes a flat list is a scroll rather than an index. <strong>It mirrors the filesystem with no special cases</strong>: <code>notes/</code> is a folder like any other, folders sort before notes and each alphabetically, and a chain of folders holding a single folder compacts to one row, because indentation is the scarcest thing in a 250px rail and a level offering no choice is not worth spending it on. A folder is a nav row and takes the §02b state matrix unchanged — hover wash, inverse when active, inset dashed focus ring, <code>↑↓</code>/<code>j–k</code> traversal — with <code>↵</code> folding rather than opening. The arrows work it the way the WAI-ARIA tree pattern says, which is worth following exactly because the argument for a tree was that people already know how one behaves: <code>→</code> opens a folded folder and steps into the first child of an open one, <code>←</code> folds an open folder and otherwise steps out to the parent. <code>h</code>/<code>l</code> alias them as <code>j</code>/<code>k</code> already alias <code>↑</code>/<code>↓</code>. The header's crumb carries the same trail — <code>INDEX / NOTES / PROJECTS / APOLLO / 010 / LAUNCH PLAN</code> — uncompacted, because a crumb answers <em>where is this file</em> and eliding a real folder to save characters would make that answer wrong. It is drawn in two parts: the trail gives way when the rail is narrow and the ref and title do not, since losing &ldquo;somewhere under notes/…&rdquo; is survivable and losing which note is open is not. <strong>Membership does not change</strong>: <code>isListed</code> still governs, so the agent contract, the stencils and the journal stay out. Folders draw what the index contains; they are not a decision to change what it contains. Fold state is stored in <code>.register/config.json</code> as <code>collapsed</code>, a list of full paths — the vault can express it, so hard rule 4 is satisfied, and unlike a display scale it <em>should</em> travel with the vault, because the folders do. The open note is revealed at render time rather than by un-collapsing, so what is stored stays what the reader chose instead of drifting every time ⌘K lands inside a folded folder.</div></div>
+
+<div class="callout warn"><span class="chip">Rev O</span><div><strong>Changes from Rev N — §04 gains a ninth endpoint and §02b an eighth screen, so a note can show what it points at. The note format is untouched and no file in the vault changes shape.</strong> A note could always say <code>![diagram](diagram.png)</code>, and the only way to see it was <code>⌘K → REVEAL VAULT</code> — which opens the file manager at the vault <em>root</em>, because <code>/api/reveal</code> takes no parameters and cannot name a file. The product&#39;s one escape hatch for non-markdown was to leave the product. <strong><code>GET /api/file/{path}</code></strong> is read-only, and that is the point: the write surface stays <code>.md</code>-only, so <code>resolve</code>&#39;s single definition of a note still governs everything that can create a file. It does not ride an existing endpoint, because Rev H&#39;s test for that is <em>&ldquo;a consumer already reads that envelope&rdquo;</em> and none does — <code>/api/note</code> is <code>text/markdown</code> by contract. Type is decided by magic number and never by the extension in the request, exactly as §03 decides a font, with the same 415 for anything outside the allowlist; SVG is excluded deliberately, being XML that can carry script. <strong>Inline, the image is drawn under its reference rather than in place of it</strong> — §12 requires that markdown stay the literal source, and the roadmap still carries an open §02 question about whether folding counts as hiding, which replacing the text would have answered by accident. <strong>Screen 8</strong> shows a PDF in the browser&#39;s own viewer, which ships no bytes: <code>object-src &#39;none&#39;</code> rules out <code>&lt;embed&gt;</code>, and pdf.js measures ~350&nbsp;kB gz against §06&#39;s 150&nbsp;kB editor budget. That frame needed the one security change here: <code>frame-ancestors</code> and <code>X-Frame-Options</code> are read from the <em>framed</em> resource, so the app was refused by its own headers — measured in a browser as &ldquo;Framing … violates … frame-ancestors &#39;none&#39;&rdquo;. They are relaxed to <code>&#39;self&#39;</code> and <code>SAMEORIGIN</code> on that one route; every other response, the app shell above all, keeps <code>&#39;none&#39;</code> and <code>DENY</code>.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
 <div class="toc">
@@ -399,6 +401,25 @@ FONT       │ ‹Choose .woff2 / .ttf / .otf›             │
 ╮ Berkeley Mono is commercial: BYOF only, bytes never
 ╮ leave the machine, never committed (§03).</pre></div>
 
+<div class="code"><div class="codebar"><span class="lbl">Screen 8 · MEDIA — a file the note points at, never a modal</span></div>
+<pre>┌ header 44 ─────────────────────────────────────────┐
+│ ■ REGISTER   MEDIA / NOTES / SPEC.PDF        clock INV ⌘K│
+├ side 250 ──┬ media ───────────────────────┬ inspector 268┤
+│ INDEX      │ DOCUMENT · notes/spec.pdf        │ PROPERTIES   │
+│ ▾ NOTES    │ ┌──────────────────────────┐ │ (still the   │
+│  001 …     │ │ the browser&#39;s own viewer,  │ │  note you    │
+│            │ │ framed — no pdf.js, no     │ │  came from)  │
+│            │ │ bytes shipped              │ │              │
+│            │ └──────────────────────────┘ │              │
+├ footer 30 ─┴───────────────────────────┴─────────────┤
+└───────────────────────────────────────────────┘
+An image is shown rather than framed, contained not cropped.
+Reached by clicking a rendered image or a link whose target is a
+servable file. Replaces the note like TODAY and SETTINGS do; the
+inspector keeps describing the note, so leaving puts you back.
+Inline, an image is drawn UNDER its own ![alt](src) — the markdown
+stays the literal source (§12).</pre></div>
+
 <div class="code"><div class="codebar"><span class="lbl">Screen 7 · AGENT-EDIT-LIVE — the headline demo (status-bar states)</span></div>
 <pre>idle    ● WATCHER LIVE ·        · RENDER 0.70ms · 6 files
 agent   ● WATCHER LIVE · +1     · WATCHER +1 4.1ms · 7 files
@@ -480,6 +501,7 @@ shown the product.</pre></div>
 <tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
 <tr><td class="k">POST /api/reveal</td><td>Opens the vault in the OS file manager (§08 P5 — a browser cannot). Takes no parameters: the path is always the vault the server was launched with, so nothing a caller sends reaches a process. Refused with 403 unless the listener bound to loopback.</td></tr>
 <tr><td class="k">GET · PUT /api/config</td><td><code>.register/config.json</code> (§08 P9). The settings screen runs in a browser and <code>.register/</code> is invisible to the note API by design, so §02b Screen 6 has no other way to reach the file it names. A PUT that is not JSON is a 400 — the client reads this at boot, and an unparseable config would break the next load with nothing on screen to explain it.</td></tr>
+<tr><td class="k">GET /api/file/{path}</td><td>The images and PDFs a note references (<strong>Rev O</strong>). Read-only: nothing writes a non-note through the API, so the vault cannot acquire a file its own tree will never show. Every path guard the note API uses applies except the <code>.md</code> rule — <code>..</code>, absolute paths and dot-prefixed segments are refused, and a symlink out of the vault is refused rather than followed. <strong>The container is sniffed from its magic number, never from the extension in the request</strong>: png, jpeg, gif, webp, avif, pdf; anything else is a 415, which is what refuses a <code>.md</code> renamed <code>.png</code> and an HTML file. SVG is excluded deliberately. Served with an <code>ETag</code> and answering <code>If-None-Match</code> with a 304 from a <code>stat</code>, and capped at 16&nbsp;MB — the read is not streamed, so the cap is also the allocation ceiling. This is the one route whose <code>frame-ancestors</code> is <code>&#39;self&#39;</code> rather than <code>&#39;none&#39;</code>, so Screen 8 can frame a PDF and no other origin can.</td></tr>
 <tr><td class="k">GET · PUT · DELETE /api/font</td><td>The BYOF licensed face (§03, §08 P9). Stored under <code>.register/fonts/</code>, gitignored by <code>register init --git</code>. The container is sniffed from its magic number, never from the filename a browser reported; anything that is not woff2/woff/otf/ttf is a 415. Served <code>no-store</code>: the bytes are the user's licensed property and a cache entry is a copy of them nobody chose to make.</td></tr>
 <tr><td class="k">WS /api/events</td><td><code>{created|changed|removed, path, etag}</code>, debounced 50 ms, coalesced. Powers live reload of agent edits.</td></tr>
 </table>
@@ -1070,7 +1092,7 @@ Tailscale pattern from §07. No accounts, no telemetry. Commit
 <p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
 
 <div class="barcode"></div>
-<div class="eor">RG-SPEC-001 · REV N · End of record</div>
+<div class="eor">RG-SPEC-001 · REV O · End of record</div>
 
 </div>
 

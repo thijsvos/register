@@ -20,12 +20,15 @@ export interface WikiLinkHost {
    * callbacks rather than in the widget.
    */
   fileUrl: (src: string) => string | null
+  /** Open a referenced file on its own surface (§02b Screen 8). */
+  openFile: (src: string) => void
 }
 
 const inert: WikiLinkHost = {
   exists: () => false,
   open: () => {},
   fileUrl: () => null,
+  openFile: () => {},
 }
 
 /**

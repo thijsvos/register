@@ -77,7 +77,7 @@ export class ImageEmbed extends WidgetType {
     return ASSUMED_HEIGHT
   }
 
-  override toDOM(): HTMLElement {
+  override toDOM(view: EditorView): HTMLElement {
     const figure = document.createElement('div')
     figure.className = 'cm-embed'
     figure.contentEditable = 'false'
@@ -106,13 +106,20 @@ export class ImageEmbed extends WidgetType {
       figure.append(said)
     })
 
+    // mousedown rather than click: click fires after the browser has moved the
+    // selection, which reads as the caret jumping before the surface opens.
+    figure.addEventListener('mousedown', (event: MouseEvent) => {
+      event.preventDefault()
+      view.state.facet(wikiLinkHost).openFile(this.src)
+    })
+
     figure.append(image)
     return figure
   }
 
-  /** Nothing here handles events yet; the caret behaves as it would over text. */
+  /** The widget's own listener handles the press. */
   override ignoreEvent(): boolean {
-    return true
+    return false
   }
 }
 

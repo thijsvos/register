@@ -35,6 +35,20 @@ const wikiMissing = Decoration.mark({
   class: 'cm-wiki cm-wiki-missing',
   attributes: { role: 'link', tabindex: '0' },
 })
+/**
+ * A `[text](spec.pdf)` whose target is a file this app can show.
+ *
+ * Only those: an ordinary link to another note, or to the web, keeps the demoted
+ * ink the HighlightStyle already gives it. Marking every link would promise a
+ * surface for targets there is none for.
+ */
+const fileLink = Decoration.mark({
+  class: 'cm-filelink',
+  attributes: { role: 'link', tabindex: '0' },
+})
+
+/** The destination of a markdown inline link, as the tree hands it over. */
+const LINK = /^\[[^\]]*\]\(\s*<?([^)\s>]+)/
 
 /**
  * Decorations for the visible ranges only.
@@ -68,6 +82,21 @@ function build(view: EditorView): DecorationSet {
         }
         if (node.name === 'FencedCode') {
           marks.push(fencedCodeMark.range(node.from, node.to))
+          return
+        }
+        // `Image` is a Link's sibling in the grammar, and an image reference is
+        // already drawn by `imageEmbeds` — so this must not claim it too.
+        if (node.name === 'Link') {
+          const written = view.state.doc.sliceString(node.from, node.to)
+          const target = LINK.exec(written)?.[1] ?? ''
+          // A note is not media. `fileUrl` resolves any vault-relative path,
+          // `.md` included, so without this a `[text](other.md)` would be
+          // dressed as a link to a surface that answers 415 for it. Notes are
+          // linked with `[[wikilinks]]`; this is for the files beside them.
+          const servable = target !== '' && !/\.md$/i.test(target)
+          if (servable && host.fileUrl(target) !== null) {
+            marks.push(fileLink.range(node.from, node.to))
+          }
           return
         }
         if (node.name === 'TaskMarker') {
@@ -128,6 +157,23 @@ const plugin = ViewPlugin.fromClass(
       mousedown(event, view) {
         const target = event.target
         if (!(target instanceof HTMLElement)) return false
+
+        // A link to a vault file opens §02b Screen 8. Checked before the
+        // wikilink branch because the two marks never overlap and this one is
+        // the cheaper test.
+        const file = target.closest('.cm-filelink')
+        if (file !== null) {
+          const position = view.posAtDOM(file)
+          const line = view.state.doc.lineAt(position)
+          const found = LINK.exec(line.text.slice(position - line.from))?.[1]
+          const written = found ?? LINK.exec(line.text)?.[1]
+          if (written !== undefined) {
+            event.preventDefault()
+            view.state.facet(wikiLinkHost).openFile(written)
+            return true
+          }
+        }
+
         const link = target.closest('.cm-wiki')
         if (link === null) return false
 

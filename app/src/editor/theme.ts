@@ -96,6 +96,15 @@ const theme = EditorView.theme({
     color: 'var(--dim)',
   },
 
+  // A link whose target is a file this app can show. The same dashed underline
+  // a wikilink gets, because it is the same promise: this opens something.
+  '.cm-filelink': {
+    textDecoration: 'underline',
+    textDecorationStyle: 'dashed',
+    textUnderlineOffset: 'var(--underline-gap)',
+    cursor: 'pointer',
+  },
+
   // §02b Task: `[ ]` fg, `[x]` plus dim strikethrough on the text.
   '.cm-task-toggle': {
     display: 'inline-block',
@@ -124,6 +133,7 @@ const theme = EditorView.theme({
     margin: 'var(--s3) 0',
     padding: 'var(--s2)',
     border: 'var(--hairline) solid var(--line)',
+    cursor: 'pointer',
   },
   '.cm-embed-image': {
     display: 'block',

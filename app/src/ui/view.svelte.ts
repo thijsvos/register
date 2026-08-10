@@ -44,6 +44,15 @@ class ChromeState {
    */
   conflict = $state<string | null>(null)
 
+  /**
+   * §02b Screen 8 is showing instead of the note: a vault file, by path.
+   *
+   * A path rather than a boolean for `conflict`'s reason — the screen is *about*
+   * one file — and in memory rather than in the vault for `today`'s: which pane
+   * you last looked at is not knowledge.
+   */
+  media = $state<string | null>(null)
+
   /** Resolved on first use: constructing it eagerly would touch the DOM at
    *  module scope, which is what made this module unimportable in a test. */
   #scheme: MediaQueryList | null = null
@@ -166,6 +175,12 @@ class ChromeState {
     this.conflict = copy
   }
 
+  /** Raise §02b Screen 8 over a file the open note references. */
+  showMedia(path: string): void {
+    this.#only('media')
+    this.media = path
+  }
+
   showNotes(): void {
     this.#only(null)
   }
@@ -178,10 +193,11 @@ class ChromeState {
    * by inspection; with three it is the kind of thing that gets forgotten in the
    * fourth, so the exclusion lives in one place instead of in every setter.
    */
-  #only(view: 'settings' | 'today' | 'conflict' | null): void {
+  #only(view: 'settings' | 'today' | 'conflict' | 'media' | null): void {
     this.settings = view === 'settings'
     this.today = view === 'today'
     if (view !== 'conflict') this.conflict = null
+    if (view !== 'media') this.media = null
   }
 
   toggleInspector(): void {

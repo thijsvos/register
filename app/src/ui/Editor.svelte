@@ -108,6 +108,11 @@ function wikiHost() {
       const path = resolveSrc(from, src)
       return path === null ? null : fileUrl(path)
     },
+    openFile: (src: string) => {
+      if (from === null) return
+      const path = resolveSrc(from, src)
+      if (path !== null) go.file(path)
+    },
   }
 }
 </script>

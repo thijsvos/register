@@ -20,7 +20,15 @@ export interface Server {
 
 const BINARY = join(process.cwd(), '..', 'target', 'release', 'register')
 
-export function vaultWith(notes: Record<string, string>): string {
+/**
+ * A vault on disk. Values may be text or bytes.
+ *
+ * `Buffer` is in the signature because `writeFileSync` defaults to utf-8 for a
+ * string: a PNG passed through `.toString('binary')` has every byte above 0x7f
+ * rewritten, and arrives as something the server correctly refuses with a 415.
+ * Measured, while writing the media fixtures.
+ */
+export function vaultWith(notes: Record<string, string | Buffer>): string {
   const root = mkdtempSync(join(tmpdir(), 'register-e2e-'))
   for (const dir of ['notes', 'daily', 'templates', '.register']) {
     mkdirSync(join(root, dir), { recursive: true })

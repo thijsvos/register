@@ -816,9 +816,25 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
     // dark for good. Naming the origin's own authority removes the argument.
     let same_origin_socket = socket_origin(request.headers());
 
+    // The one response that may be framed, and only by us.
+    //
+    // §02b Screen 8 shows a PDF in an `<iframe>` on the browser's own viewer —
+    // `object-src 'none'` rules out `<embed>`, and pdf.js is ~350 kB gz against
+    // a 150 kB editor budget. `frame-ancestors` and `X-Frame-Options` are read
+    // from the *framed* resource, not the framing page, so the app was refused
+    // by its own headers: measured in a browser as "Framing … violates …
+    // frame-ancestors 'none'".
+    //
+    // Narrowed to `'self'` rather than dropped: a cross-origin page still
+    // cannot frame a vault file, and every other response — the app shell above
+    // all — keeps `'none'`. Matched on the path because the header layer runs
+    // outside the router and has no route to ask.
+    let framable = request.uri().path().starts_with("/api/file/");
+    let frame_ancestors = if framable { "'self'" } else { "'none'" };
+
     let policy = format!(
         "default-src 'self'; \
-         frame-ancestors 'none'; \
+         frame-ancestors {frame_ancestors}; \
          form-action 'none'; \
          base-uri 'none'; \
          object-src 'none'; \
@@ -833,7 +849,12 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
     let headers = response.headers_mut();
     for (name, value) in [
         (header::CONTENT_SECURITY_POLICY, policy),
-        (header::X_FRAME_OPTIONS, "DENY"),
+        // Legacy, and still honoured — a `DENY` here would override the CSP
+        // above and refuse the frame anyway, so the two have to agree.
+        (
+            header::X_FRAME_OPTIONS,
+            if framable { "SAMEORIGIN" } else { "DENY" },
+        ),
         (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
         // The token can arrive in a URL once, before the redirect swaps it for a
         // cookie. Until that redirect lands, this is what keeps it out of the

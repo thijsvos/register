@@ -172,6 +172,11 @@ export const go = {
     chrome.showConflict(copy)
   },
 
+  /** §02b Screen 8, over a vault file a note references. */
+  file(path: string): void {
+    chrome.showMedia(path)
+  },
+
   /**
    * §02b Screen 4 over the newest unresolved conflict, or nowhere if there is
    * none.
