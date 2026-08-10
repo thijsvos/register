@@ -1,13 +1,24 @@
 import { describe, expect, it } from 'vitest'
-import { isConflictCopy, isContract, isDerived, isListed, isTemplate } from './paths'
+import {
+  isConflictCopy,
+  isContract,
+  isDaily,
+  isDerived,
+  isListed,
+  isTemplate,
+} from './paths'
 
 const CONFLICT = 'notes/003-a.conflict-20260805T101500000Z.md'
 
-describe('the three kinds of file a vault holds', () => {
+describe('the four kinds of file a vault holds', () => {
   it.each([
     ['notes/003-terminal.md', true, true],
     ['000-inbox.md', true, true],
-    ['daily/2026-08-05.md', true, true],
+    // The journal: hidden from the INDEX because there is one per day forever
+    // and `daily/` sorts above `notes/`, but counted, because its tasks are the
+    // ones people actually write. This pair is why listed and derived stopped
+    // being nested — no other kind of file wants hidden-and-counted.
+    ['daily/2026-08-05.md', false, true],
     // Furniture: real files, edited deliberately, but not notes.
     ['CLAUDE.md', false, false],
     ['templates/daily.md', false, false],
@@ -35,5 +46,26 @@ describe('the three kinds of file a vault holds', () => {
   it('spots a conflict copy wherever it sits', () => {
     expect(isConflictCopy(CONFLICT)).toBe(true)
     expect(isConflictCopy('notes/003-a.md')).toBe(false)
+  })
+
+  it('does not mistake a folder that merely ends in daily', () => {
+    expect(isDaily('my-daily/2026-08-05.md')).toBe(false)
+    expect(isDaily('notes/003-daily-habits.md')).toBe(false)
+    expect(isListed('notes/003-daily-habits.md')).toBe(true)
+  })
+
+  it('keeps listed and derived independent, which is the point', () => {
+    // Every combination is reachable, and each has an owner. Written as
+    // `isListed && !isConflictCopy` the third row is unexpressible, and a daily
+    // log would have to be either visible in the index or absent from TODAY.
+    const kinds: [string, boolean, boolean][] = [
+      ['notes/003-a.md', true, true], // shown and counted
+      ['CLAUDE.md', false, false], // hidden and uncounted
+      ['daily/2026-08-05.md', false, true], // hidden and counted
+      [CONFLICT, true, false], // shown and uncounted
+    ]
+    for (const [path, listed, derivedFrom] of kinds) {
+      expect([isListed(path), isDerived(path)], path).toEqual([listed, derivedFrom])
+    }
   })
 })

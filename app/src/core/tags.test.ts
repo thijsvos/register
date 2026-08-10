@@ -39,6 +39,13 @@ describe('tagCounts', () => {
     ])
   })
 
+  it('counts a daily log’s tags, though the INDEX does not list it', () => {
+    // Same rule as tasks: hidden from the list, present in the derivations. A
+    // `#reading` tag written in a daily log is a tag you used.
+    const withDaily = [...NOTES, entry('daily/2026-08-05.md', ['reading'])]
+    expect(tagCounts(withDaily).map((t) => t.name)).toContain('reading')
+  })
+
   it('does not count a conflict copy, which carries the original tags', () => {
     // Otherwise one unresolved conflict silently doubles a tag's meter.
     const copy = entry('notes/003-a.conflict-20260805T101500000Z.md', [
