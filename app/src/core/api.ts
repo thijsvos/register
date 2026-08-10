@@ -86,6 +86,18 @@ function noteUrl(path: string): string {
   return `/api/note/${path.split('/').map(encodeURIComponent).join('/')}`
 }
 
+/**
+ * Where the browser fetches a file a note references (§04 Rev O).
+ *
+ * A URL rather than a fetch: an `<img src>` and an `<iframe src>` are how these
+ * bytes are consumed, so handing back a string lets the browser do the
+ * conditional request, the caching and the decoding — all of which it does
+ * better than this module could, and none of which shows up in the bundle.
+ */
+export function fileUrl(path: string): string {
+  return `/api/file/${path.split('/').map(encodeURIComponent).join('/')}`
+}
+
 async function refuse(response: Response): Promise<never> {
   throw new ApiError(
     response.status,

@@ -11,9 +11,22 @@ export interface WikiLinkHost {
   exists: (target: string) => boolean
   /** Open it, creating it first if it is missing (§02b: create-on-miss). */
   open: (target: string) => void
+  /**
+   * Where a `![alt](src)` reference is served from, or `null` when it is not a
+   * vault file this app will serve.
+   *
+   * Resolution needs the open note's own path, which the editor does not know —
+   * it is handed a document, not a location. So it lives with the other
+   * callbacks rather than in the widget.
+   */
+  fileUrl: (src: string) => string | null
 }
 
-const inert: WikiLinkHost = { exists: () => false, open: () => {} }
+const inert: WikiLinkHost = {
+  exists: () => false,
+  open: () => {},
+  fileUrl: () => null,
+}
 
 /**
  * A Facet, not a StateField and not a plugin constructor argument.

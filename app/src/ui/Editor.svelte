@@ -1,5 +1,7 @@
 <script lang="ts">
+import { fileUrl } from '../core/api'
 import { bodyOffset } from '../core/frontmatter'
+import { resolveSrc } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
 import { setRenderMs } from '../lib/render.svelte'
@@ -87,13 +89,25 @@ $effect(() => {
 // in, and the decorations rebuild when they change.
 $effect(() => {
   void vault.tree
+  // …and `openPath`, because a relative `![alt](src)` resolves against the note
+  // that holds it: without this the host still points at the previous note and
+  // every relative reference in the new one loads from the wrong folder.
+  void vault.openPath
   handle?.setHost(wikiHost())
 })
 
 function wikiHost() {
+  // `openPath` is read here rather than inside the editor because the editor is
+  // handed a document, not a location — it has never known which note it holds.
+  const from = vault.openPath
   return {
     exists: (target: string) => vault.resolve(target) !== null,
     open: (target: string) => go.follow(target),
+    fileUrl: (src: string) => {
+      if (from === null) return null
+      const path = resolveSrc(from, src)
+      return path === null ? null : fileUrl(path)
+    },
   }
 }
 </script>

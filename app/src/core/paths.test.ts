@@ -7,6 +7,7 @@ import {
   isDerived,
   isListed,
   isTemplate,
+  resolveSrc,
 } from './paths'
 
 const CONFLICT = 'notes/003-a.conflict-20260805T101500000Z.md'
@@ -94,5 +95,56 @@ describe('folders', () => {
   it('survives a path someone else wrote', () => {
     expect(folders('a//b.md')).toEqual(['a'])
     expect(folders('')).toEqual([])
+  })
+})
+
+describe('resolveSrc', () => {
+  it('resolves a bare name against the note’s own folder', () => {
+    expect(resolveSrc('notes/001-a.md', 'diagram.png')).toBe('notes/diagram.png')
+    expect(resolveSrc('notes/archive/018-old.md', 'diagram.png')).toBe(
+      'notes/archive/diagram.png',
+    )
+  })
+
+  it('treats a leading slash as the vault root', () => {
+    expect(resolveSrc('notes/archive/018-old.md', '/assets/logo.png')).toBe(
+      'assets/logo.png',
+    )
+  })
+
+  it('resolves .. rather than sending it to a server that refuses it', () => {
+    expect(resolveSrc('notes/projects/010-launch.md', '../shared/plan.png')).toBe(
+      'notes/shared/plan.png',
+    )
+    expect(resolveSrc('notes/001-a.md', './diagram.png')).toBe('notes/diagram.png')
+  })
+
+  it('refuses anything that climbs out of the vault', () => {
+    // Not clamped to the root: silently resolving an escape would turn a wrong
+    // link into a different wrong link, and the server refuses it anyway.
+    expect(resolveSrc('notes/001-a.md', '../../etc/passwd')).toBeNull()
+    expect(resolveSrc('000-inbox.md', '../secrets.png')).toBeNull()
+  })
+
+  it('refuses anything with a scheme, which the CSP would refuse too', () => {
+    for (const remote of [
+      'https://example.com/x.png',
+      'http://example.com/x.png',
+      'data:image/png;base64,AAAA',
+      '//example.com/x.png',
+    ]) {
+      expect(resolveSrc('notes/001-a.md', remote), remote).toBeNull()
+    }
+  })
+
+  it('refuses an empty or root-only reference', () => {
+    expect(resolveSrc('notes/001-a.md', '')).toBeNull()
+    expect(resolveSrc('notes/001-a.md', '   ')).toBeNull()
+    expect(resolveSrc('notes/001-a.md', '/')).toBeNull()
+  })
+
+  it('resolves against a note at the vault root', () => {
+    expect(resolveSrc('000-inbox.md', 'shot.png')).toBe('shot.png')
+    expect(resolveSrc('000-inbox.md', 'assets/shot.png')).toBe('assets/shot.png')
   })
 })

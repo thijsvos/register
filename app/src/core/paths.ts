@@ -54,6 +54,43 @@ export function folders(path: string): string[] {
     .filter((segment) => segment !== '')
 }
 
+/**
+ * The vault path a note's `![alt](src)` points at, or `null` if it points
+ * somewhere this app will not serve from.
+ *
+ * Markdown semantics: a bare `src` is relative to the folder the note is in, a
+ * leading `/` means the vault root. `..` is resolved here rather than sent to
+ * the server, which refuses it outright — so `notes/../assets/x.png` is a link
+ * that works rather than a 400 the reader has to interpret.
+ *
+ * `null` for anything with a scheme (`http:`, `data:`), because `img-src 'self'`
+ * would refuse it anyway and a broken frame is worse than plain text; and for
+ * anything that climbs above the root, which is the traversal the server exists
+ * to refuse and which should never be constructed in the first place.
+ */
+export function resolveSrc(from: string, src: string): string | null {
+  const target = src.trim()
+  if (target === '' || /^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('//')) {
+    return null
+  }
+
+  const base = target.startsWith('/') ? [] : from.split('/').slice(0, -1)
+  const out: string[] = [...base]
+  for (const segment of target.replace(/^\//, '').split('/')) {
+    if (segment === '' || segment === '.') continue
+    if (segment === '..') {
+      // Escaping the vault is refused rather than clamped: silently resolving
+      // it to the root would turn a wrong link into a different wrong link.
+      if (out.length === 0) return null
+      out.pop()
+      continue
+    }
+    out.push(segment)
+  }
+
+  return out.length === 0 ? null : out.join('/')
+}
+
 /** The agent contract §04 puts at the vault root. */
 export const CONTRACT = 'CLAUDE.md'
 /** §04's stencil folder; `GO · DAILY LOG` cuts today's note from this one. */

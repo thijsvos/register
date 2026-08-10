@@ -115,6 +115,35 @@ const theme = EditorView.theme({
     outlineOffset: 'var(--focus-offset)',
   },
   '.cm-task-done': { color: 'var(--dim)', textDecoration: 'line-through' },
+
+  // The image under its own `![alt](src)`. §02 allows exactly one kind of
+  // chrome — a 1px hairline — so the frame is a rule and nothing else: no
+  // radius, no shadow, no caption plate, and no transition as it decodes.
+  '.cm-embed': {
+    display: 'block',
+    margin: 'var(--s3) 0',
+    padding: 'var(--s2)',
+    border: 'var(--hairline) solid var(--line)',
+  },
+  '.cm-embed-image': {
+    display: 'block',
+    // Never wider than the prose it sits in: §02's measure is the column, and
+    // an image that broke it would be the only full-bleed thing on the page.
+    maxWidth: '100%',
+    height: 'auto',
+  },
+  // The wikilink's own "target is not there" idiom, reused rather than invented.
+  '.cm-embed-missing': {
+    borderStyle: 'dotted',
+    color: 'var(--dim)',
+  },
+  '.cm-embed-said': {
+    fontFamily: 'var(--font-micro)',
+    fontSize: 'var(--text-micro)',
+    letterSpacing: 'var(--track-micro)',
+    textTransform: 'uppercase',
+    color: 'var(--dim)',
+  },
 })
 
 /**
