@@ -95,9 +95,23 @@ fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
     // exact failure the next two lines exist to prevent.
     let dockerfile = strip_comments(&read("deploy/Dockerfile"));
 
-    // §07: "3-stage → scratch, image ≈ binary size".
+    // §07: "3-stage → scratch, image ≈ binary size". Still three stages, and the
+    // *published* image is still the scratch one — that half is asserted in
+    // `only_the_developed_image_carries_git`, which also says why this half is
+    // not: the GIT field is derived by shelling out to git, and `scratch` has no
+    // git, so the field could only ever draw `—` here.
     assert_eq!(dockerfile.matches("FROM ").count(), 3, "§07 wants 3 stages");
-    assert!(dockerfile.contains("FROM scratch"));
+    assert!(
+        dockerfile.contains("FROM alpine:3."),
+        "the runtime stage should be a pinned Alpine release, not scratch and \
+         not a floating tag"
+    );
+    // Nothing from the build stages comes with it: the runtime carries the
+    // binary and git, never a compiler or a package index.
+    assert!(
+        !dockerfile.contains("FROM rust:1.97-alpine\nRUN apk add --no-cache git"),
+        "the runtime stage must be its own stage, not a layer on the builder"
+    );
     assert!(dockerfile.contains("EXPOSE 7777"));
     assert!(dockerfile.contains(r#"ENTRYPOINT ["/register","serve","/vault""#));
     // The lockfile governs, exactly as it does in CI.
@@ -159,6 +173,49 @@ fn the_published_image_runs_exactly_what_the_developed_one_does() {
     assert!(
         release.contains("ARG TARGETARCH"),
         "TARGETARCH has to be declared or the COPY silently resolves to nothing"
+    );
+}
+
+/// The one place the two images are *meant* to differ, pinned so it stays a
+/// decision rather than becoming drift.
+///
+/// The status bar's GIT field is derived by shelling out to `git`, so a
+/// `scratch` runtime can only ever draw `—`, whatever the repository is doing.
+/// The developed image carries git for that reason. The published one must not:
+/// it `RUN`s nothing, which is exactly what lets buildx assemble amd64 and arm64
+/// without emulating either, and `apk add` there would put a foreign-arch
+/// package install under QEMU on every release.
+#[test]
+fn only_the_developed_image_carries_git() {
+    let dev = strip_comments(&read("deploy/Dockerfile"));
+    let release = strip_comments(&read("deploy/Dockerfile.release"));
+
+    assert!(
+        dev.contains("apk add --no-cache git"),
+        "the developed image needs git or the GIT field is permanently dashed"
+    );
+    // Scoped to the mount, not `*`: this trusts exactly the directory the
+    // operator already chose to hand us.
+    //
+    // It guards the Linux case — a real bind mount keeps its real owner, so a
+    // container uid that does not match it gets "detected dubious ownership" and
+    // the GIT field silently goes back to `—`. Not reproducible on Docker
+    // Desktop, whose file sharing reports the mount as owned by whichever uid
+    // asks (measured: uid 1000 sees 1000:0 and uid 501 sees 501:0 for the same
+    // path), which is exactly why it is pinned by a test rather than left to be
+    // noticed — nobody developing on a Mac can trip it.
+    assert!(
+        dev.contains("GIT_CONFIG_VALUE_0=/vault"),
+        "git refuses a bind-mounted repo it does not own without safe.directory"
+    );
+
+    assert!(
+        !release.contains("RUN "),
+        "the release image must RUN nothing, or multi-arch needs QEMU"
+    );
+    assert!(
+        !release.contains("apk"),
+        "the release image is scratch — there is no package manager in it"
     );
 }
 
