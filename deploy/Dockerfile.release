@@ -1,20 +1,31 @@
-# The published image: `scratch` plus a binary the matrix already built.
+# The published image: Alpine, git, and a binary the matrix already built.
 #
-# `deploy/Dockerfile` builds from source and is what `docker compose up --build`
+# `deploy/Dockerfile` builds from source and is what the compose build overlay
 # uses. It cannot publish arm64, because it compiles inside the image and the
 # release runner is amd64 — building both there means a Rust release build under
 # QEMU, which is slow enough to change how often anyone cuts a release.
 #
-# So this one compiles nothing. `binaries` in release.yml already cross-builds
-# a static musl binary per platform on its own native runner; this stage is the
-# `COPY` that turns those into one multi-platform manifest. Nothing here `RUN`s,
-# so buildx assembles the foreign-architecture layer without emulating anything.
+# So this one compiles nothing of ours. `binaries` in release.yml cross-builds a
+# static musl binary per platform on its own native runner, and this file is the
+# `COPY` that turns those into one multi-platform manifest.
+#
+# It was `scratch` until the GIT field turned out to be underivable in it: that
+# state comes from shelling out to `git`, so the field read `—` in every
+# container however the vault was stored, and pulling a published image is now
+# the documented way in. The one `RUN` below costs QEMU for the non-native
+# architecture — release.yml installs binfmt for exactly this line — which is a
+# real price paid deliberately for a field that would otherwise be a dead pixel
+# with a label. The Rust build stays where it was, on native runners.
 #
 # The runtime stanza below is duplicated from `deploy/Dockerfile` on purpose —
 # two files, one contract — and `tests/release.rs` compares them line for line,
 # so the copy cannot drift from the one people actually develop against.
 
-FROM scratch
+# Pinned to a release, never `latest` (§06 version doctrine). Kept identical to
+# `deploy/Dockerfile`'s runtime base so the two images differ in nothing.
+FROM alpine:3.24
+# The only reason this is not `scratch`. --no-cache leaves no index behind.
+RUN apk add --no-cache git
 
 # Set by buildx per platform: `amd64` or `arm64`. `binaries` stages the musl
 # builds under exactly these names so this is a lookup rather than a mapping
@@ -22,10 +33,17 @@ FROM scratch
 ARG TARGETARCH
 COPY dist/register-linux-${TARGETARCH} /register
 
+# git refuses to read a repository whose owner does not match the calling uid,
+# and a bind-mounted vault keeps whatever owner it has on the host. See
+# `deploy/Dockerfile` for the full reasoning; kept byte-identical to it.
+ENV GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=safe.directory \
+    GIT_CONFIG_VALUE_0=/vault
+
 # A bare `docker run` should not be root. compose overrides this with the host
 # user's own ids so the mounted vault comes out theirs; this is only the default
-# for someone who runs the image directly. Numeric because `scratch` has no
-# /etc/passwd to name anyone.
+# for someone who runs the image directly. Numeric because there is no
+# /etc/passwd entry naming whoever ends up here.
 USER 1000:1000
 VOLUME /vault
 EXPOSE 7777
