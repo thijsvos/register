@@ -224,9 +224,15 @@ jobs:
           test -f dist/register-linux-arm64
           chmod +x dist/register-linux-amd64 dist/register-linux-arm64
           ls -l dist
+      # Dockerfile.release `RUN`s one line — `apk add git`, which the GIT field
+      # needs — and that line executes on each target architecture. binfmt is
+      # what lets the arm64 half of it run on this amd64 runner. It was not
+      # needed while the image was `scratch` and pure `COPY`; it is the price of
+      # that one package, and it applies to the package install only. The Rust
+      # build stays on native runners in the `binaries` matrix above.
+      - uses: docker/setup-qemu-action@v3
       # The default builder cannot produce a multi-platform manifest; the
-      # container driver can. No QEMU, because Dockerfile.release only COPYs —
-      # nothing foreign is ever executed during the build.
+      # container driver can.
       - name: A builder that can emit more than one platform
         run: docker buildx create --name multi --driver docker-container --use
       - name: Log in to ghcr

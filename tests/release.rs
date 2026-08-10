@@ -158,13 +158,26 @@ fn the_published_image_runs_exactly_what_the_developed_one_does() {
         );
     }
 
-    // And it is still `scratch` plus one binary: no toolchain, no shell.
+    // One stage: it compiles nothing of ours. The Rust build stays in the
+    // `binaries` matrix on native runners, which is what keeps a release from
+    // ever compiling under emulation.
     assert_eq!(
         release.matches("FROM ").count(),
         1,
         "the release image should be one stage — it compiles nothing"
     );
-    assert!(release.contains("FROM scratch"));
+    // The same runtime base as the developed image. These were `scratch` and
+    // Alpine for one commit, which made the GIT field derivable in the image
+    // people build and not in the one they pull.
+    // The LAST `FROM`, not the first: the developed image has three stages and
+    // its first is the UI builder. `line_starting` takes the first match — its
+    // doc comment claimed otherwise, which is corrected below.
+    let base = |text: &str| last_starting(text, "FROM ");
+    assert_eq!(
+        base(&dev),
+        base(&release),
+        "the two images no longer start from the same base"
+    );
     // The binary comes from the matrix, named for the platform buildx asks for.
     assert!(
         release.contains("COPY dist/register-linux-${TARGETARCH} /register"),
@@ -176,17 +189,20 @@ fn the_published_image_runs_exactly_what_the_developed_one_does() {
     );
 }
 
-/// The one place the two images are *meant* to differ, pinned so it stays a
-/// decision rather than becoming drift.
+/// Both images carry git, and that is load-bearing rather than incidental.
 ///
 /// The status bar's GIT field is derived by shelling out to `git`, so a
-/// `scratch` runtime can only ever draw `—`, whatever the repository is doing.
-/// The developed image carries git for that reason. The published one must not:
-/// it `RUN`s nothing, which is exactly what lets buildx assemble amd64 and arm64
-/// without emulating either, and `apk add` there would put a foreign-arch
-/// package install under QEMU on every release.
+/// `scratch` runtime can only ever draw `—` whatever the repository is doing.
+/// The developed image gained git first; the published one followed, because
+/// pulling it is now the documented way in and the newcomer's field was the one
+/// that dashed.
+///
+/// The cost is one `RUN` executing per target architecture, so release.yml
+/// installs binfmt. That is asserted here too: drop the QEMU step and the arm64
+/// half of `apk add` has no interpreter, which fails at publish time — the
+/// slowest possible place to find out.
 #[test]
-fn only_the_developed_image_carries_git() {
+fn both_images_carry_git_and_the_release_can_emulate() {
     let dev = strip_comments(&read("deploy/Dockerfile"));
     let release = strip_comments(&read("deploy/Dockerfile.release"));
 
@@ -210,21 +226,54 @@ fn only_the_developed_image_carries_git() {
     );
 
     assert!(
-        !release.contains("RUN "),
-        "the release image must RUN nothing, or multi-arch needs QEMU"
+        release.contains("apk add --no-cache git"),
+        "the published image needs git or the GIT field dashes for everyone who \
+         pulls it, which is now the documented way in"
     );
     assert!(
-        !release.contains("apk"),
-        "the release image is scratch — there is no package manager in it"
+        release.contains("GIT_CONFIG_VALUE_0=/vault"),
+        "the published image needs safe.directory for the same reason the \
+         developed one does"
+    );
+
+    // The `RUN` above executes on each target architecture, so the workflow has
+    // to install binfmt before building. Asserted together with the RUN itself:
+    // either both are there or neither is, and a release that publishes the
+    // arm64 half of an emulated build without an emulator fails at push time.
+    let workflow = strip_comments(&read(".github/workflows/release.yml"));
+    assert!(
+        workflow.contains("docker/setup-qemu-action"),
+        "the release image RUNs on a foreign architecture with no binfmt \
+         installed; arm64 will fail at `apk add`"
+    );
+    assert!(
+        workflow.contains("--platform linux/amd64,linux/arm64"),
+        "the QEMU step only earns its place if both platforms are built"
     );
 }
 
-/// The last line beginning with `prefix`, trimmed — panics if there is none, so
-/// a directive that vanished fails loudly rather than comparing None to None.
+/// The **first** line beginning with `prefix`, trimmed — panics if there is
+/// none, so a directive that vanished fails loudly rather than comparing None to
+/// None.
+///
+/// The directives this is used for appear once per file. For `FROM`, which does
+/// not, use `last_starting`.
 fn line_starting(text: &str, prefix: &str) -> String {
     text.lines()
         .map(str::trim)
         .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no line starting with {prefix:?}"))
+        .to_owned()
+}
+
+/// The last line beginning with `prefix`, trimmed. The runtime stage of a
+/// multi-stage Dockerfile is its final `FROM`, and comparing the first would
+/// compare the developed image's UI builder against the published image's
+/// runtime — two different things that happen to share a keyword.
+fn last_starting(text: &str, prefix: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .rfind(|line| line.starts_with(prefix))
         .unwrap_or_else(|| panic!("no line starting with {prefix:?}"))
         .to_owned()
 }

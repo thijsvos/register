@@ -189,15 +189,18 @@ written down. The overlay tags what it builds `register:source` rather than the
 published name, so a local build cannot sit in the image store pretending to be
 the release.
 
-**Two images, and they differ in one thing.** The published image is three
-stages down to `scratch` — the binary and nothing else, no shell, no package
-manager, **3.65 MB** on amd64. The one you build from source is Alpine plus
-`git` (**25.7 MB**), because the status bar's GIT field is derived by shelling
-out to `git` and `scratch` has none: in the published image that field reads `—`
-however your vault is stored. The published image stays `scratch` because it
-`RUN`s nothing, which is exactly what lets one build produce both architectures
-without emulating either. `tests/release.rs` pins both halves so the difference
-stays a decision.
+**Two files, one image.** `deploy/Dockerfile` builds from source; `deploy/
+Dockerfile.release` copies the binaries the release matrix already cross-built
+on native runners, which is how one build publishes both architectures without
+compiling Rust under emulation. Both end at the same runtime — `alpine:3.24`
+plus `git`, about **25 MB** — and `tests/release.rs` compares their runtime
+stanzas line for line so the half nobody develops against cannot drift.
+
+`git` is in there because the status bar's GIT field is derived by shelling out
+to it: on the `scratch` image this started as, that field read `—` however your
+vault was stored. It costs one `RUN` executing per target architecture, so the
+release workflow installs binfmt — the emulation is for `apk add` only, never
+for the Rust build.
 
 The live-reload works through the bind mount: edit a note on the host and the
 watcher inside the container reports it in about 15 ms, so an agent running on
