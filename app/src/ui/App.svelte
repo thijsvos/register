@@ -1,5 +1,6 @@
 <script lang="ts">
 import { untrack } from 'svelte'
+import { gitLabel } from '../core/git'
 import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
@@ -19,18 +20,12 @@ import Today from './Today.svelte'
 import { chrome } from './view.svelte'
 
 /**
- * §02b Screen 1's GIT field, finally fillable (§08 P12).
+ * §02b Screen 1's GIT field (§08 P12), in git's own shorthand — see
+ * `core/git.ts` for the marks and why they replaced CLEAN/DIRTY.
  *
- * `—` when the vault is not a repository, which is most of them. "Chrome shows
- * only derivable truth" — so this says CLEAN only when git says clean, and
- * counts ahead only when there is an upstream to be ahead of.
+ * `—` when the vault is not a repository, which is most of them.
  */
-let gitLabel = $derived.by(() => {
-  const state = vault.git
-  if (state === null) return null
-  if (state.ahead !== null && state.ahead > 0) return `${state.ahead} ahead`
-  return state.clean ? 'Clean' : 'Dirty'
-})
+let gitField = $derived(gitLabel(vault.git))
 
 /** Newest first, so the status bar's route lands on the one that just happened. */
 let unresolved = $derived(vault.unresolved)
@@ -138,7 +133,7 @@ $effect(() => {
     vault={vault.vaultPath}
     files={vault.files}
     words={vault.openWords}
-    git={gitLabel}
+    git={gitField}
     notice={vault.notice}
     dirty={vault.dirty}
     externalEdit={vault.externalEdit}

@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev K</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev L</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -153,14 +153,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="mast">
   <div class="mast-top">
     <span class="co">Register Project · Engineering Document</span>
-    <span class="no">RG-SPEC-001 · REV K <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+    <span class="no">RG-SPEC-001 · REV L <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
   </div>
   <div class="mast-mid">
     <h1>Register RG-1<br>Build Specification</h1>
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-10 · Rev K</span></div>
+    <div><label>Issued</label><span>2026-08-10 · Rev L</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -188,6 +188,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="callout warn"><span class="chip">Rev J</span><div><strong>Changes from Rev I — §04's agent contract gains a daily log; the note format is untouched.</strong> The contract gave an agent the complete rules for creating a <em>note</em> — ref allocation, ULID, filename, every frontmatter field — and about daily logs it said one thing: <code>daily/YYYY-MM-DD.md   # daily logs</code>. An agent reading that literally has no header to write, and a real vault duly filled with copies of <code>templates/daily.md</code> carrying <code>title: TEMPLATE</code>, because copying the stencil is the reasonable guess when nothing says otherwise. <strong>Creating a daily log is now written down</strong>: no ref, because a date is not one; a fresh <code>id</code>; <code>title</code> and <code>created</code> are the date; and never copy the stencil as-is, because its fields all read TEMPLATE and stay that way. This documents what <code>dailyFrom</code> already produced rather than changing it — no file written by an earlier version becomes invalid and no reader moves, so it is an amendment to the contract's prose in the shape of Rev G and Rev H, not a format change. The masthead and end-of-record strings are corrected here too: both had read REV F since Rev G while the title said otherwise.</div></div>
 
 <div class="callout warn"><span class="chip">Rev K</span><div><strong>Changes from Rev J — §02 gains a plate clause and §02b Screen 6 gains a row. No token value changes; the note format is untouched.</strong> §02 dimensions the chrome in pixels and never says what a pixel is, so the product renders at exactly one size on every display it reaches — while §07 promises the UI on every device the user owns. On a 3440×1440 panel at DPR&nbsp;1 the frame is the same 44/250/268/30 it is on a laptop, the body face subtends about 63% of the angle it does on the 1080p display this section was drawn against, and the reading column is 530&nbsp;px of 3440 — measured. That is the gap this closes. <strong>Nothing in the §02 code block, the type scale table or the frame sentence changes.</strong> Those values now dimension <em>one plate unit</em>, and the plate renders at whole multiples of it; at 1× every rendered dimension is byte-identical to Rev J. <strong>Whole multiples only</strong>, and that is the §02 pixel grid enforcing itself rather than a preference: Departure Mono's em is exactly 11 design pixels, so 2× keeps every design pixel on a whole device pixel while 1.5× puts it on one and a half — rendered side by side, 11&nbsp;px and 22&nbsp;px are crisp and 16&nbsp;px, 16.5&nbsp;px and 19&nbsp;px all alias, and rounding to a whole pixel does not recover it. Screen 6 gains a fourth row in the segmented control the SCHEME and BODY FACE rows already use — a component §02b defines, not a new one — because the choice is the user's, while whether there is room to draw it is the canvas's and is settled by measurement. The scale rides <code>.register/config.json</code> beside <code>scheme</code> and <code>bodyFace</code>: browser zoom is per-origin state the vault cannot express (rule 4) and does not travel with the vault (§07). §04, the API surface and the note format are unchanged.</div></div>
+
+<div class="callout warn"><span class="chip">Rev L</span><div><strong>Changes from Rev K — §04's API table, so the GIT field can speak git. The note format is untouched.</strong> The field read <code>CLEAN</code> or <code>DIRTY</code>, and neither is a word git prints: <code>--dirty</code> is a flag, not an output. Worse, the pair could not distinguish a vault with one untracked note from a vault mid-rebase — both read DIRTY — while the data to tell them apart was already being fetched and discarded, since <code>status()</code> ran <code>git status --porcelain</code> and kept only whether the output was empty. So <code>GET /api/tree</code>'s <code>git</code> envelope grows from <code>{clean, ahead}</code> to <code>{branch, clean, staged, modified, untracked, ahead}</code>, and the field is drawn the way <code>git status --short</code> and every shell prompt draw it: the branch, then <code>+</code> staged, <code>~</code> modified, <code>?</code> untracked, <code>↑</code> ahead — a mark only when its count is above zero, so a clean vault on <code>main</code> reads <code>MAIN</code>. <code>clean</code> stays in the envelope and stays derived from the raw output rather than from the counts, so the two cannot start disagreeing silently. This rides the existing endpoint and adds no ninth, exactly as Rev H's <code>git</code> did; it is additive, so a client that reads only <code>clean</code> and <code>ahead</code> is unaffected, and <strong>no file in the vault changes shape</strong>. Also recorded here: the field could never say anything at all from a container until now — the image was <code>FROM scratch</code> and the state is derived by shelling out to <code>git</code>, which was documented in the status bar's own source and nowhere else. <code>deploy/Dockerfile</code> carries git; the published image stays <code>scratch</code>, because it <code>RUN</code>s nothing and that is what lets it build for both architectures without emulation.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
 <div class="toc">
@@ -466,7 +468,7 @@ shown the product.</pre></div>
 <h3 class="sub">HTTP/WS API (complete)</h3>
 <table>
 <tr><th>Endpoint</th><th>Semantics</th></tr>
-<tr><td class="k">GET /api/tree</td><td><code>{vault, nextRef, git, notes[]}</code>. Each note: path, ref, title, tags, mtime, size, etag. UI builds sidebar + search corpus from this plus bodies. <code>vault</code> is the vault's absolute path (§02b status bar); <code>nextRef</code> is the ref a new note must take — the server allocates it because only the server can see <code>.register/trash/</code>. <strong>P12:</strong> the envelope also carries <code>git</code> — <code>{clean, ahead}</code> or <code>null</code> when the vault is not a repository of its own — which is what fills §02b Screen 1's GIT field.</td></tr>
+<tr><td class="k">GET /api/tree</td><td><code>{vault, nextRef, git, notes[]}</code>. Each note: path, ref, title, tags, mtime, size, etag. UI builds sidebar + search corpus from this plus bodies. <code>vault</code> is the vault's absolute path (§02b status bar); <code>nextRef</code> is the ref a new note must take — the server allocates it because only the server can see <code>.register/trash/</code>. <strong>P12:</strong> the envelope also carries <code>git</code> — <code>{branch, clean, staged, modified, untracked, ahead}</code> or <code>null</code> when the vault is not a repository of its own — which is what fills §02b Screen 1's GIT field. <code>branch</code> is <code>null</code> on a detached head; <code>staged</code>, <code>modified</code> and <code>untracked</code> are the three columns of <code>git status --short</code>, counted per path, so one path edited after staging counts in both of the first two. <strong>Rev L:</strong> the counts and the branch were added so the field can say <em>what</em> changed rather than only that something did.</td></tr>
 <tr><td class="k">GET /api/note/{path}</td><td>Raw markdown + etag.</td></tr>
 <tr><td class="k">PUT /api/note/{path}</td><td>Body + If-Match etag. Atomic tmp+rename. Stale etag ⇒ 409; client writes <code>*.conflict-&lt;ts&gt;.md</code> and surfaces it. Missing path ⇒ create.</td></tr>
 <tr><td class="k">DELETE /api/note/{path}</td><td>Moves to <code>.register/trash/</code>, never hard-deletes.</td></tr>
@@ -1062,7 +1064,7 @@ Tailscale pattern from §07. No accounts, no telemetry. Commit
 <p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
 
 <div class="barcode"></div>
-<div class="eor">RG-SPEC-001 · REV K · End of record</div>
+<div class="eor">RG-SPEC-001 · REV L · End of record</div>
 
 </div>
 

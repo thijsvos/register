@@ -353,3 +353,92 @@ fn a_hostile_repository_config_does_not_execute() {
         "hardening broke the status path it was protecting"
     );
 }
+
+#[test]
+fn the_marks_count_each_column_of_git_status_short() {
+    // The format is two columns then the path: X is index-against-HEAD, Y is
+    // worktree-against-index. Written out rather than generated, because the
+    // whole risk here is misreading a column.
+    let porcelain = concat!(
+        "M  staged-only.md\n",   // index moved, worktree matches it
+        " M worktree-only.md\n", // worktree moved, nothing staged
+        "MM both.md\n",          // staged, then edited again
+        "A  added.md\n",
+        "?? untracked.md\n",
+        "R  old.md -> new.md\n",
+    );
+
+    // both.md counts once in each column, which is what makes the marks add up
+    // to what `git status --short` prints.
+    assert_eq!(tally(porcelain), (4, 2, 1));
+}
+
+#[test]
+fn a_leading_space_is_a_status_column_and_not_padding() {
+    // Trimming the line first turns " M" (worktree-modified) into "M "
+    // (staged) — the whole file would report the wrong column.
+    assert_eq!(tally(" M a.md\n"), (0, 1, 0));
+    assert_eq!(tally("M  a.md\n"), (1, 0, 0));
+}
+
+#[test]
+fn nothing_uncommitted_is_no_marks_at_all() {
+    assert_eq!(tally(""), (0, 0, 0));
+    assert_eq!(tally("\n"), (0, 0, 0));
+}
+
+#[test]
+fn a_state_nobody_enumerated_still_counts() {
+    // Unmerged paths carry U in both columns. A whitelist of the letters we
+    // expected would drop them and report a clean-looking branch for a vault
+    // mid-conflict.
+    assert_eq!(tally("UU conflicted.md\n"), (1, 1, 0));
+    assert_eq!(tally("C  copied.md\n"), (1, 0, 0));
+}
+
+#[test]
+fn the_status_names_the_branch_and_counts_what_changed() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+
+    let clean = status(tmp.path()).expect("status");
+    assert_eq!(clean.branch.as_deref(), Some("main"));
+    assert!(clean.clean);
+    assert_eq!((clean.staged, clean.modified, clean.untracked), (0, 0, 0));
+
+    tmp.put("notes/009-new.md", "---\nref: 009\n---\nUntracked.\n");
+    let dirty = status(tmp.path()).expect("status");
+    assert!(!dirty.clean);
+    assert_eq!(dirty.untracked, 1);
+    assert_eq!((dirty.staged, dirty.modified), (0, 0));
+    // The branch does not change just because the tree did.
+    assert_eq!(dirty.branch.as_deref(), Some("main"));
+}
+
+#[test]
+fn a_detached_head_has_no_branch_to_name() {
+    // `rev-parse --abbrev-ref HEAD` answers "HEAD" here — a branch name that
+    // looks real and is not one. `symbolic-ref` fails instead, which is what
+    // `None` records.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let head = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("rev-parse");
+    let sha = String::from_utf8_lossy(&head.stdout).trim().to_owned();
+    assert!(
+        Command::new("git")
+            .args(["checkout", "--detach", &sha])
+            .current_dir(tmp.path())
+            .output()
+            .expect("checkout")
+            .status
+            .success()
+    );
+
+    let detached = status(tmp.path()).expect("status");
+    assert_eq!(detached.branch, None);
+    assert!(detached.clean, "detaching changed no file");
+}

@@ -21,7 +21,15 @@ export interface Tree {
 
 /** What §02b Screen 1's GIT field shows. Derived, never stored. */
 export interface GitStatus {
+  /** The branch HEAD is on; null when detached. */
+  branch: string | null
   clean: boolean
+  /** Index against HEAD — `git status --short`'s first column, drawn `+`. */
+  staged: number
+  /** Worktree against the index — the second column, drawn `~`. */
+  modified: number
+  /** Paths git is not tracking — `??`, drawn `?`. */
+  untracked: number
   /** Commits the branch has that its upstream does not; null with no upstream. */
   ahead: number | null
 }
@@ -245,9 +253,26 @@ function asGit(value: unknown): GitStatus | null {
   // unreadable shape reads as "no git", never as a broken tree.
   if (!isRecord(value) || typeof value.clean !== 'boolean') return null
   return {
+    branch: typeof value.branch === 'string' && value.branch !== '' ? value.branch : null,
     clean: value.clean,
+    staged: count(value.staged),
+    modified: count(value.modified),
+    untracked: count(value.untracked),
     ahead: typeof value.ahead === 'number' ? value.ahead : null,
   }
+}
+
+/**
+ * A count from an envelope we did not write, or zero.
+ *
+ * Zero rather than null: a mark is drawn only when its count is above zero, so
+ * an unreadable number has to mean "nothing to draw" — `NaN > 0` is false but
+ * `NaN` would reach the label as `~NaN` if it were ever formatted directly.
+ */
+function count(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : 0
 }
 
 function asEntry(value: unknown): Entry | null {
