@@ -235,9 +235,19 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      # Deliberately no floating tag. Rule 11 bans `latest` as a version, and
-      # publishing one invites exactly the drift the rule exists to stop — so
-      # the image is addressable only by the version that built it.
+      # Three tags: `v0.4.2`, `0.4.2` and `latest`.
+      #
+      # `latest` was deliberately absent until now, on the reading that rule 11
+      # bans it outright. That reading was too broad and the maintainer has
+      # settled it: the rule governs what this project *consumes* — a `FROM` or
+      # an `uses:` that moves under us is a dependency nobody pinned — and says
+      # nothing about what it publishes. Someone trying the product should not
+      # have to find a version string first, and `tests/release.rs` still fails
+      # the build if any of those four files consumes a moving tag.
+      #
+      # The versioned tags remain the ones to depend on, and are what
+      # deploy/docker-compose.yml names: a checked-in file that silently changes
+      # what it runs is the drift the rule is actually about.
       # Through the environment, not interpolated into the script. Git permits
       # `$`, backticks and parentheses in a tag name, and such a tag still
       # matches the trigger — `${{ }}` pastes it in as source text before bash
@@ -258,6 +268,10 @@ jobs:
             --platform linux/amd64,linux/arm64 \
             -t "ghcr.io/$OWNER/register:$VERSION" \
             -t "ghcr.io/$OWNER/register:${VERSION#v}" \
+            -t "ghcr.io/$OWNER/register:latest" \
             --push \
             .
           docker buildx imagetools inspect "ghcr.io/$OWNER/register:$VERSION"
+          # `latest` is what the README's one-liner pulls, so prove it resolves
+          # and carries both platforms rather than assuming the tag followed.
+          docker buildx imagetools inspect "ghcr.io/$OWNER/register:latest"

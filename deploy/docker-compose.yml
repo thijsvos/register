@@ -1,8 +1,25 @@
-# SPEC §07, verbatim. That is the whole stack: agents run on the host against
-# the same mounted folder, and the container only serves the UI.
+# SPEC §07. The default path: pull a published image and run it.
+#
+# Deliberately no `build:` key. This file used to have one and nothing else,
+# so the only documented way in was to clone the repository and compile node,
+# pnpm and a Rust release build inside Docker — which is what someone trying
+# this for the first time ran into, and reasonably read as "you build this
+# yourself". Contributors add the build back explicitly:
+#
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.build.yml up -d --build
+#
+# Splitting them means the quickstart cannot accidentally compile, and the
+# `--build` warning that used to be required here belongs only to that file.
 services:
   register:
-    build: { context: .., dockerfile: deploy/Dockerfile }
+    # Pinned, and `tests/release.rs` asserts it matches Cargo.toml — a release
+    # that forgot to bump it would hand every new user the previous version
+    # while the README claimed otherwise. `:latest` also exists and is what the
+    # README's one-liner uses; this file names a version because a compose file
+    # is checked in, and a checked-in file that silently changes what it runs is
+    # the drift rule 11 is about.
+    image: ghcr.io/thijsvos/register:v0.4.2
     # Loopback only. `"7777:7777"` publishes on every interface, which makes
     # putting your vault on the network the default — while the README calls it
     # "a decision, not a default". One of the two had to change, and it was not
@@ -13,17 +30,31 @@ services:
     #   ports: ["7777:7777"]
     #   command: ["--token", "<secret>"]     # appended to the image ENTRYPOINT
     ports: ["127.0.0.1:7777:7777"]
-    # Who the server writes as. The image is `scratch` and has no /etc/passwd,
-    # so this can only be numeric — and without it the server is uid 0, which on
-    # a Linux host leaves every note it creates root-owned inside your own
-    # folder. Pass your own ids so the files come out yours:
-    #   REGISTER_UID=$(id -u) REGISTER_GID=$(id -g) VAULT_PATH=~/vault docker compose ... up -d --build
+    # Who the server writes as. The image has no /etc/passwd entry for you, so
+    # this can only be numeric — and without it the server is uid 1000, which on
+    # a Linux host leaves notes owned by whoever that happens to be.
+    #
+    # It does nothing on macOS or Windows: Docker Desktop maps ownership to the
+    # calling user whatever the container says — measured, a file written by
+    # uid 1000 inside lands owned by you outside. Set them on Linux; ignore them
+    # everywhere else. `deploy/.env.example` says the same thing next to the
+    # values themselves.
     #
     # Not `UID`/`GID`: bash and dash both make UID readonly, so that assignment
     # fails and the command falls back to the default while looking like it
-    # worked. The default is the usual first-user pair on Linux; Docker Desktop
-    # on macOS and Windows maps ownership itself and ignores the mismatch.
+    # worked.
     user: "${REGISTER_UID:-1000}:${REGISTER_GID:-1000}"
     volumes:
-      - ${VAULT_PATH:-./vault}:/vault
+      # Required, with no default. It used to be `${VAULT_PATH:-./vault}`, which
+      # resolves against THIS file — so forgetting the variable silently put a
+      # real vault in `deploy/vault/`, inside the checkout, one `git add -A`
+      # from being committed. There is a .gitignore entry for that path, which
+      # is the proof it happened. Now compose refuses to start and prints this
+      # sentence instead.
+      #
+      # A bind mount rather than a named volume, and that is not negotiable:
+      # §04's whole premise is that the vault is a folder you can open in a
+      # terminal, point an agent at, and put under git. A named volume would
+      # hide it inside Docker's storage and break the product to tidy the file.
+      - ${VAULT_PATH:?set VAULT_PATH to the folder your notes live in — see deploy/.env.example}:/vault
     restart: unless-stopped

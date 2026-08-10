@@ -116,6 +116,68 @@ pub struct Report {
 }
 
 /// Scaffold a vault at `root`, creating only what is absent.
+/// Whether this folder already holds a vault, and must therefore be left alone.
+///
+/// `serve` scaffolds an empty folder so that pointing the app at one is the
+/// whole of setup — but "empty" has to mean *empty of a vault*, not literally
+/// empty, or the check refuses to help anyone whose folder contains a `.git`
+/// directory or a `.DS_Store`. So it asks the two questions that actually
+/// distinguish a vault from a blank folder:
+///
+///   - is `.register/` there? That is the directory the app owns, and `new`
+///     already uses its presence as the definition of "you are in a vault".
+///   - is there a note anywhere? A folder holding markdown is somebody's
+///     writing whether or not this app made it, and scaffolding a `CLAUDE.md`
+///     into it uninvited is not ours to do.
+///
+/// Errors read as "yes, it holds one". A folder we cannot inspect is the last
+/// place to start writing files.
+pub fn holds_a_vault(root: &Path) -> bool {
+    // A folder that is not there holds nothing. Checked before the walk below,
+    // whose "cannot read it, assume occupied" rule would otherwise catch this
+    // and refuse to scaffold the one case that most needs it — `register serve
+    // ~/vault` on a machine that has never run this before.
+    if !root.exists() {
+        return false;
+    }
+    if root.join(APP_DIR).is_dir() {
+        return true;
+    }
+    has_a_note(root, 0)
+}
+
+/// Any `.md` at any depth. Bounded, because a vault folder can be a symlink
+/// farm or a mount and this runs before anything else does.
+fn has_a_note(dir: &Path, depth: u8) -> bool {
+    const MAX_DEPTH: u8 = 6;
+
+    let Ok(entries) = fs::read_dir(dir) else {
+        // Unreadable: assume occupied. The alternative is writing a contract
+        // into a folder whose contents we could not see.
+        return true;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
+        {
+            return true;
+        }
+        // `file_type` rather than `is_dir`: the latter follows symlinks, and a
+        // link pointing at `/` would walk the filesystem looking for markdown.
+        let Ok(kind) = entry.file_type() else {
+            return true;
+        };
+        if kind.is_dir() && depth < MAX_DEPTH && has_a_note(&path, depth + 1) {
+            return true;
+        }
+    }
+
+    false
+}
+
 pub fn init(root: &Path, git: bool) -> io::Result<Report> {
     let mut report = Report::default();
 

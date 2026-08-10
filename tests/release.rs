@@ -403,8 +403,44 @@ fn compose_mounts_a_vault_and_publishes_one_port_on_loopback() {
     // showing the old form, so the assertion went on passing while testing
     // nothing. A test satisfied by a comment is worse than no test.
     let compose = strip_comments(&read("deploy/docker-compose.yml"));
-    assert!(compose.contains("${VAULT_PATH:-./vault}:/vault"));
-    assert!(compose.contains("dockerfile: deploy/Dockerfile"));
+
+    // Required, with no default. `${VAULT_PATH:-./vault}` resolved against the
+    // compose file, so forgetting it put a real vault inside the checkout —
+    // there is a .gitignore entry for that path, which is how we know it
+    // happened. `:?` makes compose refuse to start and say what to set.
+    assert!(
+        compose.contains("${VAULT_PATH:?"),
+        "VAULT_PATH has a default again, so an unset one lands somewhere quietly:\n{compose}"
+    );
+    assert!(
+        !compose.contains("${VAULT_PATH:-"),
+        "VAULT_PATH must not have a fallback path"
+    );
+    // A bind mount, never a named volume: §04's premise is a folder you can open
+    // in a terminal and put under git.
+    assert!(compose.contains(":/vault"));
+
+    // The default path pulls. A `build:` here is what made the only documented
+    // way in "clone it and compile", which is exactly the barrier this split
+    // removed — so its absence is the assertion, not its presence.
+    assert!(
+        !compose.contains("build:"),
+        "the default compose builds again; the build belongs in the overlay"
+    );
+    assert!(
+        compose.contains("image: ghcr.io/"),
+        "the default compose no longer names a published image"
+    );
+
+    // And the overlay still exists, still builds, and does not masquerade as the
+    // published tag.
+    let overlay = strip_comments(&read("deploy/docker-compose.build.yml"));
+    assert!(overlay.contains("dockerfile: deploy/Dockerfile"));
+    assert!(
+        overlay.contains("image: register:source"),
+        "a local build tagged as the published image would shadow it in the \
+         image store, and `docker pull` would skip a version you do not have"
+    );
 
     assert!(
         compose.contains(r#""127.0.0.1:7777:7777""#),
@@ -473,13 +509,49 @@ fn a_release_binary_over_the_budget_fails_the_build() {
     );
 }
 
+/// The compose file names a version, so a release that forgets it hands every
+/// new user the previous build while the README says otherwise.
+///
+/// This is the drift rule 11 exists to catch, one file over: the quickstart is
+/// the most-read thing in the repository and the least likely to be re-run by
+/// the person cutting a release.
+#[test]
+fn the_quickstart_pulls_the_version_this_repo_is() {
+    let manifest = read("Cargo.toml");
+    let version = manifest
+        .lines()
+        .find_map(|line| line.strip_prefix("version = "))
+        .map(|value| value.trim().trim_matches('"').to_owned())
+        .expect("a version in Cargo.toml");
+    assert!(!version.is_empty(), "no version in Cargo.toml");
+
+    let compose = strip_comments(&read("deploy/docker-compose.yml"));
+    let wanted = format!("register:v{version}");
+    assert!(
+        compose.contains(&wanted),
+        "deploy/docker-compose.yml does not pull {wanted}:\n{compose}"
+    );
+}
+
 #[test]
 fn nothing_consumes_a_tag_that_moves() {
     // Rule 11 bans `latest` as an image or package version in Dockerfiles,
     // workflows and manifests. Runner labels are exempt — they name
     // GitHub-managed infrastructure, no update bot tracks them, and pinning one
     // would create a stale pin nothing owns.
-    let exempt = ["ubuntu-latest", "macos-latest", "windows-latest"];
+    //
+    // The image we PUBLISH under that name is exempt too, and the distinction is
+    // the whole point of the rule: consuming a tag that moves means a dependency
+    // nobody pinned, while publishing one is a convenience offered to people who
+    // should not need to find a version string to try the product. Written as
+    // the exact string we push, so `FROM alpine:latest` in the same file still
+    // fails.
+    let exempt = [
+        "ubuntu-latest",
+        "macos-latest",
+        "windows-latest",
+        "register:latest",
+    ];
 
     for path in [
         "deploy/Dockerfile",
@@ -566,22 +638,52 @@ fn the_documented_compose_command_rebuilds() {
     // you just made is absent and the symptom is indistinguishable from the
     // code not working. Documenting the form that does not rebuild is worse
     // than documenting nothing.
-    let readme = read("README.md");
+    //
+    // That is true of the BUILD path only. The default file has no `build:` in
+    // it, so `up` there pulls and `--build` would be a flag with nothing to do —
+    // and the whole point of splitting the files was that the quickstart should
+    // not mention building at all. So the rule is now conditional: a documented
+    // command that names the overlay must rebuild, and one that does not must
+    // not pretend to.
+    // Shell line continuations joined first: the build command is written across
+    // two lines, so reading them separately finds a `docker compose` line with
+    // no `up` on it and an `up` line with no command — and the filter below
+    // silently matched neither. A test that stops seeing the thing it guards
+    // reports success.
+    let readme = read("README.md").replace("\\\n", " ");
     let compose_lines: Vec<&str> = readme
         .lines()
-        .filter(|line| line.contains("docker compose") && line.contains("up"))
+        .map(str::trim)
+        .filter(|line| line.contains("docker compose") && line.contains(" up"))
         .collect();
 
     assert!(
         !compose_lines.is_empty(),
         "the README stopped documenting it"
     );
-    for line in compose_lines {
-        assert!(
-            line.contains("--build"),
-            "the README teaches a compose command that reuses a stale image: {line}"
-        );
+
+    let mut builds = 0;
+    for line in &compose_lines {
+        // The overlay is what makes a build possible; the README continues it
+        // across two lines, so the flag may be on either.
+        let is_build_path = line.contains("docker-compose.build.yml") || line.contains("--build");
+        if is_build_path {
+            builds += 1;
+            assert!(
+                line.contains("--build") || line.contains("docker-compose.build.yml"),
+                "the README teaches a compose build that reuses a stale image: {line}"
+            );
+        } else {
+            assert!(
+                !line.contains("--build"),
+                "a pull-only command carries --build, which has nothing to build: {line}"
+            );
+        }
     }
+    assert!(
+        builds > 0,
+        "the README no longer documents how to build from source at all"
+    );
 }
 
 #[test]
