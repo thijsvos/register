@@ -1,4 +1,20 @@
-# SPEC §07 — three stages to `scratch`, so the image is the binary.
+# SPEC §07 — three stages to a runtime that is the binary plus git.
+#
+# §07 lists `scratch` here and `deploy/Dockerfile.release` still is one. This
+# stage is not, and the difference is deliberate rather than drift: the status
+# bar's GIT field (§02b Screen 1, carried by GET /api/tree per §04) is derived by
+# shelling out to `git`, and a `scratch` image has no git to shell out to. So the
+# field was pinned to `—` for every containerised vault no matter what state the
+# repository was actually in — measured: the same binary against the same vault
+# reported {"clean":false} on the host and null in the container, at the same
+# moment. A field that can only ever say one thing is not chrome showing
+# derivable truth; it is a dead pixel with a label.
+#
+# The published image keeps `scratch` on purpose. It carries no compiler and
+# `RUN`s nothing, which is what lets buildx assemble both architectures without
+# emulating either — adding `apk add` there would put a foreign-arch package
+# install under QEMU on every release. `tests/release.rs` asserts both halves of
+# this: the runtime stanza is identical, and the bases are meant to differ.
 #
 # Two deviations from §07's listing, both required by §06's own version
 # doctrine ("each version lives in exactly one file, everything else references
@@ -32,12 +48,33 @@ COPY --from=ui /build/app/dist ./app/dist
 # dynamically linked binary would fail to start with no message at all.
 RUN cargo build --release --locked
 
-FROM scratch
+# Pinned to a release, never `latest` (§06 version doctrine). 3.24 is current
+# stable — released 2026-06-09, supported to 2028-06-01.
+FROM alpine:3.24
+# The one reason this is not `scratch`. --no-cache leaves no index behind.
+RUN apk add --no-cache git
 COPY --from=server /build/target/release/register /register
+
+# git refuses to read a repository whose owner does not match the calling uid
+# ("detected dubious ownership"), and a bind-mounted vault keeps whatever owner
+# it has on the host — which is the point of the compose file's `user:` line,
+# and is not knowable at build time. Declared through the environment rather
+# than a gitconfig file so it applies to whatever uid `docker run --user` picks,
+# and scoped to the mount rather than `*`, so this trusts exactly the directory
+# the operator already chose to hand us.
+#
+# This is for a Linux host. Docker Desktop reports a shared mount as owned by
+# whichever uid asks — measured, uid 1000 sees 1000:0 and uid 501 sees 501:0 for
+# the same path — so the mismatch cannot happen there and nobody developing on a
+# Mac would ever find this missing. `tests/release.rs` pins it for that reason.
+ENV GIT_CONFIG_COUNT=1 \
+    GIT_CONFIG_KEY_0=safe.directory \
+    GIT_CONFIG_VALUE_0=/vault
+
 # A bare `docker run` should not be root. compose overrides this with the host
 # user's own ids so the mounted vault comes out theirs; this is only the default
-# for someone who runs the image directly. Numeric because `scratch` has no
-# /etc/passwd to name anyone.
+# for someone who runs the image directly. Numeric because it has to match the
+# release image's, which is `scratch` and has no /etc/passwd to name anyone.
 USER 1000:1000
 VOLUME /vault
 EXPOSE 7777
