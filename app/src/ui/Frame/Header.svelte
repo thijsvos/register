@@ -134,11 +134,11 @@ time {
 /* The inspector is gone below this width (App.svelte, Inspector.svelte), so
    there is no rule left to line up with and the reserved width would only
    squeeze the crumb. */
-@media (max-width: 1080px) {
+@container frame (max-width: 1080px) {
   .stats { min-width: 0; }
 }
 
-@media (max-width: 760px) {
+@container frame (max-width: 760px) {
   .brand { min-width: 0; }
   .crumb { display: none; }
 }

@@ -53,6 +53,32 @@ html.dark {
    editor / inspector (268px) / status bar (30px), separated by 1px hairlines."
    --------------------------------------------------------------------------- */
 :root {
+  /* --- the plate scale (§02 "Plate", Rev K) -------------------------------
+     Every length in this file dimensions ONE plate unit. The plate renders at
+     whole multiples of it, applied as `zoom` on <html> in base.css — so no
+     value here is ever rewritten, `--text-body` stays the literal `13px`, and
+     1x is byte-identical to Rev J.
+
+     Whole multiples only, and that is the pixel grid enforcing itself rather
+     than a preference. Departure Mono's em is exactly 11 design pixels, so at
+     2x every design pixel still lands on a whole device pixel; at 1.5x it
+     lands on one and a half. Rendered side by side on a DPR-1 panel, 11px and
+     22px are crisp while 16px, 16.5px and 19px all alias — and rounding a
+     fractional size to a whole pixel does not recover it, because what is
+     fractional is the glyph scaling, not the placement.
+
+     The user chooses the scale (Screen 6, stored in config.json); the canvas
+     decides whether there is room for it. Unset is AUTO, which is deliberately
+     the classless case: boot.js cannot read config.json, so leaving auto to a
+     plain media query is what lets an ultrawide come up at 2x on the first
+     frame rather than painting 1x and snapping.
+
+     2160px is a hard floor, not taste. At 2x the frame measures the viewport
+     halved, so 2160 yields 1080 plate px — exactly where the @container
+     breakpoint below drops the inspector. Auto stays well clear of it at 2560;
+     a deliberate 2x is permitted down to 2200. */
+  --ui-scale: 1;
+
   /* --- normative: §02 component doctrine, stated in prose --- */
   --frame-header: 44px;
   --frame-side: 250px;
@@ -87,12 +113,32 @@ html.dark {
 
   --scrim: rgba(0,0,0,.28);   /* behind the ⌘K palette (§02b Screen 2) */
   --pal-width: 600px;
-  --pal-top: 11vh;
-  --pal-max: 52vh;            /* result list before it scrolls */
+  /* vh resolves against the UNZOOMED viewport, so read inside a scaled plate it
+     measures --ui-scale times what it says. Divided back, here rather than at
+     each use, so the palette sits where §02b draws it at either scale. */
+  --pal-top: calc(11vh / var(--ui-scale));
+  --pal-max: calc(52vh / var(--ui-scale));   /* result list before it scrolls */
 
-  /* breakpoints are not custom properties (media queries cannot read them);
-     they live in the components as literals: 1080px drops the inspector, 760px
-     collapses to one column. */
+  /* breakpoints are not custom properties (media queries cannot read them, and
+     neither can container queries); they live in the components as literals:
+     1080px drops the inspector, 760px collapses to one column. They are asked
+     of the frame in PLATE units via @container, not of the raw viewport — the
+     plate may be scaled, and at 2x on a 1440 canvas a viewport query would draw
+     three columns into 720 plate px. */
+}
+
+/* AUTO — the classless default, so it holds before the config arrives. */
+@media (min-width: 2560px) {
+  :root { --ui-scale: 2; }
+}
+
+/* Pinned in §02b Screen 6. These are (0,1,1) against the (0,1,0) rules above,
+   so a pin wins at every width — including pinning 1x on a 3440 panel, which is
+   the way back and the reason the row has three buttons rather than two. */
+html.scale-1 { --ui-scale: 1; }
+html.scale-2 { --ui-scale: 1; }
+@media (min-width: 2200px) {
+  html.scale-2 { --ui-scale: 2; }
 }
 
 html.dark {

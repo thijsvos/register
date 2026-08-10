@@ -284,7 +284,10 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
 
 /* §02: "Emphasis is a double rule (border + offset outline)." */
 .pal {
-  width: min(var(--pal-width), 92vw);
+  /* vw resolves against the unzoomed viewport, so divided back like --pal-top
+     and --pal-max. Left inline rather than tokenised: it is the palette's own
+     margin against a narrow window, not a §02 dimension. */
+  width: min(var(--pal-width), calc(92vw / var(--ui-scale)));
   background: var(--bg);
   border: var(--hairline) solid var(--line);
   outline: var(--hairline) solid var(--line);

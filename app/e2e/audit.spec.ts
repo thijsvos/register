@@ -239,7 +239,13 @@ test('the frame’s vertical rules are continuous through the header', async ({ 
   await page.getByRole('button', { name: /Alpha/ }).click()
   await expect(page.locator('.cm-content')).toBeVisible()
 
-  for (const width of [1600, 1400, 1200, 1100]) {
+  // 3440 and 2560 are where the plate is 2x (§02 "Plate"). They are in this
+  // loop rather than in scale.spec.ts because the rules going out of register
+  // is this test's failure, not the scale's — and because until they were added
+  // the widest viewport anything in this suite had ever rendered was 1600, which
+  // is why an ultrawide shipped for twelve phases drawing a 530px column into
+  // 3440px of screen with nothing red.
+  for (const width of [3440, 2560, 1600, 1400, 1200, 1100]) {
     await page.setViewportSize({ width, height: 900 })
     const rules = await page.evaluate(() => {
       const edge = (selector: string, side: 'left' | 'right') => {
@@ -285,5 +291,14 @@ test('the frame’s vertical rules are continuous through the header', async ({ 
     }
   })
   expect(narrow.inspectorShown).toBe(false)
-  expect(narrow.reserved).toBeLessThan(268)
+  // Read from the token rather than restated as a literal. At 1000px the plate
+  // is 1x, so the two are in the same units. Written as `268` this assertion
+  // would keep passing while meaning nothing the day --frame-insp moved.
+  const reservedWhenShown = await page.evaluate(() =>
+    Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--frame-insp'),
+    ),
+  )
+  expect(reservedWhenShown).toBeGreaterThan(0)
+  expect(narrow.reserved).toBeLessThan(reservedWhenShown)
 })
