@@ -259,6 +259,31 @@ async fn serve(
         return Err(format!("assets {}: not a directory", dir.display()));
     }
 
+    // Pointing the app at a folder is the whole of setup.
+    //
+    // Before this, `serve` on a folder with no vault in it started cleanly and
+    // served an empty one: no agent contract, no daily stencil, no inbox — so
+    // `G D` and NEW FROM TEMPLATE had nothing to cut from and the §04 premise
+    // was quietly absent, on a screen that looked fine. A missing folder was
+    // worse: `open: no such note`, which tells a beginner nothing at all. Both
+    // are the same instruction — run `register init` first — that nothing on
+    // screen ever gave.
+    //
+    // Only ever into a folder holding no vault (`holds_a_vault`), and `init`
+    // itself never overwrites, so this cannot touch anybody's notes. Said out
+    // loud rather than done silently, because a command that writes files
+    // should say which ones.
+    if !scaffold::holds_a_vault(&root) {
+        let made = scaffold::init(&root, false)
+            .map_err(|error| format!("init {}: {error}", root.display()))?;
+        for rel in &made.created {
+            println!("  + {rel}");
+        }
+        for note in &made.notes {
+            println!("  ! {note}");
+        }
+    }
+
     let vault =
         vault::Vault::open(&root).map_err(|error| format!("serve {}: {error}", root.display()))?;
     let vault = Arc::new(vault);

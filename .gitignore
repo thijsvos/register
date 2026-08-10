@@ -11,10 +11,15 @@ app/dist/
 # path argument stays relative to where you are standing.
 devvault/
 
-# The compose default when VAULT_PATH is unset. Relative to the compose file, so
-# `docker compose -f deploy/docker-compose.yml up` with no VAULT_PATH puts a real
-# vault here — someone's actual notes, one `git add -A` from being committed.
+# VAULT_PATH is required now and compose refuses to start without it, so nothing
+# should land here again. Kept because the folder may already exist in a working
+# copy from before that changed, and because a real vault appearing inside the
+# checkout is the one mistake that ends with someone's notes in a public repo.
 deploy/vault/
+
+# Someone's real VAULT_PATH, and on Linux their uid. `deploy/.env.example` is the
+# checked-in one.
+deploy/.env
 
 # OS
 .DS_Store

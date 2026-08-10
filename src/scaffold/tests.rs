@@ -411,3 +411,92 @@ fn dates_are_utc_and_survive_leap_years() {
         assert_eq!(iso_seconds(seconds), stamp, "iso_seconds({seconds})");
     }
 }
+
+/// `serve` scaffolds a folder that holds no vault, so pointing the app at one is
+/// the whole of setup — and must never scaffold over anything anyone else put
+/// there. These pin both halves.
+mod holds_a_vault {
+    use super::*;
+
+    /// A directory under a temp vault, so nothing here writes outside it.
+    fn dir(tmp: &TempVault, name: &str) -> std::path::PathBuf {
+        let path = tmp.path().join(name);
+        fs::create_dir_all(&path).expect("create dir");
+        path
+    }
+
+    #[test]
+    fn a_folder_that_is_not_there_holds_nothing() {
+        // The case that most needs scaffolding: `register serve ~/vault` on a
+        // machine that has never run this. It used to be caught by the walk's
+        // "cannot read it, assume occupied" rule and refused.
+        let tmp = TempVault::new();
+        assert!(!holds_a_vault(&tmp.path().join("never-created")));
+    }
+
+    #[test]
+    fn an_empty_folder_holds_nothing() {
+        let tmp = TempVault::new();
+        assert!(!holds_a_vault(&dir(&tmp, "empty")));
+    }
+
+    #[test]
+    fn housekeeping_files_are_not_a_vault() {
+        // "Empty" has to mean empty of a *vault*, or the check refuses to help
+        // anyone whose folder has been touched by git or the Finder.
+        let tmp = TempVault::new();
+        let path = dir(&tmp, "housekeeping");
+        fs::write(path.join(".DS_Store"), "").expect("write");
+        fs::create_dir_all(path.join(".git")).expect("create .git");
+        fs::write(path.join("notes.txt"), "not markdown").expect("write");
+        assert!(!holds_a_vault(&path));
+    }
+
+    #[test]
+    fn the_directory_the_app_owns_is_a_vault() {
+        // A vault whose notes have all been deleted is still a vault: it has
+        // config, a trash folder and a ref counter that must not be reset.
+        let tmp = TempVault::new();
+        let path = dir(&tmp, "emptied");
+        fs::create_dir_all(path.join(APP_DIR)).expect("create .register");
+        assert!(holds_a_vault(&path));
+    }
+
+    #[test]
+    fn markdown_anywhere_is_somebody_writing() {
+        let tmp = TempVault::new();
+        let shallow = dir(&tmp, "shallow");
+        fs::write(shallow.join("theirs.md"), "# theirs").expect("write");
+        assert!(holds_a_vault(&shallow));
+
+        // Nested, because a notes folder is the ordinary shape and a check that
+        // only looked at the top level would scaffold straight over one.
+        let deep = dir(&tmp, "deep");
+        fs::create_dir_all(deep.join("a/b/c")).expect("create nested");
+        fs::write(deep.join("a/b/c/theirs.md"), "# theirs").expect("write");
+        assert!(holds_a_vault(&deep));
+    }
+
+    #[test]
+    fn the_extension_is_matched_whatever_its_case() {
+        let tmp = TempVault::new();
+        let path = dir(&tmp, "shouty");
+        fs::write(path.join("THEIRS.MD"), "# theirs").expect("write");
+        assert!(
+            holds_a_vault(&path),
+            "a .MD file is still someone's writing"
+        );
+    }
+
+    #[test]
+    fn scaffolding_a_new_folder_leaves_it_holding_a_vault() {
+        // The property that makes this safe to run on every serve: it is not
+        // idempotent by luck, it is idempotent because the second call sees
+        // what the first one wrote.
+        let tmp = TempVault::new();
+        let path = tmp.path().join("fresh");
+        assert!(!holds_a_vault(&path));
+        init(&path, false).expect("init");
+        assert!(holds_a_vault(&path));
+    }
+}

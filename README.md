@@ -69,8 +69,43 @@ If a change breaks a budget, the change shrinks. Not the budget.
 
 ## Running it
 
-Two modes. Native is the primary one; the container exists for a home server or
-a tailnet, where you want the UI on every device and the vault in one folder.
+### Try it — one command
+
+```sh
+docker run -d --name register -p 127.0.0.1:7777:7777 \
+  -v ~/vault:/vault ghcr.io/thijsvos/register:latest
+```
+
+Open <http://localhost:7777>. That is the whole of setup.
+
+`~/vault` does not have to exist and does not have to contain anything: pointing
+the app at a folder with no vault in it scaffolds one — `CLAUDE.md`, the daily
+stencil, an inbox, the folders — and says which files it wrote. Point it at a
+folder that already holds notes and it changes nothing, because a folder with
+markdown in it is somebody's writing.
+
+Your notes are plain markdown in `~/vault` on your own disk. Nothing is stored
+inside Docker; delete the container and the notes are still there.
+
+**On Linux, add `--user $(id -u):$(id -g)`** or every note is owned by uid 1000.
+On macOS and Windows leave it off — Docker Desktop maps ownership to you
+whatever the container says.
+
+To stop and remove it: `docker rm -f register`.
+
+### Or with compose
+
+For something you keep running. `deploy/docker-compose.yml` pulls the published
+image — it has no `build:` in it, so it cannot accidentally compile:
+
+```sh
+cp deploy/.env.example deploy/.env     # then set VAULT_PATH
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+`VAULT_PATH` is required and has no default. It used to fall back to a folder
+next to the compose file, which quietly put real notes inside the checkout;
+compose now refuses to start and tells you what to set.
 
 ### Native
 
@@ -136,24 +171,33 @@ get a supply-chain incident with your own README as the delivery mechanism.
 
 ### Container
 
+Running it is two commands up the page; this is what is in the image and how to
+change it.
+
+**Building from source** is an overlay on the same compose file, so the default
+path stays incapable of compiling:
+
 ```sh
-REGISTER_UID=$(id -u) REGISTER_GID=$(id -g) VAULT_PATH=~/vault \
-  docker compose -f deploy/docker-compose.yml up -d --build
+docker compose -f deploy/docker-compose.yml \
+               -f deploy/docker-compose.build.yml up -d --build
 ```
 
-**`--build` is not optional when you are building from source.** Without it,
-compose reuses whatever image it built last time — so your changes are simply
-absent, and the symptom is identical to the code not working. It cost an
-investigation here before it was written down. Drop the flag only when you are
-running a published image you have not modified.
+**`--build` is not optional here.** Without it, compose reuses whatever image it
+built last time — so your changes are simply absent, and the symptom is
+identical to the code not working. It cost an investigation before it was
+written down. The overlay tags what it builds `register:source` rather than the
+published name, so a local build cannot sit in the image store pretending to be
+the release.
 
-Serves on `http://localhost:7777` against the folder you mounted. The image is
-three stages down to `scratch`, so it is the binary and nothing else — no shell,
-no package manager, **3.65 MB** on amd64 — which is what `release.yml` publishes,
-since it builds on an x64 runner. Build it on an arm64 machine and you get
-3.25 MB. The image *is* the binary; there is nothing else in it to account for
-the difference. Every MB on this page is 1024², the unit `release.yml` measures
-the budget in.
+**Two images, and they differ in one thing.** The published image is three
+stages down to `scratch` — the binary and nothing else, no shell, no package
+manager, **3.65 MB** on amd64. The one you build from source is Alpine plus
+`git` (**25.7 MB**), because the status bar's GIT field is derived by shelling
+out to `git` and `scratch` has none: in the published image that field reads `—`
+however your vault is stored. The published image stays `scratch` because it
+`RUN`s nothing, which is exactly what lets one build produce both architectures
+without emulating either. `tests/release.rs` pins both halves so the difference
+stays a decision.
 
 The live-reload works through the bind mount: edit a note on the host and the
 watcher inside the container reports it in about 15 ms, so an agent running on
@@ -177,9 +221,15 @@ the machine it runs on and nowhere else. Three things before you widen it:
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
-Images are published to `ghcr.io/thijsvos/register` on tags, addressable by version
-only — there is no `latest`, deliberately, because nothing should depend on a
-tag that moves under it.
+Images are published to `ghcr.io/thijsvos/register` on tags: `v0.4.2`, `0.4.2`
+and `latest`.
+
+`latest` is there so nobody has to find a version string to try the product.
+**Depend on a versioned tag**, and note that `deploy/docker-compose.yml` names
+one for exactly that reason — a checked-in file that silently changes what it
+runs is the drift worth avoiding, and `tests/release.rs` fails the build if that
+pin falls behind `Cargo.toml`. The rule against floating tags governs what this
+project *consumes*: no `FROM …:latest`, no `uses: …@latest`, still enforced.
 
 They are multi-platform: one manifest carrying `linux/amd64` and `linux/arm64`,
 so `docker pull` gets the right one on an Apple Silicon machine or a Pi without

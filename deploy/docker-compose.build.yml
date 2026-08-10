@@ -1,0 +1,18 @@
+# Build from source instead of pulling. An overlay, never used on its own:
+#
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.build.yml up -d --build
+#
+# **`--build` is not optional here.** Without it compose reuses whatever image
+# it built last time, so a change you just made is simply absent and the symptom
+# is identical to the code not working. It cost an investigation before it was
+# written down.
+services:
+  register:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    # Overrides the published tag from the base file. Without this line a local
+    # build would be tagged `ghcr.io/thijsvos/register:v0.4.2` and sit in the
+    # image store pretending to be the release — so `docker pull` would find it
+    # already present and skip, and you would be running your working tree
+    # believing you were running the published build.
+    image: register:source
