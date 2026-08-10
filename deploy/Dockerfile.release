@@ -1,0 +1,42 @@
+# The published image: `scratch` plus a binary the matrix already built.
+#
+# `deploy/Dockerfile` builds from source and is what `docker compose up --build`
+# uses. It cannot publish arm64, because it compiles inside the image and the
+# release runner is amd64 — building both there means a Rust release build under
+# QEMU, which is slow enough to change how often anyone cuts a release.
+#
+# So this one compiles nothing. `binaries` in release.yml already cross-builds
+# a static musl binary per platform on its own native runner; this stage is the
+# `COPY` that turns those into one multi-platform manifest. Nothing here `RUN`s,
+# so buildx assembles the foreign-architecture layer without emulating anything.
+#
+# The runtime stanza below is duplicated from `deploy/Dockerfile` on purpose —
+# two files, one contract — and `tests/release.rs` compares them line for line,
+# so the copy cannot drift from the one people actually develop against.
+
+FROM scratch
+
+# Set by buildx per platform: `amd64` or `arm64`. `binaries` stages the musl
+# builds under exactly these names so this is a lookup rather than a mapping
+# table nobody remembers to extend.
+ARG TARGETARCH
+COPY dist/register-linux-${TARGETARCH} /register
+
+# A bare `docker run` should not be root. compose overrides this with the host
+# user's own ids so the mounted vault comes out theirs; this is only the default
+# for someone who runs the image directly. Numeric because `scratch` has no
+# /etc/passwd to name anyone.
+USER 1000:1000
+VOLUME /vault
+EXPOSE 7777
+# 0.0.0.0 because a published port needs it, not because the server is meant to
+# be reachable off the machine — inside the container it is the only way the
+# published port reaches anything.
+#
+# `--allow-tokenless-network` is required because the binary now refuses that
+# combination outright: the Host header the origin guard checks is chosen by the
+# client, so on a real network a tokenless port is readable and writable by
+# anyone who can reach it. What makes it safe *here* is the compose file, which
+# publishes to 127.0.0.1 only. Widen that `ports:` line and this flag becomes a
+# lie — add `--token-file` in the same edit.
+ENTRYPOINT ["/register","serve","/vault","--host","0.0.0.0","--port","7777","--allow-tokenless-network"]

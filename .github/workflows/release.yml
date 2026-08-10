@@ -211,6 +211,24 @@ jobs:
       packages: write # push the image to ghcr
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v6
+        with: { pattern: bin-*, path: dist, merge-multiple: true }
+      # buildx names platforms `amd64`/`arm64`; the matrix names its artifacts
+      # after the download people run (`-x64`). Renamed once, here, so
+      # Dockerfile.release can say `COPY dist/register-linux-${TARGETARCH}` and
+      # a third platform is a matrix row rather than an edit in two places.
+      - name: Stage the cross-built binaries under their buildx names
+        run: |
+          set -euo pipefail
+          mv dist/register-linux-x64 dist/register-linux-amd64
+          test -f dist/register-linux-arm64
+          chmod +x dist/register-linux-amd64 dist/register-linux-arm64
+          ls -l dist
+      # The default builder cannot produce a multi-platform manifest; the
+      # container driver can. No QEMU, because Dockerfile.release only COPYs —
+      # nothing foreign is ever executed during the build.
+      - name: A builder that can emit more than one platform
+        run: docker buildx create --name multi --driver docker-container --use
       - name: Log in to ghcr
         env:
           GH_TOKEN: ${{ github.token }}
@@ -231,8 +249,15 @@ jobs:
         run: |
           set -euo pipefail
           OWNER=$(echo "$OWNER_RAW" | tr '[:upper:]' '[:lower:]')
-          docker build -f deploy/Dockerfile \
+          # One manifest, both platforms, pushed as it is built — buildx cannot
+          # load a multi-platform image into the local daemon, so `--push` is the
+          # only way it leaves the builder. §07's remote pattern is a home server
+          # behind Tailscale, which is as likely to be an arm64 Pi as an x86 box,
+          # and every Apple Silicon machine is arm64 too.
+          docker buildx build -f deploy/Dockerfile.release \
+            --platform linux/amd64,linux/arm64 \
             -t "ghcr.io/$OWNER/register:$VERSION" \
             -t "ghcr.io/$OWNER/register:${VERSION#v}" \
+            --push \
             .
-          docker push --all-tags "ghcr.io/$OWNER/register"
+          docker buildx imagetools inspect "ghcr.io/$OWNER/register:$VERSION"

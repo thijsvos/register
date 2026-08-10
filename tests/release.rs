@@ -116,6 +116,94 @@ fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
     );
 }
 
+/// Two Dockerfiles, one runtime contract.
+///
+/// `deploy/Dockerfile` builds from source — it is what `docker compose up
+/// --build` and every developer uses. `deploy/Dockerfile.release` compiles
+/// nothing and `COPY`s the binaries the matrix already cross-built, which is the
+/// only way to publish arm64 without a Rust release build under QEMU.
+///
+/// The cost of two files is that they can disagree, and the half nobody develops
+/// against is the half that ships. So the runtime stanza — who the process runs
+/// as, what it exposes, what it is told to do — is compared line for line rather
+/// than asserted twice.
+#[test]
+fn the_published_image_runs_exactly_what_the_developed_one_does() {
+    let dev = strip_comments(&read("deploy/Dockerfile"));
+    let release = strip_comments(&read("deploy/Dockerfile.release"));
+
+    // Every directive that survives into the final stage. A `USER` that drifted
+    // to root, or an ENTRYPOINT missing --allow-tokenless-network, would be a
+    // published image behaving unlike the one anyone tested.
+    for directive in ["USER ", "VOLUME ", "EXPOSE ", "ENTRYPOINT "] {
+        let from_dev = line_starting(&dev, directive);
+        let from_release = line_starting(&release, directive);
+        assert_eq!(
+            from_dev, from_release,
+            "{directive}drifted between deploy/Dockerfile and deploy/Dockerfile.release"
+        );
+    }
+
+    // And it is still `scratch` plus one binary: no toolchain, no shell.
+    assert_eq!(
+        release.matches("FROM ").count(),
+        1,
+        "the release image should be one stage — it compiles nothing"
+    );
+    assert!(release.contains("FROM scratch"));
+    // The binary comes from the matrix, named for the platform buildx asks for.
+    assert!(
+        release.contains("COPY dist/register-linux-${TARGETARCH} /register"),
+        "the release image should copy the cross-built binary for its platform"
+    );
+    assert!(
+        release.contains("ARG TARGETARCH"),
+        "TARGETARCH has to be declared or the COPY silently resolves to nothing"
+    );
+}
+
+/// The last line beginning with `prefix`, trimmed — panics if there is none, so
+/// a directive that vanished fails loudly rather than comparing None to None.
+fn line_starting(text: &str, prefix: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .find(|line| line.starts_with(prefix))
+        .unwrap_or_else(|| panic!("no line starting with {prefix:?}"))
+        .to_owned()
+}
+
+/// §07's remote pattern is a home server behind Tailscale, which is as likely to
+/// be an arm64 Pi as an x86 box — and every Apple Silicon machine is arm64.
+/// Publishing amd64 alone was a roadmap entry for exactly that reason.
+#[test]
+fn the_image_is_published_for_both_architectures() {
+    let release = strip_comments(&read(".github/workflows/release.yml"));
+
+    assert!(
+        release.contains("--platform linux/amd64,linux/arm64"),
+        "the container job should publish a multi-platform manifest"
+    );
+    assert!(
+        release.contains("-f deploy/Dockerfile.release"),
+        "the container job should build the prebuilt-binary Dockerfile"
+    );
+    // buildx cannot load a multi-platform image into the daemon, so the push has
+    // to happen as part of the build. A later `docker push` would push nothing.
+    assert!(
+        release.contains("--push"),
+        "a multi-platform build has to push from the builder"
+    );
+    // Both binaries have to be staged under the names TARGETARCH resolves to.
+    assert!(
+        release.contains("mv dist/register-linux-x64 dist/register-linux-amd64"),
+        "the x64 artifact must be renamed to the platform buildx asks for"
+    );
+    assert!(
+        release.contains("test -f dist/register-linux-arm64"),
+        "the arm64 artifact must be present, not assumed"
+    );
+}
+
 #[test]
 fn the_build_context_carries_no_licensed_font_bytes() {
     // §03: a licensed face is the user's property. A build context is a copy of
