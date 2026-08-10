@@ -19,7 +19,13 @@ within 100 ms.
 V1 ships five things to instrument grade — notes, links, tags, tasks, search —
 and stages everything else (§12). The full contract is in **`SPEC.html`**.
 
-![The editor, with the index, tag meters, outline and backlinks](docs/screenshot.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+  <img alt="The editor: index and tag meters on the left, a note with headings, wikilinks and inline code in the middle, outline and backlinks on the right, and the status bar reading GIT MAIN" src="docs/screenshot.png">
+</picture>
+
+<sup>Both themes, because §02 says dark is *tuned per surface* rather than
+inverted — the picture follows whichever one you read GitHub in.</sup>
 
 ## The thesis
 
