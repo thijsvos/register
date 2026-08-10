@@ -25,6 +25,13 @@ fn repo(tmp: &TempVault) {
         );
     };
     run(&["init", "--quiet"]);
+    // The branch is named here rather than inherited. `git init` uses whatever
+    // `init.defaultBranch` says, which is `main` on this developer's machine and
+    // `master` on the CI runner — so a test asserting the branch passed locally
+    // and failed there, on a fixture difference rather than on the code. Set
+    // through `symbolic-ref` instead of `init -b`, which git only learned in
+    // 2.28, and before the first commit so there is no branch to move.
+    run(&["symbolic-ref", "HEAD", "refs/heads/main"]);
     run(&["config", "user.email", "t@e"]);
     run(&["config", "user.name", "T"]);
     tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
@@ -35,6 +42,20 @@ fn repo(tmp: &TempVault) {
     assert!(
         tmp.path().join(".git").is_dir(),
         "no repository was created"
+    );
+    // And that the branch really is the one the tests name. Without this the
+    // `symbolic-ref` above could stop working and every branch assertion would
+    // go back to depending on whose machine it ran on.
+    let head = Command::new("git")
+        .arg("-C")
+        .arg(tmp.path())
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .expect("git");
+    assert_eq!(
+        String::from_utf8_lossy(&head.stdout).trim(),
+        "main",
+        "the fixture is not on the branch its tests assert"
     );
 }
 
