@@ -34,9 +34,24 @@ export interface Config {
   scheme: Scheme
   bodyFace: BodyFace
   scale: Scale
+  /**
+   * Folders the reader has collapsed in the INDEX (§02b Screen 1, Rev N).
+   *
+   * Full paths from the vault root, so two folders both called `archive` in
+   * different places collapse independently. Stored in the vault rather than the
+   * browser because hard rule 4 forbids state the vault cannot express — and
+   * because the folders are a property of the vault, so the choice travelling
+   * between machines is right here in a way a display scale was not.
+   */
+  collapsed: string[]
 }
 
-const DEFAULTS: Config = { scheme: 'system', bodyFace: 'default', scale: 'auto' }
+const DEFAULTS: Config = {
+  scheme: 'system',
+  bodyFace: 'default',
+  scale: 'auto',
+  collapsed: [],
+}
 
 /**
  * The family §03 registers a licensed face under.
@@ -54,6 +69,7 @@ class Settings {
   scheme = $state<Scheme>(DEFAULTS.scheme)
   bodyFace = $state<BodyFace>(DEFAULTS.bodyFace)
   scale = $state<Scale>(DEFAULTS.scale)
+  collapsed = $state<string[]>([])
   font = $state<FontState>('none')
   /** One line of instrument-voiced trouble, or nothing. */
   notice = $state<string | null>(null)
@@ -77,6 +93,7 @@ class Settings {
       this.scheme = stored.scheme
       this.bodyFace = stored.bodyFace
       this.scale = stored.scale
+      this.collapsed = stored.collapsed
     } catch {
       // Defaults already hold.
     }
@@ -104,6 +121,26 @@ class Settings {
   async setBodyFace(face: BodyFace): Promise<void> {
     this.bodyFace = face
     this.apply()
+    await this.#save()
+  }
+
+  /** Whether the reader has collapsed this folder. */
+  isCollapsed(path: string): boolean {
+    return this.collapsed.includes(path)
+  }
+
+  /**
+   * Fold a folder open or shut.
+   *
+   * Deliberately not called when a note is opened inside a collapsed folder:
+   * the sidebar reveals the open note's ancestors at render time instead, so
+   * what is stored stays what the reader chose rather than drifting every time
+   * ⌘K lands somewhere.
+   */
+  async toggleFolder(path: string): Promise<void> {
+    this.collapsed = this.isCollapsed(path)
+      ? this.collapsed.filter((folder) => folder !== path)
+      : [...this.collapsed, path]
     await this.#save()
   }
 
@@ -192,6 +229,7 @@ class Settings {
         scheme: this.scheme,
         bodyFace: this.bodyFace,
         scale: this.scale,
+        collapsed: this.collapsed,
       })
       this.notice = null
     } catch (error) {
@@ -209,6 +247,7 @@ export function asConfig(value: unknown): Config {
     scheme: isScheme(record.scheme) ? record.scheme : DEFAULTS.scheme,
     bodyFace: isBodyFace(record.bodyFace) ? record.bodyFace : DEFAULTS.bodyFace,
     scale: isScale(record.scale) ? record.scale : DEFAULTS.scale,
+    collapsed: asFolders(record.collapsed),
   }
 }
 
@@ -230,6 +269,20 @@ function isBodyFace(value: unknown): value is BodyFace {
  */
 function isScale(value: unknown): value is Scale {
   return value === 'auto' || value === 1 || value === 2
+}
+
+/**
+ * A list of folder paths from a file anyone can hand-edit.
+ *
+ * Anything that is not a non-empty string is dropped rather than the whole list
+ * being discarded: one bad entry should cost one folder's fold state, not the
+ * reader's whole tree.
+ */
+function asFolders(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter(
+    (entry): entry is string => typeof entry === 'string' && entry !== '',
+  )
 }
 
 function describe(error: unknown): string {

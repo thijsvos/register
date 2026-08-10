@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
-<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev M</title>
+<title>RG-SPEC-001 · REGISTER RG-1 Build Specification · Rev N</title>
 <script>/* boot into the OS scheme before first paint */
 if (matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");</script>
 <style>
@@ -153,14 +153,14 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="mast">
   <div class="mast-top">
     <span class="co">Register Project · Engineering Document</span>
-    <span class="no">RG-SPEC-001 · REV M <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
+    <span class="no">RG-SPEC-001 · REV N <button class="theme-key" onclick="document.documentElement.classList.toggle('dark')">INV</button></span>
   </div>
   <div class="mast-mid">
     <h1>Register RG-1<br>Build Specification</h1>
     <div class="sub">File-native second brain · Agent-compatible by construction · Open source</div>
   </div>
   <div class="mast-grid">
-    <div><label>Issued</label><span>2026-08-10 · Rev M</span></div>
+    <div><label>Issued</label><span>2026-08-10 · Rev N</span></div>
     <div><label>Status</label><span class="st">◉ Approved for build</span></div>
     <div><label>License</label><span>MIT (code) · OFL (fonts)</span></div>
     <div><label>Builder</label><span>Claude Code, supervised</span></div>
@@ -192,6 +192,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 <div class="callout warn"><span class="chip">Rev L</span><div><strong>Changes from Rev K — §04's API table, so the GIT field can speak git. The note format is untouched.</strong> The field read <code>CLEAN</code> or <code>DIRTY</code>, and neither is a word git prints: <code>--dirty</code> is a flag, not an output. Worse, the pair could not distinguish a vault with one untracked note from a vault mid-rebase — both read DIRTY — while the data to tell them apart was already being fetched and discarded, since <code>status()</code> ran <code>git status --porcelain</code> and kept only whether the output was empty. So <code>GET /api/tree</code>'s <code>git</code> envelope grows from <code>{clean, ahead}</code> to <code>{branch, clean, staged, modified, untracked, ahead}</code>, and the field is drawn the way <code>git status --short</code> and every shell prompt draw it: the branch, then <code>+</code> staged, <code>~</code> modified, <code>?</code> untracked, <code>↑</code> ahead — a mark only when its count is above zero, so a clean vault on <code>main</code> reads <code>MAIN</code>. <code>clean</code> stays in the envelope and stays derived from the raw output rather than from the counts, so the two cannot start disagreeing silently. This rides the existing endpoint and adds no ninth, exactly as Rev H's <code>git</code> did; it is additive, so a client that reads only <code>clean</code> and <code>ahead</code> is unaffected, and <strong>no file in the vault changes shape</strong>. Also recorded here: the field could never say anything at all from a container until now — the image was <code>FROM scratch</code> and the state is derived by shelling out to <code>git</code>, which was documented in the status bar's own source and nowhere else. <code>deploy/Dockerfile</code> carries git; the published image stays <code>scratch</code>, because it <code>RUN</code>s nothing and that is what lets it build for both architectures without emulation.</div></div>
 
 <div class="callout warn"><span class="chip">Rev M</span><div><strong>Changes from Rev L — §04 says who scaffolds a vault, because it is no longer only <code>init</code>. The note format is untouched and every scaffolded file is byte-identical.</strong> Pointing the app at a folder is now the whole of setup: <code>serve</code> scaffolds when the target holds no vault, so <code>docker run -v ~/vault:/vault</code> is a complete install rather than the first of two steps nothing on screen mentioned. Before this it started cleanly on an empty folder and served a vault with no agent contract, no daily stencil and no inbox — <code>G D</code> and NEW FROM TEMPLATE pointing at nothing, the §04 premise quietly absent, on a screen that looked correct — and on a folder that did not exist it failed with <code>no such note</code>, which tells a beginner nothing. Both were the same missing instruction. "Holds no vault" means no <code>.register/</code> and no markdown at any depth, so a folder carrying <code>.git</code> or <code>.DS_Store</code> is still scaffolded while a folder carrying somebody's writing is never touched; <code>init</code> never overwrites, so the operation cannot damage a vault even if that test were wrong. It says which files it wrote, because a command that writes files should. <code>register init</code> is unchanged and still the way to scaffold with <code>--git</code>.</div></div>
+
+<div class="callout warn"><span class="chip">Rev N</span><div><strong>Changes from Rev M — §02b Screen 1's INDEX becomes a folder tree. No format change; the note format and the API are untouched.</strong> The pane drew one flat list sorted by path, which reads as a numbered register only while every note is one level down. Nesting has always worked underneath — measured, a note three folders deep is indexed, searched, tag-counted and resolves as a backlink, and <code>notes/archive/018-nested.md</code> has been in the frozen §09 fixture since P14 — so a vault with structure looked like a vault with a shuffled list, and at a thousand notes a flat list is a scroll rather than an index. <strong>It mirrors the filesystem with no special cases</strong>: <code>notes/</code> is a folder like any other, folders sort before notes and each alphabetically, and a chain of folders holding a single folder compacts to one row, because indentation is the scarcest thing in a 250px rail and a level offering no choice is not worth spending it on. A folder is a nav row and takes the §02b state matrix unchanged — hover wash, inverse when active, inset dashed focus ring, <code>↑↓</code>/<code>j–k</code> traversal — with <code>↵</code> folding rather than opening. <strong>Membership does not change</strong>: <code>isListed</code> still governs, so the agent contract, the stencils and the journal stay out. Folders draw what the index contains; they are not a decision to change what it contains. Fold state is stored in <code>.register/config.json</code> as <code>collapsed</code>, a list of full paths — the vault can express it, so hard rule 4 is satisfied, and unlike a display scale it <em>should</em> travel with the vault, because the folders do. The open note is revealed at render time rather than by un-collapsing, so what is stored stays what the reader chose instead of drifting every time ⌘K lands inside a folded folder.</div></div>
 
 <!-- ═══════════════ TOC ═══════════════ -->
 <div class="toc">
@@ -327,10 +329,12 @@ html.dark {
 │ ■ REGISTER   INDEX / 003 / TERMINAL-AESTHETICS   clock INV ⌘K│
 ├ side 250 ──┬ editor (measure 68ch) ────────┬ inspector 268┤
 │ INDEX [6]  │ NOTE · REF 003 · REV 07          │ PROPERTIES   │
-│ 003 …  act │ Terminal aesthetics  (sentence)  │ REF 003      │
-│ 004 …      │ ┌created┬modified┬words┬status┐  │ OUTLINE      │
-│ TAGS       │ body 13px, [[wikilinks]] live   │ BACKLINKS[n] │
-│ #design ▓▓ │ - [ ] tasks toggle in place     │ (all derived)│
+│ ▾ NOTES  6 │ Terminal aesthetics  (sentence)  │ REF 003      │
+│  ▸ ARCH  2 │ ┌created┬modified┬words┬status┐  │ OUTLINE      │
+│  003 … act │ body 13px, [[wikilinks]] live   │ BACKLINKS[n] │
+│  004 …     │ - [ ] tasks toggle in place     │ (all derived)│
+│ TAGS       │                                  │              │
+│ #design ▓▓ │                                  │              │
 ├ footer 30 ─┴───────────────────────────┴─────────────┤
 │ ● WATCHER LIVE · VAULT ~/vault · RENDER 0.7ms · n files · GIT │
 └───────────────────────────────────────────────┘</pre></div>
@@ -1066,7 +1070,7 @@ Tailscale pattern from §07. No accounts, no telemetry. Commit
 <p class="dim">Execution order: read §01–§07 once, then run §08 phase by phase. The vault format is the contract; the budgets are the law; the agent loop is the demo; §12 is the future — staged, not banned.</p>
 
 <div class="barcode"></div>
-<div class="eor">RG-SPEC-001 · REV M · End of record</div>
+<div class="eor">RG-SPEC-001 · REV N · End of record</div>
 
 </div>
 

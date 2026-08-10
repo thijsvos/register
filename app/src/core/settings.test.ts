@@ -18,10 +18,18 @@ import { asConfig } from './settings.svelte'
  */
 describe('asConfig', () => {
   it('reads a config the settings pane wrote', () => {
-    expect(asConfig({ scheme: 'dark', bodyFace: 'teletype', scale: 2 })).toEqual({
+    expect(
+      asConfig({
+        scheme: 'dark',
+        bodyFace: 'teletype',
+        scale: 2,
+        collapsed: ['notes/archive'],
+      }),
+    ).toEqual({
       scheme: 'dark',
       bodyFace: 'teletype',
       scale: 2,
+      collapsed: ['notes/archive'],
     })
   })
 
@@ -31,6 +39,7 @@ describe('asConfig', () => {
       scheme: 'system',
       bodyFace: 'default',
       scale: 'auto',
+      collapsed: [],
     })
   })
 
@@ -44,6 +53,7 @@ describe('asConfig', () => {
       scheme: 'system',
       bodyFace: 'default',
       scale: 'auto',
+      collapsed: [],
     })
   })
 
@@ -54,6 +64,7 @@ describe('asConfig', () => {
       scheme: 'system',
       bodyFace: 'default',
       scale: 'auto',
+      collapsed: [],
     })
   })
 
@@ -62,6 +73,7 @@ describe('asConfig', () => {
       scheme: 'light',
       bodyFace: 'default',
       scale: 'auto',
+      collapsed: [],
     })
   })
 
@@ -70,6 +82,7 @@ describe('asConfig', () => {
       scheme: 'dark',
       bodyFace: 'default',
       scale: 'auto',
+      collapsed: [],
     })
   })
 
@@ -112,6 +125,41 @@ describe('asConfig', () => {
         scheme: 'dark',
         bodyFace: 'teletype',
         scale: 'auto',
+        collapsed: [],
+      })
+    })
+  })
+
+  describe('collapsed folders (§02b Screen 1, Rev N)', () => {
+    it('round-trips the folders the reader folded shut', () => {
+      expect(
+        asConfig({ collapsed: ['notes/archive', 'areas/health'] }).collapsed,
+      ).toEqual(['notes/archive', 'areas/health'])
+    })
+
+    it.each([
+      ['a string', 'notes/archive'],
+      ['an object', { 'notes/archive': true }],
+      ['null', null],
+      ['a number', 3],
+    ])('falls back to nothing folded for %s', (_label, value) => {
+      expect(asConfig({ collapsed: value }).collapsed).toEqual([])
+    })
+
+    it('drops the entries it cannot read rather than the whole list', () => {
+      // One hand-edited line should cost one folder's fold state, not the
+      // reader's whole tree.
+      expect(
+        asConfig({ collapsed: ['notes/archive', 7, '', null, 'areas'] }).collapsed,
+      ).toEqual(['notes/archive', 'areas'])
+    })
+
+    it('does not lose the other settings when the list is unreadable', () => {
+      expect(asConfig({ scheme: 'dark', scale: 2, collapsed: 'oops' })).toEqual({
+        scheme: 'dark',
+        bodyFace: 'default',
+        scale: 2,
+        collapsed: [],
       })
     })
   })

@@ -232,5 +232,10 @@ test('choosing a scale does not discard the other settings', async ({ page }) =>
   await expect.poll(() => storedScale(page), { timeout: 3000 }).toBe(1)
 
   const config = await (await page.request.get(`${server.url}/api/config`)).json()
-  expect(config).toEqual({ scheme: 'dark', bodyFace: 'teletype', scale: 1 })
+  expect(config).toEqual({
+    scheme: 'dark',
+    bodyFace: 'teletype',
+    scale: 1,
+    collapsed: [],
+  })
 })

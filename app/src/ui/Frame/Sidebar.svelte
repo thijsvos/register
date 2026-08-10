@@ -1,7 +1,9 @@
 <script lang="ts">
 import { basename, isConflictCopy, isListed } from '../../core/paths'
+import { settings } from '../../core/settings.svelte'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
+import { ancestors, folderTree, type Node } from '../../core/tree'
 import { go, traverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
@@ -9,8 +11,16 @@ import PaneLabel from './PaneLabel.svelte'
 // Your notes, not the vault's own furniture. `CLAUDE.md` is the agent's brief
 // and `templates/` are stencils: both are still in ⌘K, and a stencil is also a
 // row under NEW FROM TEMPLATE, so this hides them from a list rather than from
-// the app.
+// the app. The journal is out for the same reason it always was — one log per
+// day forever — and folders do not change that, they only draw what is here.
 let notes = $derived(vault.tree.filter((entry) => isListed(entry.path)))
+let tree = $derived(folderTree(notes))
+
+// The open note is always visible, whatever is folded shut. Computed here
+// rather than by un-collapsing on open, so what is stored stays what the reader
+// chose instead of drifting every time ⌘K lands inside a folded folder.
+let revealed = $derived(new Set(vault.openPath === null ? [] : ancestors(vault.openPath)))
+const shown = (folder: string) => !settings.isCollapsed(folder) || revealed.has(folder)
 let tags = $derived(tagCounts(vault.tree))
 // The meter is relative to the commonest tag, not to the note count: a vault
 // where nothing is tagged twice should read as a flat row of equals, not as
@@ -25,31 +35,7 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
     <PaneEmpty text="No notes. [N] creates the first one." />
   {:else}
     <nav>
-      {#each notes as entry (entry.path)}
-        {@const words = vault.words(entry.path)}
-        {@const artefact = isConflictCopy(entry.path)}
-        <!-- §04: a conflict copy is "an artefact to merge, not a note". It
-             carries the original's ref and title verbatim, so drawn as a note it
-             is indistinguishable from the note it came from — which is how one
-             sat in this list announced by nothing. It reads as what it is, and
-             it opens §02b Screen 4 rather than the editor. -->
-        <button
-          class="row"
-          class:active={entry.path === vault.openPath}
-          aria-current={entry.path === vault.openPath ? 'page' : undefined}
-          title={artefact ? entry.path : undefined}
-          onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
-          onkeydown={traverse}
-        >
-          <span class="ref">{artefact ? '—' : (entry.ref ?? '—')}</span>
-          <span class="name">{artefact ? basename(entry.path) : (entry.title ?? entry.path)}</span>
-          {#if artefact}
-            <span class="unresolved">Unresolved</span>
-          {:else}
-            <span class="count">{words ?? '—'}</span>
-          {/if}
-        </button>
-      {/each}
+      {@render rows(tree, 0)}
     </nav>
   {/if}
 
@@ -71,6 +57,61 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
     </ul>
   {/if}
 </aside>
+
+<!--
+  One snippet, recursing on itself, because a tree is one. Depth is passed
+  rather than measured so the indent is arithmetic on a token instead of a
+  nested box model: a 250px rail cannot afford a margin per level.
+-->
+{#snippet rows(nodes: Node[], depth: number)}
+  {#each nodes as node (node.path)}
+    {#if node.kind === 'folder'}
+      {@const open = shown(node.path)}
+      <button
+        class="row folder"
+        aria-expanded={open}
+        style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
+        onclick={() => settings.toggleFolder(node.path)}
+        onkeydown={traverse}
+      >
+        <!-- Decorative: the row's own aria-expanded is what a screen reader
+             reads, so the arrow must not be announced twice. -->
+        <span class="twist" aria-hidden="true">{open ? '▾' : '▸'}</span>
+        <span class="name">{node.label}</span>
+        <span class="count">{node.count}</span>
+      </button>
+      {#if open}
+        {@render rows(node.children, depth + 1)}
+      {/if}
+    {:else}
+      {@const entry = node.entry}
+      {@const words = vault.words(entry.path)}
+      {@const artefact = isConflictCopy(entry.path)}
+      <!-- §04: a conflict copy is "an artefact to merge, not a note". It
+           carries the original's ref and title verbatim, so drawn as a note it
+           is indistinguishable from the note it came from — which is how one
+           sat in this list announced by nothing. It reads as what it is, and
+           it opens §02b Screen 4 rather than the editor. -->
+      <button
+        class="row"
+        class:active={entry.path === vault.openPath}
+        aria-current={entry.path === vault.openPath ? 'page' : undefined}
+        title={artefact ? entry.path : undefined}
+        style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
+        onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
+        onkeydown={traverse}
+      >
+        <span class="ref">{artefact ? '—' : (entry.ref ?? '—')}</span>
+        <span class="name">{artefact ? basename(entry.path) : (entry.title ?? entry.path)}</span>
+        {#if artefact}
+          <span class="unresolved">Unresolved</span>
+        {:else}
+          <span class="count">{words ?? '—'}</span>
+        {/if}
+      </button>
+    {/if}
+  {/each}
+{/snippet}
 
 <style>
 .side {
@@ -110,6 +151,23 @@ nav {
 .row.active:hover {
   background: var(--sel-bg);
   color: var(--sel-fg);
+}
+
+/* A folder is a nav row like any other — same hover, same focus ring, same
+   inverse when it is the one you are on — but it has no ref, so the twist
+   occupies that column and keeps every title on the same vertical line.
+   Left-aligned, not centred: the ref beside it is, and a twist floating in the
+   middle of its column put every folder's left edge out of register with the
+   notes underneath it — visible as a jagged margin down the whole pane, in a
+   product named after registration marks. */
+.folder .twist {
+  color: var(--dim);
+  font-size: var(--text-ui);
+}
+.folder .name {
+  text-transform: uppercase;
+  letter-spacing: var(--track-ui);
+  font-size: var(--text-ui);
 }
 
 .ref {

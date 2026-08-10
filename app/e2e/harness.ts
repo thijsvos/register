@@ -1,7 +1,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /**
  * A real `register serve` over a real vault, for the duration of one spec file.
@@ -26,7 +26,12 @@ export function vaultWith(notes: Record<string, string>): string {
     mkdirSync(join(root, dir), { recursive: true })
   }
   for (const [rel, body] of Object.entries(notes)) {
-    writeFileSync(join(root, rel), body)
+    // The parent, not just the four §04 folders above: a vault may nest, and a
+    // fixture that could only write one level down could not test the thing
+    // nesting is for.
+    const file = join(root, rel)
+    mkdirSync(dirname(file), { recursive: true })
+    writeFileSync(file, body)
   }
   return root
 }

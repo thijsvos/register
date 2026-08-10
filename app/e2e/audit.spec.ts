@@ -144,10 +144,20 @@ test('a note opens from the index without the mouse or a single Tab', async ({
     page.getByRole('complementary', { name: 'Index' }).getByRole('button').first(),
   ).toBeVisible()
 
+  // Since §02b Rev N the index is a tree, and `notes/` is a row like any other
+  // folder — so entering the index lands on that folder and the route to a note
+  // is one key longer than it was. Written out rather than looped, because the
+  // extra keystroke is the cost of drawing the structure and should be visible
+  // here if anyone ever wants to argue about it.
+  await page.keyboard.press('j')
+  await expect(
+    page.getByRole('complementary', { name: 'Index' }).getByRole('button').first(),
+  ).toBeFocused()
+
   await page.keyboard.press('j')
   await page.keyboard.press('Enter')
-  // Enter on a row opens it and hands the caret straight to the note, so the
-  // whole route is j · Enter · type.
+  // Enter on a note row opens it and hands the caret straight to the note, so
+  // the whole route is j · j · Enter · type, and never the mouse.
   await expect(page.locator('.cm-content')).toBeFocused()
 })
 
