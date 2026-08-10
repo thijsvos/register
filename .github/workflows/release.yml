@@ -241,7 +241,7 @@ jobs:
           ACTOR: ${{ github.actor }}
         run: |
           echo "$GH_TOKEN" | docker login ghcr.io -u "$ACTOR" --password-stdin
-      # Three tags: `v0.4.2`, `0.4.2` and `latest`.
+      # Three tags: the tag itself, the tag without its `v`, and `latest`.
       #
       # `latest` was deliberately absent until now, on the reading that rule 11
       # bans it outright. That reading was too broad and the maintainer has

@@ -11,7 +11,7 @@ services:
   register:
     build: { context: .., dockerfile: deploy/Dockerfile }
     # Overrides the published tag from the base file. Without this line a local
-    # build would be tagged `ghcr.io/thijsvos/register:v0.4.2` and sit in the
+    # build would be tagged `ghcr.io/thijsvos/register:v0.4.3` and sit in the
     # image store pretending to be the release — so `docker pull` would find it
     # already present and skip, and you would be running your working tree
     # believing you were running the published build.

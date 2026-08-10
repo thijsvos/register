@@ -63,7 +63,7 @@ runs the promise as written on any machine.
 | Budget | Limit | Measured | Enforced by |
 |---|---|---|---|
 | Release binary | ≤ 10 MB | 3.04 MB macOS arm64 · 3.65 MB linux x64, the largest | `release.yml` per platform |
-| Shell JS (initial) | ≤ 60 kB gz | 37.45 kB | `size-limit` |
+| Shell JS (initial) | ≤ 60 kB gz | 41.57 kB | `size-limit` |
 | Editor chunk (lazy) | ≤ 150 kB gz | 101.36 kB | `size-limit` |
 | Idle RAM, 1k notes | ≤ 50 MB | asserted | Playwright + `ps` |
 | Agent edit → visible | ≤ 100 ms | asserted | Playwright, real file write |
@@ -230,7 +230,7 @@ the machine it runs on and nowhere else. Three things before you widen it:
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
-Images are published to `ghcr.io/thijsvos/register` on tags: `v0.4.2`, `0.4.2`
+Images are published to `ghcr.io/thijsvos/register` on tags: `v0.4.3`, `0.4.3`
 and `latest`.
 
 `latest` is there so nobody has to find a version string to try the product.
