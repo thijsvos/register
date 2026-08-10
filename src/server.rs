@@ -322,6 +322,9 @@ pub fn router(state: AppState) -> Router {
             "/api/note/{*path}",
             get(read_note).put(write_note).delete(delete_note),
         )
+        // GET only. Nothing writes a non-note through the API, so the vault
+        // cannot acquire a file its own tree will never show.
+        .route("/api/file/{*path}", get(read_file))
         .route("/api/events", any(events))
         .route("/api/reveal", post(reveal))
         // §04's table listed six endpoints; §08 P9 asks for two more, because
@@ -384,6 +387,56 @@ async fn read_note(State(state): State<AppState>, Path(path): Path<String>) -> R
                 ),
             ],
             body,
+        )
+            .into_response(),
+        Err(response) => response,
+    }
+}
+
+/// A file the vault holds that is not a note — the images and PDFs a note
+/// references (§04 Rev O).
+///
+/// Read-only on purpose. The write surface stays `.md`-only, so `resolve`'s one
+/// definition of a note still governs everything that can create a file, and
+/// this endpoint cannot put anything in the vault that the tree will not show.
+///
+/// Conditional first: a `stat` decides the 304 before any bytes are allocated.
+/// `ETag` rather than the font endpoint's `no-store` — these are the user's own
+/// files in their own browser, and re-sending a 4 MB diagram on every navigation
+/// is the cost worth avoiding. The font endpoint's reason for `no-store` was
+/// that the bytes are licensed property; that does not apply here.
+async fn read_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let if_none_match = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.trim_matches('"').to_owned());
+
+    if let Some(wanted) = if_none_match {
+        let vault = state.vault.clone();
+        let known = path.clone();
+        if let Ok(current) = blocking(move || vault.media_etag(&known)).await
+            && current == wanted
+        {
+            return (StatusCode::NOT_MODIFIED, [(header::ETAG, quoted(&current))]).into_response();
+        }
+    }
+
+    let vault = state.vault.clone();
+    match blocking(move || vault.read_media(&path)).await {
+        Ok((bytes, format, etag)) => (
+            StatusCode::OK,
+            [
+                (header::ETAG, quoted(&etag)),
+                // A `&'static str` from the format table, never a caller string.
+                // `nosniff` is set on every response, so this has to be right or
+                // the browser renders nothing rather than guessing.
+                (header::CONTENT_TYPE, format.media_type.to_owned()),
+            ],
+            bytes,
         )
             .into_response(),
         Err(response) => response,
@@ -901,6 +954,19 @@ fn error_response(error: vault::Error) -> Response {
         vault::Error::UnsupportedFont => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "not a woff2, woff, otf or ttf font\n",
+        )
+            .into_response(),
+        // The same 415 the font endpoint gives, for the same reason: the bytes
+        // are not a container this app will hand to a browser. Says which ones
+        // it will, because "unsupported" alone sends the reader to the source.
+        vault::Error::UnsupportedMedia => (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "not a png, jpeg, gif, webp, avif or pdf\n",
+        )
+            .into_response(),
+        vault::Error::TooLarge => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "file is larger than this app will serve\n",
         )
             .into_response(),
         vault::Error::Io(error) => {

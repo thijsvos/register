@@ -1215,3 +1215,118 @@ fn the_policy_names_this_origins_socket_and_nothing_else() {
     // No Host at all: fall back to `'self'` alone rather than to a broken policy.
     assert_eq!(socket_origin(&HeaderMap::new()), "");
 }
+
+/// `GET /api/file` over the wire: the status codes and headers a browser acts
+/// on, which the vault-level tests cannot see.
+mod file_endpoint {
+    use super::*;
+
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+
+    fn put_bytes(tmp: &TempVault, rel: &str, bytes: &[u8]) {
+        let path = tmp.path().join(rel);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
+        std::fs::write(path, bytes).expect("write bytes");
+    }
+
+    #[tokio::test]
+    async fn serves_an_image_with_its_sniffed_type_and_an_etag() {
+        let tmp = TempVault::new();
+        put_bytes(&tmp, "notes/diagram.png", PNG);
+        let addr = start(&tmp).await;
+
+        let reply = request(addr, "GET", "/api/file/notes/diagram.png", &[], "").await;
+        assert_eq!(reply.status, 200);
+        // `nosniff` is on every response, so this header is the whole difference
+        // between rendering and not rendering.
+        assert_eq!(
+            reply.headers.get("content-type").map(String::as_str),
+            Some("image/png")
+        );
+        let etag = reply.headers.get("etag").cloned().expect("etag");
+        assert!(
+            etag.starts_with('"') && etag.ends_with('"'),
+            "{etag} is not quoted"
+        );
+
+        // And the conditional request the etag exists for.
+        let again = request(
+            addr,
+            "GET",
+            "/api/file/notes/diagram.png",
+            &[("If-None-Match", etag.as_str())],
+            "",
+        )
+        .await;
+        assert_eq!(
+            again.status, 304,
+            "a matching etag should not resend the file"
+        );
+        assert!(again.body.is_empty(), "304 must carry no body");
+    }
+
+    #[tokio::test]
+    async fn a_note_is_not_a_file_this_endpoint_will_serve() {
+        // The mirror of `only_markdown_is_a_note`: the two halves of the API
+        // refuse each other's content, so neither can be used to reach the
+        // other's rules.
+        let tmp = TempVault::new();
+        tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
+        put_bytes(
+            &tmp,
+            "notes/trick.png",
+            b"---\nref: 004\n---\nstill markdown\n",
+        );
+        let addr = start(&tmp).await;
+
+        for path in ["/api/file/notes/003-a.md", "/api/file/notes/trick.png"] {
+            let reply = request(addr, "GET", path, &[], "").await;
+            assert_eq!(reply.status, 415, "{path} answered {}", reply.status);
+        }
+    }
+
+    #[tokio::test]
+    async fn path_traversal_is_refused_here_too() {
+        let tmp = TempVault::new();
+        let addr = start(&tmp).await;
+
+        for hostile in [
+            "/api/file/../../../etc/passwd",
+            "/api/file/%2e%2e/%2e%2e/etc/passwd",
+            "/api/file/.register/config.json",
+            "/api/file/.register/fonts/licensed.woff2",
+        ] {
+            let reply = request(addr, "GET", hostile, &[], "").await;
+            assert!(
+                reply.status == 400 || reply.status == 404,
+                "{hostile} answered {}",
+                reply.status
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_is_read_only() {
+        // Nothing may create a file the tree will never show. If this ever
+        // answers 200, `resolve`'s one definition of a note has been bypassed.
+        let tmp = TempVault::new();
+        put_bytes(&tmp, "notes/diagram.png", PNG);
+        let addr = start(&tmp).await;
+
+        // No body: axum answers 405 and closes without consuming one, which
+        // resets the connection under the test client rather than failing the
+        // assertion — a broken probe reading as a broken server.
+        for method in ["PUT", "DELETE", "POST"] {
+            let reply = request(addr, method, "/api/file/notes/diagram.png", &[], "").await;
+            assert_eq!(reply.status, 405, "{method} /api/file should not be routed");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_404() {
+        let tmp = TempVault::new();
+        let addr = start(&tmp).await;
+        let reply = request(addr, "GET", "/api/file/notes/absent.png", &[], "").await;
+        assert_eq!(reply.status, 404);
+    }
+}

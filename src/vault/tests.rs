@@ -784,3 +784,209 @@ fn a_symlink_cannot_smuggle_a_parent_directory_out_of_the_vault() {
         outside.display()
     );
 }
+
+/// `GET /api/file` reuses every guard `read` has except the `.md` rule.
+///
+/// The whole risk of the endpoint is that it declines *one* check; these pin
+/// that it declined only that one. Written against the same hostile paths the
+/// note API is tested with, because a guard that protects one caller and not the
+/// other is the failure this split was designed to avoid.
+mod media {
+    use super::*;
+
+    /// The smallest valid PNG: an 8-byte signature is all `media_format` reads.
+    const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+    const PDF: &[u8] = b"%PDF-1.7\n%\xE2\xE3\xCF\xD3\n";
+
+    fn put_bytes(tmp: &TempVault, rel: &str, bytes: &[u8]) {
+        let path = tmp.path().join(rel);
+        fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
+        fs::write(path, bytes).expect("write bytes");
+    }
+
+    #[test]
+    fn serves_an_image_that_the_note_api_will_not() {
+        let tmp = TempVault::new();
+        put_bytes(&tmp, "notes/diagram.png", PNG);
+        let vault = tmp.open();
+
+        // The note API still refuses it — that rule did not move.
+        assert!(matches!(
+            vault.read("notes/diagram.png"),
+            Err(Error::InvalidPath)
+        ));
+        assert!(!vault.is_visible(&tmp.path().join("notes/diagram.png")));
+
+        let (bytes, format, etag) = vault.read_media("notes/diagram.png").expect("media");
+        assert_eq!(bytes, PNG);
+        assert_eq!(format.media_type, "image/png");
+        assert!(!etag.is_empty());
+    }
+
+    #[test]
+    fn refuses_every_path_the_note_api_refuses() {
+        let tmp = TempVault::new();
+        let vault = tmp.open();
+
+        for hostile in [
+            "../secrets.png",
+            "notes/../../secrets.png",
+            "/etc/passwd",
+            "notes/../.register/config.json",
+            "..",
+            "",
+            "/",
+            "notes\\..\\secrets.png",
+        ] {
+            assert!(
+                matches!(
+                    vault.read_media(hostile),
+                    Err(Error::InvalidPath | Error::NotFound)
+                ),
+                "{hostile} should not resolve through /api/file"
+            );
+        }
+    }
+
+    #[test]
+    fn the_app_directory_stays_unreachable_even_holding_a_real_image() {
+        // Asserted against a file that EXISTS, and against `InvalidPath`
+        // specifically. The first version of this test listed `.register/…`
+        // among the traversal paths and accepted `NotFound` — which a temp
+        // vault answers for anything under `.register/` whether the guard holds
+        // or not. Deleting the dot-segment guard passed the whole suite.
+        let tmp = TempVault::new();
+        put_bytes(&tmp, ".register/fonts/decoy.png", PNG);
+        put_bytes(&tmp, ".register/config.json", b"{}");
+        let vault = tmp.open();
+
+        for hidden in [".register/fonts/decoy.png", ".register/config.json"] {
+            assert!(
+                matches!(vault.read_media(hidden), Err(Error::InvalidPath)),
+                "{hidden} must be refused as a path, not merely missing"
+            );
+        }
+        // The control: the same bytes under an ordinary name are served, so the
+        // refusal above is the dot-segment rule and not the allowlist.
+        put_bytes(&tmp, "notes/decoy.png", PNG);
+        assert!(vault.read_media("notes/decoy.png").is_ok());
+    }
+
+    #[test]
+    fn a_symlink_cannot_serve_a_file_from_outside_the_vault() {
+        let tmp = TempVault::new();
+        let outside = tmp.path().parent().expect("parent").join("outside.png");
+        fs::write(&outside, PNG).expect("write outside");
+
+        let link = tmp.path().join("notes/escape.png");
+        fs::create_dir_all(link.parent().expect("parent")).expect("create dir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).expect("symlink");
+
+        let vault = tmp.open();
+        assert!(
+            matches!(
+                vault.read_media("notes/escape.png"),
+                Err(Error::InvalidPath)
+            ),
+            "a symlink out of the vault must be refused, not followed"
+        );
+        // The positive control: those bytes really are readable, so the refusal
+        // above is the guard rather than a missing file.
+        assert_eq!(fs::read(&outside).expect("read outside"), PNG);
+    }
+
+    #[test]
+    fn the_type_comes_from_the_bytes_and_never_from_the_name() {
+        let tmp = TempVault::new();
+        // A note renamed to look like an image, which is the case an
+        // extension-based server would happily hand over as image/png.
+        put_bytes(
+            &tmp,
+            "notes/trick.png",
+            b"---\nref: 003\n---\n# not an image\n",
+        );
+        put_bytes(
+            &tmp,
+            "notes/page.png",
+            b"<!doctype html><script>alert(1)</script>",
+        );
+        // And the mirror: a real PDF wearing the wrong extension is still served
+        // as a PDF, because nothing here reads the extension at all.
+        put_bytes(&tmp, "notes/report.txt", PDF);
+        let vault = tmp.open();
+
+        assert!(matches!(
+            vault.read_media("notes/trick.png"),
+            Err(Error::UnsupportedMedia)
+        ));
+        assert!(matches!(
+            vault.read_media("notes/page.png"),
+            Err(Error::UnsupportedMedia)
+        ));
+        let (_, format, _) = vault.read_media("notes/report.txt").expect("media");
+        assert_eq!(format.media_type, "application/pdf");
+    }
+
+    #[test]
+    fn every_listed_format_is_recognised_by_its_own_magic() {
+        // A table test rather than one case, because the offset-based entries
+        // (WebP, AVIF) use a different matcher from the prefix ones and a
+        // single PNG case would exercise only half of it.
+        let webp = b"RIFF\x00\x00\x00\x00WEBPVP8 ";
+        let avif = b"\x00\x00\x00\x20ftypavif\x00\x00\x00\x00";
+        for (bytes, wanted) in [
+            (PNG, "image/png"),
+            (&[0xFF, 0xD8, 0xFF, 0xE0][..], "image/jpeg"),
+            (b"GIF87a\x00\x00", "image/gif"),
+            (b"GIF89a\x00\x00", "image/gif"),
+            (&webp[..], "image/webp"),
+            (&avif[..], "image/avif"),
+            (PDF, "application/pdf"),
+        ] {
+            let found = media_format(bytes).unwrap_or_else(|| panic!("{wanted} not recognised"));
+            assert_eq!(found.media_type, wanted);
+        }
+
+        // SVG is deliberately absent (see MEDIA_FORMATS), and so is anything
+        // whose first bytes happen to look like text.
+        assert!(media_format(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>").is_none());
+        assert!(media_format(b"").is_none());
+        assert!(
+            media_format(b"RIFF\x00\x00\x00\x00WAVE").is_none(),
+            "a wav is not an image"
+        );
+    }
+
+    #[test]
+    fn a_file_larger_than_the_cap_is_refused_before_it_is_read() {
+        let tmp = TempVault::new();
+        let mut big = PNG.to_vec();
+        big.resize((MAX_MEDIA_BYTES + 1) as usize, 0);
+        put_bytes(&tmp, "notes/huge.png", &big);
+        let vault = tmp.open();
+
+        assert!(matches!(
+            vault.read_media("notes/huge.png"),
+            Err(Error::TooLarge)
+        ));
+    }
+
+    #[test]
+    fn the_etag_can_be_had_without_reading_the_file() {
+        let tmp = TempVault::new();
+        put_bytes(&tmp, "notes/diagram.png", PNG);
+        let vault = tmp.open();
+
+        let (_, _, from_read) = vault.read_media("notes/diagram.png").expect("media");
+        let from_stat = vault.media_etag("notes/diagram.png").expect("etag");
+        assert_eq!(
+            from_read, from_stat,
+            "a conditional request must compare the same value the body carries"
+        );
+        assert!(matches!(
+            vault.media_etag("notes/missing.png"),
+            Err(Error::NotFound)
+        ));
+    }
+}

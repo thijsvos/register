@@ -68,11 +68,82 @@ pub fn font_format(bytes: &[u8]) -> Option<&'static FontFormat> {
         .iter()
         .find(|format| bytes.starts_with(format.magic))
 }
+
+/// A file `GET /api/file` will serve out of the vault, by its magic number.
+///
+/// An allowlist rather than a passthrough, for the reason §03 gives about
+/// fonts: the vault is a folder anyone can write to, and a served byte stream
+/// the browser decides how to interpret is a wider surface than this product
+/// wants. A `.md` renamed `.png`, an HTML file, a shell script — none of them
+/// match anything here, so all of them are refused rather than served with a
+/// guess.
+pub struct MediaFormat {
+    pub media_type: &'static str,
+    /// Every `(offset, bytes)` pair must match. A list rather than a prefix
+    /// because WebP and AVIF name themselves *after* a length field, so
+    /// `starts_with` — which is all the font table needs — cannot see them.
+    magic: &'static [(usize, &'static [u8])],
+}
+
+/// What a note can reasonably reference and a browser can render natively.
+///
+/// **SVG is deliberately absent.** It is XML that can carry script, and while
+/// the CSP would block that today, "an allowlist of containers, not a
+/// passthrough" is the principle — SVG does not earn an exception on the day
+/// this endpoint is born. Parked in `docs/ROADMAP.md` with its own trigger.
+const MEDIA_FORMATS: &[MediaFormat] = &[
+    MediaFormat {
+        media_type: "image/png",
+        magic: &[(0, b"\x89PNG\r\n\x1a\n")],
+    },
+    MediaFormat {
+        media_type: "image/jpeg",
+        magic: &[(0, &[0xFF, 0xD8, 0xFF])],
+    },
+    MediaFormat {
+        media_type: "image/gif",
+        magic: &[(0, b"GIF87a")],
+    },
+    MediaFormat {
+        media_type: "image/gif",
+        magic: &[(0, b"GIF89a")],
+    },
+    // RIFF container: "RIFF" then four bytes of length, then the form type.
+    MediaFormat {
+        media_type: "image/webp",
+        magic: &[(0, b"RIFF"), (8, b"WEBP")],
+    },
+    // ISO-BMFF: a four-byte box length, then "ftyp", then the brand.
+    MediaFormat {
+        media_type: "image/avif",
+        magic: &[(4, b"ftypavif")],
+    },
+    MediaFormat {
+        media_type: "application/pdf",
+        magic: &[(0, b"%PDF-")],
+    },
+];
+
+/// Which servable format `bytes` is, by content — never by extension.
+pub fn media_format(bytes: &[u8]) -> Option<&'static MediaFormat> {
+    MEDIA_FORMATS.iter().find(|format| {
+        format.magic.iter().all(|(at, want)| {
+            bytes
+                .get(*at..at.saturating_add(want.len()))
+                .is_some_and(|found| found == *want)
+        })
+    })
+}
 /// §04's dated-log directory. Its filenames are dates, not refs.
 const DAILY_DIR: &str = "daily/";
 /// Marks an unresolved conflict copy (§04).
 const CONFLICT_MARK: &str = ".conflict-";
 const NOTE_EXT: &str = "md";
+/// The largest file `GET /api/file` will serve, matching the router's own
+/// request-body limit so the two halves of the API refuse at the same size.
+/// The read is not streamed — nothing in this crate streams, and adding it
+/// means a new dependency — so this is also the allocation ceiling.
+const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
 /// §04's examples are three digits (`003-…`).
 const MIN_REF_WIDTH: usize = 3;
 /// How many same-millisecond, same-basename deletions to disambiguate before
@@ -92,6 +163,13 @@ pub enum Error {
     /// The bytes offered as a licensed face are not a font container this app
     /// recognises (§03: woff2 / woff / otf / ttf).
     UnsupportedFont,
+    /// Inside the vault and readable, but not a format this app hands to a
+    /// browser. See `MEDIA_FORMATS`.
+    UnsupportedMedia,
+    /// Bigger than `MAX_MEDIA_BYTES`. The file is read whole to be served, so an
+    /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
+    /// 50 MB for the whole process.
+    TooLarge,
     Io(io::Error),
 }
 
@@ -102,6 +180,8 @@ impl fmt::Display for Error {
             Self::NotFound => write!(f, "no such note"),
             Self::Conflict { current } => write!(f, "etag is stale; current is {current}"),
             Self::UnsupportedFont => write!(f, "not a woff2, woff, otf or ttf font"),
+            Self::UnsupportedMedia => write!(f, "not an image or pdf this app will serve"),
+            Self::TooLarge => write!(f, "file is larger than this app will serve"),
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -254,12 +334,18 @@ impl Vault {
         }
     }
 
-    /// Map a vault-relative request path to an absolute path inside the vault.
+    /// Map a vault-relative request path to an absolute path inside the vault,
+    /// without deciding what kind of file it names.
     ///
     /// This is the security boundary of the whole server. It rejects `..`,
     /// absolute paths, Windows separators and any dot-prefixed segment — which
     /// also makes `.register/` unreachable through the API, as §04 requires.
-    fn resolve(&self, rel: &str) -> Result<PathBuf> {
+    ///
+    /// Split out of `resolve` so `GET /api/file` can reuse **every** guard while
+    /// declining only the `.md` rule. The split is deliberate and narrow:
+    /// anything added here protects both callers, and the note API's definition
+    /// of a note is unchanged directly below.
+    fn resolve_within(&self, rel: &str) -> Result<PathBuf> {
         // An absolute path is refused rather than quietly reinterpreted as a
         // vault-relative one: a client that sends `/etc/passwd` is confused, and
         // silently creating `<vault>/etc/passwd` would hide the bug.
@@ -283,6 +369,12 @@ impl Vault {
         if depth == 0 {
             return Err(Error::InvalidPath);
         }
+        Ok(out)
+    }
+
+    /// `resolve_within` plus the one rule that makes a path a *note*.
+    fn resolve(&self, rel: &str) -> Result<PathBuf> {
+        let out = self.resolve_within(rel)?;
         // One definition of "a note", shared with `list` and `is_visible`.
         // Without this the write path is looser than the read path: PUT would
         // happily create files the tree can never show and the watcher never
@@ -424,6 +516,44 @@ impl Vault {
             out.push(entry_for(rel, &body, &meta));
         }
         Ok(())
+    }
+
+    /// The etag of any vault file, without reading it.
+    ///
+    /// So a conditional request costs a `stat` rather than a whole PNG: the
+    /// handler asks this first and answers 304 before `read_media` allocates.
+    pub fn media_etag(&self, rel: &str) -> Result<String> {
+        let path = self.resolve_within(rel)?;
+        self.verify_contained(&path)?;
+        let meta = fs::metadata(&path)?;
+        if !meta.is_file() {
+            return Err(Error::NotFound);
+        }
+        Ok(etag_of(&meta))
+    }
+
+    /// A non-note file from the vault: its bytes, its format and its etag.
+    ///
+    /// Every guard `read` uses, minus the `.md` rule and plus two of its own —
+    /// a size cap before the allocation, and a magic-number allowlist after it.
+    /// The allowlist is what makes this safe to point at a folder anyone can
+    /// write to: the type is decided by content, never by the extension in the
+    /// request, so a `.md` renamed `.png` is refused rather than mislabelled.
+    pub fn read_media(&self, rel: &str) -> Result<(Vec<u8>, &'static MediaFormat, String)> {
+        let path = self.resolve_within(rel)?;
+        self.verify_contained(&path)?;
+        let meta = fs::metadata(&path)?;
+        if !meta.is_file() {
+            return Err(Error::NotFound);
+        }
+        // Checked against the metadata, before the read rather than after it:
+        // refusing a 2 GB file is only useful if we have not already loaded it.
+        if meta.len() > MAX_MEDIA_BYTES {
+            return Err(Error::TooLarge);
+        }
+        let bytes = fs::read(&path)?;
+        let format = media_format(&bytes).ok_or(Error::UnsupportedMedia)?;
+        Ok((bytes, format, etag_of(&meta)))
     }
 
     /// Raw markdown plus its etag.
