@@ -122,6 +122,22 @@ describe('taskGroups', () => {
     ])
   })
 
+  it('keeps daily logs in, which is the whole reason TODAY exists', () => {
+    // A daily log is hidden from the INDEX — one per day forever would bury the
+    // notes — but it is where people actually write `- [ ]`, so it has to stay
+    // counted. Nothing pinned this until `isListed` and `isDerived` were
+    // untangled, and defining derived in terms of listed empties TODAY silently.
+    const withDaily: [Entry, string][] = [
+      ...notes,
+      [entry('daily/2026-08-05.md'), `${FRONT}\n- [ ] from the daily log\n`],
+    ]
+    const { notes: tree, corpus } = vault(withDaily)
+    expect(taskGroups(tree, corpus).map((g) => g.entry.path)).toContain(
+      'daily/2026-08-05.md',
+    )
+    expect(count(taskGroups(tree, corpus))).toEqual({ open: 3, total: 4 })
+  })
+
   it('leaves conflict copies out', () => {
     const withCopy: [Entry, string][] = [
       ...notes,

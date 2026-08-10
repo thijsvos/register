@@ -5,16 +5,27 @@
  * and anything heavier here would be pulled across the lazy-chunk boundary with
  * it — which is how P6 accidentally loaded all of CodeMirror at boot.
  *
- * A vault holds three kinds of file and the difference matters at every surface:
+ * A vault holds four kinds of file and the difference matters at every surface:
  *
  * - **Notes.** What you accumulate. Listed, searched, counted.
  * - **Furniture.** `CLAUDE.md` is the agent's brief and `templates/` are
  *   stencils. Real files you edit deliberately, but not knowledge — so listing
  *   them among your notes buries the notes, and counting a stencil's tags
  *   reports a tag no note of yours carries.
+ * - **Journal.** `daily/YYYY-MM-DD.md`. Knowledge, unlike furniture — its tasks
+ *   belong in TODAY and its links in the graph — but there is one per day
+ *   forever, and `daily/` sorts before `notes/`, so listing them put a growing
+ *   wall of dated rows above every note you own. Seven after a week; three
+ *   hundred and sixty-five after a year.
  * - **Artefacts.** `*.conflict-<ts>.md`, waiting to be merged. §04 wants them
  *   gone, not derived from — but they stay in the index, because that is the
  *   only place you would ever find one.
+ *
+ * Listed and derived are therefore **independent**. They used to be nested —
+ * `isDerived` was `isListed && !isConflictCopy` — which could express "hidden
+ * and uncounted" (furniture) and "shown and counted" (notes) but not the
+ * journal's "hidden and counted". Untangling them is what makes the fix below
+ * possible without emptying TODAY.
  */
 
 /**
@@ -53,24 +64,41 @@ export function isConflictCopy(path: string): boolean {
   return path.includes('.conflict-')
 }
 
+/** Whether a path is a daily log (§04 layout: `daily/YYYY-MM-DD.md`). */
+export function isDaily(path: string): boolean {
+  return path === 'daily' || path.startsWith('daily/')
+}
+
 /**
  * Whether the INDEX lists it.
  *
- * Furniture is out. Both kinds stay reachable — ⌘K searches every note-shaped
- * file in the vault, and a stencil is also a row under NEW FROM TEMPLATE — so
- * this hides them from a list, not from the app.
+ * Furniture and the journal are out. Everything stays reachable — ⌘K searches
+ * every note-shaped file in the vault, a stencil is also a row under NEW FROM
+ * TEMPLATE, and today's log is `⌘D`'s TODAY and `G D` away — so this hides them
+ * from one list, not from the app.
+ *
+ * The journal is the P8 argument a second time. That one closed with "a first
+ * real vault made the answer obvious": stencils among your notes bury the notes.
+ * A daily log buries them faster, because there is one per day forever and
+ * `daily/` sorts before `notes/`, so a year of dated rows accumulates *above*
+ * everything you wrote.
  */
 export function isListed(path: string): boolean {
-  return !isContract(path) && !isTemplate(path)
+  return !isContract(path) && !isTemplate(path) && !isDaily(path)
 }
 
 /**
  * Whether backlinks, tags and tasks count it.
  *
- * Stricter than `isListed`: an artefact is listed so you can find it, and
- * derived from by nothing, because every one of its lines already belongs to
- * the note it was copied from.
+ * Not "listed, minus artefacts" — the two are independent, and the journal is
+ * why. A daily log is knowledge: its `- [ ]` belongs in TODAY and its `[[…]]`
+ * in the graph, and it is hidden from the INDEX only because there are so many.
+ * Written as `isListed(path) && …` this would empty TODAY of everything you
+ * wrote in a daily log, which is most of what people put in one.
+ *
+ * An artefact is the mirror case — listed so you can find it, derived from by
+ * nothing, because every line it holds already belongs to the note it copied.
  */
 export function isDerived(path: string): boolean {
-  return isListed(path) && !isConflictCopy(path)
+  return !isContract(path) && !isTemplate(path) && !isConflictCopy(path)
 }
