@@ -4,7 +4,7 @@ import { settings } from '../../core/settings.svelte'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
 import { ancestors, folderTree, type Node } from '../../core/tree'
-import { go, traverse } from '../nav'
+import { go, treeTraverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
@@ -70,9 +70,10 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
       <button
         class="row folder"
         aria-expanded={open}
+        data-depth={depth}
         style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
         onclick={() => settings.toggleFolder(node.path)}
-        onkeydown={traverse}
+        onkeydown={treeTraverse}
       >
         <!-- Decorative: the row's own aria-expanded is what a screen reader
              reads, so the arrow must not be announced twice. -->
@@ -97,9 +98,10 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
         class:active={entry.path === vault.openPath}
         aria-current={entry.path === vault.openPath ? 'page' : undefined}
         title={artefact ? entry.path : undefined}
+        data-depth={depth}
         style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
         onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
-        onkeydown={traverse}
+        onkeydown={treeTraverse}
       >
         <span class="ref">{artefact ? '—' : (entry.ref ?? '—')}</span>
         <span class="name">{artefact ? basename(entry.path) : (entry.title ?? entry.path)}</span>

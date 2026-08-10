@@ -24,6 +24,90 @@ export function traverse(event: KeyboardEvent): void {
 }
 
 /**
+ * The INDEX tree's own keys, on top of `traverse` (§02b Screen 1, Rev N).
+ *
+ * The WAI-ARIA tree pattern, which is worth following exactly because the whole
+ * argument for a tree was that people already know how one behaves — and they
+ * know it from widgets that obey this:
+ *
+ *   →  a folded folder opens · an open folder steps into its first child
+ *   ←  an open folder folds · anything else steps out to its parent
+ *
+ * `h`/`l` alias the arrows the way `j`/`k` already alias `↑`/`↓`. Neither is
+ * bound globally, and these handlers only fire on a focused row.
+ *
+ * Folding goes through the row's own click rather than calling the setter, so
+ * the keyboard and the mouse take one path and the fold is persisted by the
+ * same code either way. Depth is read from the DOM because the rows are flat
+ * siblings — the tree is drawn by indentation, so the nesting a parent lookup
+ * needs is not in the element hierarchy to be walked.
+ */
+export function treeTraverse(event: KeyboardEvent): void {
+  const right = event.key === 'ArrowRight' || event.key === 'l'
+  const left = event.key === 'ArrowLeft' || event.key === 'h'
+  if (!right && !left) {
+    traverse(event)
+    return
+  }
+
+  const row = event.currentTarget
+  if (!(row instanceof HTMLElement)) return
+
+  // `null` for a note: only folders carry the attribute, so this is also the
+  // test for "is this row a folder" without a second one that could disagree.
+  const expanded = row.getAttribute('aria-expanded')
+
+  if (right) {
+    if (expanded === 'false') {
+      event.preventDefault()
+      row.click()
+    } else if (expanded === 'true') {
+      // The row after an open folder is its first child, always: a folder only
+      // exists because notes are under it, and expanding renders them next.
+      // This started as a `depth === here + 1` guard, which no reachable state
+      // could violate — an unfalsifiable branch reads as care and tests as
+      // nothing, so it is gone rather than uncovered.
+      focus(event, row.nextElementSibling)
+    }
+    return
+  }
+
+  if (expanded === 'true') {
+    event.preventDefault()
+    row.click()
+    return
+  }
+  // A note, or an already-folded folder: step out. The first row above with a
+  // smaller depth is the parent, whatever is in between.
+  focus(event, parentOf(row))
+}
+
+/**
+ * The row this one is nested under: the nearest one above it drawn shallower.
+ *
+ * Not simply the row above. Those coincide for a folder's first child and
+ * nowhere else — the row above `001 Alpha` at depth 1 is whatever ended the
+ * subtree before it, which can be several levels deeper.
+ */
+function parentOf(row: HTMLElement): HTMLElement | null {
+  const depth = deep(row)
+  let at = row.previousElementSibling
+  while (at instanceof HTMLElement) {
+    if (deep(at) < depth) return at
+    at = at.previousElementSibling
+  }
+  return null
+}
+
+const deep = (row: HTMLElement) => Number(row.dataset.depth ?? '0')
+
+function focus(event: KeyboardEvent, row: Element | null): void {
+  if (!(row instanceof HTMLElement)) return
+  event.preventDefault()
+  row.focus()
+}
+
+/**
  * Reach the index, at one end or the other.
  *
  * The counterpart to `traverse`: that one moves within the list, this one gets
