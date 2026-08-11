@@ -71,6 +71,8 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
         class="row folder"
         aria-expanded={open}
         data-depth={depth}
+        data-kind="folder"
+        data-path={node.path}
         style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
         onclick={() => settings.toggleFolder(node.path)}
         onkeydown={treeTraverse}
@@ -99,6 +101,7 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
         aria-current={entry.path === vault.openPath ? 'page' : undefined}
         title={artefact ? entry.path : undefined}
         data-depth={depth}
+        data-path={entry.path}
         style:padding-left="calc(var(--pane-x) + {depth} * var(--s3))"
         onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
         onkeydown={treeTraverse}

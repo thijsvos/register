@@ -17,6 +17,7 @@
  * at 16 ms.
  */
 import type { Entry } from './api'
+import { inside, isListed } from './paths'
 
 export interface Folder {
   kind: 'folder'
@@ -133,4 +134,20 @@ export function ancestors(path: string): string[] {
   const segments = path.split('/').filter((segment) => segment !== '')
   segments.pop()
   return segments.map((_, index) => segments.slice(0, index + 1).join('/'))
+}
+
+/**
+ * How many notes the INDEX draws under a folder — what a delete confirm counts.
+ *
+ * Listed notes only, because that is what the reader can see and therefore what
+ * they are agreeing to. Whatever else is in the folder goes too, and the server
+ * says so afterwards.
+ *
+ * Here rather than beside the commands that use it: the palette and the index's
+ * `⌫` both need it, and `nav.ts` importing it from `Palette/commands.ts` — which
+ * imports `nav.ts` — is an import cycle that happens to work today.
+ */
+export function notesUnder(entries: Entry[], folder: string): number {
+  return entries.filter((entry) => isListed(entry.path) && inside(entry.path, folder))
+    .length
 }

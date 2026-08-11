@@ -166,6 +166,10 @@ pub enum Error {
     /// Inside the vault and readable, but not a format this app hands to a
     /// browser. See `MEDIA_FORMATS`.
     UnsupportedMedia,
+    /// The path is reachable but does not name a folder. Distinct from
+    /// `NotFound` only so the body can say which of the two the request got
+    /// wrong — "no such note" is a confusing answer to a request about a folder.
+    NoSuchFolder,
     /// Bigger than `MAX_MEDIA_BYTES`. The file is read whole to be served, so an
     /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
     /// 50 MB for the whole process.
@@ -181,6 +185,7 @@ impl fmt::Display for Error {
             Self::Conflict { current } => write!(f, "etag is stale; current is {current}"),
             Self::UnsupportedFont => write!(f, "not a woff2, woff, otf or ttf font"),
             Self::UnsupportedMedia => write!(f, "not an image or pdf this app will serve"),
+            Self::NoSuchFolder => write!(f, "no such folder"),
             Self::TooLarge => write!(f, "file is larger than this app will serve"),
             Self::Io(e) => write!(f, "{e}"),
         }
@@ -225,6 +230,24 @@ pub struct Tree {
     /// fill it.
     pub git: Option<crate::git::Status>,
     pub notes: Vec<Entry>,
+}
+
+/// What a folder deletion moved (`DELETE /api/folder/{path}`, §04 Rev P).
+///
+/// The counts are separated because the client can only predict one of them: it
+/// confirms against the notes the INDEX draws, and everything else in the folder
+/// — images, PDFs, anything not `.md` — is invisible to it. Reporting both is
+/// what lets the notice say what actually happened rather than repeating the
+/// guess the confirm was built on.
+///
+/// `bucket` is where it all went, vault-relative, because "deleted" is a lie
+/// here — §04 never hard-deletes, and a message that does not say where to look
+/// makes a recoverable operation feel final.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Trashed {
+    pub notes: u32,
+    pub files: u32,
+    pub bucket: String,
 }
 
 /// One row of `GET /api/tree` (§04). Everything except `path` is derived, and
@@ -786,6 +809,7 @@ impl Vault {
                 Ok(_) => {
                     // Reserved. The rename replaces this empty placeholder.
                     fs::rename(&path, &target)?;
+                    self.prune_empty_parents(&path);
                     return Ok(());
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -796,6 +820,119 @@ impl Vault {
             io::ErrorKind::AlreadyExists,
             "trash name collision limit reached",
         )))
+    }
+
+    /// Move a folder and everything under it to `.register/trash/`, in **one**
+    /// bucket (§04 Rev P).
+    ///
+    /// One bucket, not one per note, and that is the whole argument for doing
+    /// this on the server. The client already holds every note path and could
+    /// loop over `DELETE /api/note` — but each of those claims its own
+    /// `<stamp>` directory, so one folder scatters across as many buckets as it
+    /// held notes and "restore what I deleted" becomes archaeology. Here it is a
+    /// single `rename` of the directory itself: atomic, one bucket, the subtree
+    /// preserved at its original vault path exactly as `trash` preserves a
+    /// note's, and therefore restorable by moving one directory back.
+    ///
+    /// The rename is also what takes **non-note files with it**. `trash` cannot
+    /// name a PNG at all — it goes through `resolve`, which is `.md`-only — so a
+    /// client-side loop would empty a folder of its notes and leave the images
+    /// behind in a directory the INDEX now shows as gone. That is not a gap this
+    /// endpoint is closing by accident: it is why the operation belongs to the
+    /// folder rather than to the notes inside it. It does not reopen the
+    /// read-only rule on `GET /api/file` either — that rule exists so the vault
+    /// cannot *acquire* a file its own tree will never show, and this removes.
+    pub fn trash_folder(&self, rel: &str) -> Result<Trashed> {
+        // `resolve_within`, not `resolve`: a folder has no `.md`. Every other
+        // guard applies unchanged — `..`, absolute paths, `\`, NUL and any
+        // dot-prefixed segment, which is what keeps `.register/` unreachable.
+        // The vault root is refused by the same rule that refuses an empty
+        // path: a request has to name something, and `depth == 0` names the
+        // vault itself.
+        let path = self.resolve_within(rel)?;
+        self.verify_contained(&path)?;
+        self.require_root()?;
+
+        let _writing = self.lock();
+
+        if !path.is_dir() {
+            return Err(Error::NoSuchFolder);
+        }
+
+        // Counted before the move, because afterwards there is nothing to count.
+        // Informational only: the client's own confirm counts what the INDEX
+        // shows, and the two differ by exactly the files the INDEX does not draw
+        // — media above all. Reporting what actually moved is what stops those
+        // two numbers from quietly disagreeing.
+        let (notes, files) = tally_files(&path)?;
+
+        let dir = self.root.join(APP_DIR).join(TRASH_DIR);
+        fs::create_dir_all(&dir)?;
+        let stamp = now_millis();
+
+        for nth in 0..MAX_TRASH_COLLISIONS {
+            let name = if nth == 0 {
+                stamp.to_string()
+            } else {
+                format!("{stamp}-{nth}")
+            };
+            let bucket = dir.join(&name);
+            // The bucket is *claimed* with `create_dir`, which fails rather than
+            // succeeding when it already exists — the same claim-don't-probe
+            // reasoning `trash` applies with `create_new`, for the same reason:
+            // probing and then renaming is a check-then-act race, and `rename`
+            // replaces its destination without a word.
+            match fs::create_dir(&bucket) {
+                Ok(()) => {
+                    let target = bucket.join(rel);
+                    if let Some(parent) = target.parent() {
+                        fs::create_dir_all(parent)?;
+                    }
+                    fs::rename(&path, &target)?;
+                    self.prune_empty_parents(&path);
+                    return Ok(Trashed {
+                        notes,
+                        files,
+                        bucket: format!("{APP_DIR}/{TRASH_DIR}/{name}"),
+                    });
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(Error::Io(e)),
+            }
+        }
+        Err(Error::Io(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "trash name collision limit reached",
+        )))
+    }
+
+    /// Remove directories a deletion left empty, innermost first.
+    ///
+    /// Without this the INDEX and the filesystem disagree in the one direction
+    /// that matters: the folder is gone from the app — a folder row exists only
+    /// while a note is under it — and still sitting in Finder. §04's premise is
+    /// that the folder on disk *is* the product, so the two have to agree.
+    ///
+    /// It stops at any direct child of the root, so the §04 layout survives its
+    /// own last note: emptying `notes/` must not delete `notes/`. A directory
+    /// holding anything at all is left alone, `.DS_Store` included — `remove_dir`
+    /// refusing a non-empty directory is the test, so nothing here can remove a
+    /// file, and sweeping away somebody's leftovers is worse than an empty
+    /// folder the INDEX cannot draw.
+    ///
+    /// Failure is not an error. The deletion has already happened and succeeded;
+    /// a directory that would not go is untidy, not wrong.
+    fn prune_empty_parents(&self, from: &Path) {
+        let mut at = from.parent();
+        while let Some(dir) = at {
+            if dir.parent() == Some(self.root.as_path()) || !dir.starts_with(&self.root) {
+                return;
+            }
+            if fs::remove_dir(dir).is_err() {
+                return;
+            }
+            at = dir.parent();
+        }
     }
 
     /// The etag of a vault-relative path, if it exists.
@@ -850,6 +987,40 @@ fn etag_of(meta: &Metadata) -> String {
         .map(|d| d.as_nanos())
         .unwrap_or(0);
     format!("{nanos:x}-{:x}", meta.len())
+}
+
+/// Count what is under a directory: notes, and everything else.
+///
+/// Dot-prefixed entries are skipped, the same rule and for the same reason as
+/// `walk` — an editor swap file is not something a reader put there and not
+/// something a count of their work should include. They still ride along in the
+/// rename, since it moves the directory whole; they are simply not claimed to be
+/// part of what was deleted.
+fn tally_files(dir: &Path) -> Result<(u32, u32)> {
+    let mut notes = 0;
+    let mut files = 0;
+    let mut stack = vec![dir.to_path_buf()];
+
+    while let Some(at) = stack.pop() {
+        for entry in fs::read_dir(&at)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if name.starts_with('.') {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|e| e.to_str()) == Some(NOTE_EXT) {
+                notes += 1;
+            } else {
+                files += 1;
+            }
+        }
+    }
+    Ok((notes, files))
 }
 
 fn now_millis() -> i64 {

@@ -1,6 +1,7 @@
 import { revealVault } from '../../core/api'
-import { isListed, isTemplate } from '../../core/paths'
+import { folders, isListed, isTemplate } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
+import { notesUnder } from '../../core/tree'
 import { enterIndex, go } from '../nav'
 import { chrome } from '../view.svelte'
 
@@ -123,6 +124,40 @@ export function allCommands(): Command[] {
       enabled: () => vault.unresolved.length > 0,
       run: () => go.newestConflict(),
     },
+    // §04 Rev P. Both arm the palette rather than acting, so the confirm is the
+    // same surface however a deletion is started — the other way in is `⌫` on a
+    // focused INDEX row, which names its own target instead of inferring one.
+    {
+      id: 'delete-note',
+      label: 'DELETE · NOTE → TRASH',
+      keys: '⌫',
+      enabled: () => vault.openPath !== null,
+      takesFocus: true,
+      run: () => {
+        const path = vault.openPath
+        if (path !== null) chrome.arm({ kind: 'note', path, notes: 1 })
+      },
+    },
+    // The folder the open note is in — the only folder the palette can name
+    // without a row to point at. Hidden for a note at the vault root, where
+    // there is no folder to mean.
+    {
+      id: 'delete-folder',
+      label: 'DELETE · FOLDER → TRASH',
+      keys: '',
+      enabled: () => openFolder() !== null,
+      takesFocus: true,
+      run: () => {
+        const folder = openFolder()
+        if (folder !== null) {
+          chrome.arm({
+            kind: 'folder',
+            path: folder,
+            notes: notesUnder(vault.tree, folder),
+          })
+        }
+      },
+    },
     {
       id: 'reveal',
       label: 'OPEN VAULT IN FILE MANAGER',
@@ -136,6 +171,20 @@ export function allCommands(): Command[] {
       },
     },
   ]
+}
+
+/**
+ * The folder holding the open note, or null when it sits at the vault root.
+ *
+ * The deepest one, not the whole trail: `notes/projects/010.md` offers
+ * `notes/projects`. Deleting the outer folder is a bigger operation than the
+ * command's label implies, and it is one keystroke away from the row itself.
+ */
+export function openFolder(): string | null {
+  const path = vault.openPath
+  if (path === null) return null
+  const trail = folders(path)
+  return trail.length === 0 ? null : trail.join('/')
 }
 
 /** A stencil in `templates/`, offered as an action rather than as a note. */

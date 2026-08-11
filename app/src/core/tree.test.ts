@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Entry } from './api'
-import { ancestors, type Folder, folderTree, type Node } from './tree'
+import { ancestors, type Folder, folderTree, type Node, notesUnder } from './tree'
 
 const at = (path: string, ref: string | null = null): Entry => ({
   path,
@@ -158,5 +158,34 @@ describe('ancestors', () => {
     // set; the ones that are not rows simply match nothing, which is cheaper
     // than teaching this function about compaction.
     expect(ancestors('notes/projects/apollo/010.md')).toContain('notes/projects')
+  })
+})
+
+describe('notesUnder', () => {
+  const TREE = [
+    at('notes/projects/010-a.md'),
+    at('notes/projects/deep/011-b.md'),
+    at('notes/projects-old/012-c.md'),
+    at('notes/007-loose.md'),
+    at('daily/2026-08-11.md'),
+    at('templates/daily.md'),
+  ]
+
+  it('counts every listed note under the folder, at any depth', () => {
+    expect(notesUnder(TREE, 'notes/projects')).toBe(2)
+    expect(notesUnder(TREE, 'notes')).toBe(4)
+  })
+
+  it('does not count the folder whose name merely starts the same', () => {
+    // Counting `notes/projects-old` here would put a number in a delete confirm
+    // that the deletion never touches.
+    expect(notesUnder(TREE, 'notes/projects-old')).toBe(1)
+  })
+
+  it('leaves furniture and the journal out of the number', () => {
+    // `isListed`-hidden, so the reader cannot see them to agree to them. They
+    // still go if the folder goes, and the server reports that afterwards.
+    expect(notesUnder(TREE, 'daily')).toBe(0)
+    expect(notesUnder(TREE, 'templates')).toBe(0)
   })
 })

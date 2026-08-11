@@ -336,6 +336,253 @@ fn trashing_a_missing_note_is_not_found() {
     assert!(matches!(vault.trash("notes/404.md"), Err(Error::NotFound)));
 }
 
+// -------------------------------------------------------------- trash folder
+
+/// Seed a folder holding two notes, a PNG and a nested note.
+fn seeded_folder(tmp: &TempVault) {
+    tmp.put("notes/projects/010-a.md", NOTE);
+    tmp.put("notes/projects/011-b.md", NOTE);
+    // Contents are irrelevant: a folder deletion moves the directory whole and
+    // never looks inside a file, which is exactly why it can take media at all.
+    tmp.put("notes/projects/diagram.png", "pretend png");
+    tmp.put("notes/projects/deep/012-c.md", NOTE);
+}
+
+#[test]
+fn trashing_a_folder_moves_the_whole_subtree_into_one_bucket() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    seeded_folder(&tmp);
+
+    let moved = vault.trash_folder("notes/projects").expect("trash folder");
+
+    assert!(!tmp.path().join("notes/projects").exists());
+    // One bucket. This is the property the whole endpoint exists for — a
+    // client-side loop over DELETE /api/note produces one per note, and the
+    // folder can then only be restored by hand.
+    let buckets = fs::read_dir(tmp.path().join(APP_DIR).join("trash"))
+        .expect("read trash")
+        .count();
+    assert_eq!(buckets, 1);
+
+    // At its original vault path inside that bucket, exactly as a single note
+    // is — which is what keeps the refs it used recoverable.
+    let bucket = tmp.path().join(&moved.bucket);
+    assert!(bucket.join("notes/projects/010-a.md").is_file());
+    assert!(bucket.join("notes/projects/deep/012-c.md").is_file());
+}
+
+#[test]
+fn trashing_a_folder_takes_the_media_with_it() {
+    // The reason this is not a loop over DELETE /api/note: `trash` goes through
+    // `resolve`, which is .md-only, so a client doing it note by note leaves
+    // every image behind in a folder the INDEX now draws as gone.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    seeded_folder(&tmp);
+
+    let moved = vault.trash_folder("notes/projects").expect("trash folder");
+
+    assert!(
+        tmp.path()
+            .join(&moved.bucket)
+            .join("notes/projects/diagram.png")
+            .is_file()
+    );
+    assert_eq!((moved.notes, moved.files), (3, 1));
+}
+
+#[test]
+fn a_trashed_folder_still_holds_its_refs_against_reuse() {
+    // next_ref reads the trash precisely so a deleted ref is never handed out
+    // again, and it can only do that while the notes sit at their original
+    // paths. A folder deletion must not be the hole in that.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    seeded_folder(&tmp);
+    assert_eq!(vault.next_ref().expect("next"), "013");
+
+    vault.trash_folder("notes/projects").expect("trash folder");
+
+    assert_eq!(vault.next_ref().expect("next"), "013");
+}
+
+#[test]
+fn trashing_a_folder_prunes_what_it_left_empty() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/areas/work/alpha/001-a.md", NOTE);
+
+    vault
+        .trash_folder("notes/areas/work/alpha")
+        .expect("trash folder");
+
+    // `work/` and `areas/` held nothing else, so the INDEX draws neither — and
+    // a folder the app says is gone must not still be sitting in Finder.
+    assert!(!tmp.path().join("notes/areas/work").exists());
+    assert!(!tmp.path().join("notes/areas").exists());
+    // `notes/` is the §04 layout, not a folder the reader made. It stays even
+    // when it is empty, or the vault loses its own shape on the last deletion.
+    assert!(tmp.path().join("notes").is_dir());
+}
+
+#[test]
+fn pruning_stops_at_a_parent_that_still_holds_something() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/areas/work/alpha/001-a.md", NOTE);
+    tmp.put("notes/areas/work/002-b.md", NOTE);
+
+    vault
+        .trash_folder("notes/areas/work/alpha")
+        .expect("trash folder");
+
+    assert!(tmp.path().join("notes/areas/work/002-b.md").is_file());
+}
+
+#[test]
+fn trashing_the_last_note_in_a_folder_prunes_it_too() {
+    // The single-note path has the same obligation: the folder row disappears
+    // when its last note does, so the directory must not outlive it.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/areas/solo/001-a.md", NOTE);
+
+    vault.trash("notes/areas/solo/001-a.md").expect("trash");
+
+    assert!(!tmp.path().join("notes/areas/solo").exists());
+    assert!(tmp.path().join("notes").is_dir());
+}
+
+#[test]
+fn a_folder_holding_something_unswept_is_left_alone() {
+    // `remove_dir` refuses a non-empty directory, and that refusal is the whole
+    // guard: nothing here may remove a file, so somebody's leftovers survive.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/areas/solo/001-a.md", NOTE);
+    tmp.put("notes/areas/solo/.DS_Store", "junk");
+
+    vault.trash("notes/areas/solo/001-a.md").expect("trash");
+
+    assert!(tmp.path().join("notes/areas/solo/.DS_Store").is_file());
+}
+
+#[test]
+fn the_vault_root_is_not_a_folder_anyone_can_delete() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/003-a.md", NOTE);
+
+    for named in ["", ".", "/", "./"] {
+        assert!(
+            matches!(vault.trash_folder(named), Err(Error::InvalidPath)),
+            "{named:?} reached the root"
+        );
+    }
+    assert!(tmp.path().join("notes/003-a.md").is_file());
+}
+
+#[test]
+fn a_folder_delete_takes_every_guard_the_note_api_takes() {
+    // The point of `resolve_within`: dropping only the .md rule, never a guard.
+    // Each of these names something that exists, so a NotFound would prove
+    // nothing about whether the guard is there.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/003-a.md", NOTE);
+    tmp.put(".register/config.json", "{}");
+    fs::create_dir_all(tmp.path().join(".register/fonts")).expect("fonts dir");
+
+    for named in [
+        "../..",
+        "notes/../../etc",
+        ".register",
+        ".register/fonts",
+        "/etc",
+        "notes\\projects",
+    ] {
+        assert!(
+            matches!(vault.trash_folder(named), Err(Error::InvalidPath)),
+            "{named:?} was not refused"
+        );
+    }
+    assert!(tmp.path().join(".register/config.json").is_file());
+}
+
+#[test]
+fn a_note_is_not_a_folder() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/003-a.md", NOTE);
+
+    assert!(matches!(
+        vault.trash_folder("notes/003-a.md"),
+        Err(Error::NoSuchFolder)
+    ));
+    assert!(tmp.path().join("notes/003-a.md").is_file());
+}
+
+#[test]
+fn trashing_a_missing_folder_says_so() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    assert!(matches!(
+        vault.trash_folder("notes/nowhere"),
+        Err(Error::NoSuchFolder)
+    ));
+}
+
+#[test]
+fn a_bucket_name_already_taken_is_not_reused() {
+    // One deletion is one bucket — the property the whole endpoint rests on, and
+    // the reason the destination is *claimed* with `create_dir` rather than
+    // probed. `create_dir_all` would succeed on a name that already exists, so
+    // two deletions in one millisecond would share a bucket and stop being
+    // separately restorable.
+    //
+    // Deterministic rather than timing-dependent: the first version of this
+    // test deleted two folders back to back and asserted the buckets differed,
+    // which they did — because the two calls landed in different milliseconds.
+    // It passed with the claim removed, which is a test that proves nothing.
+    // Every name the next 50 ms could produce is taken up front instead.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    tmp.put("notes/one/001-a.md", NOTE);
+
+    let trash = tmp.path().join(APP_DIR).join("trash");
+    fs::create_dir_all(&trash).expect("trash dir");
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_millis() as i64;
+    for stamp in (now - 2)..(now + 50) {
+        fs::create_dir(trash.join(stamp.to_string())).expect("claim a name");
+    }
+
+    let moved = vault.trash_folder("notes/one").expect("trash folder");
+
+    // It had to step past every taken name, so the suffix is the evidence.
+    assert!(
+        moved.bucket.ends_with("-1"),
+        "reused a taken bucket: {}",
+        moved.bucket
+    );
+    assert!(
+        tmp.path()
+            .join(&moved.bucket)
+            .join("notes/one/001-a.md")
+            .is_file()
+    );
+    // And nothing was poured into the name that was already there.
+    assert_eq!(
+        fs::read_dir(trash.join(now.to_string()))
+            .expect("read the taken bucket")
+            .count(),
+        0
+    );
+}
+
 // ------------------------------------------------------------ symlink escape
 
 #[cfg(unix)]
@@ -362,12 +609,25 @@ fn a_symlinked_directory_cannot_escape_the_vault() {
         vault.trash("escape/secret.md"),
         Err(Error::InvalidPath)
     ));
+    // The folder route drops the `.md` rule and nothing else. This is the one
+    // it would be easiest to lose, because a directory *is* what it takes and a
+    // symlinked one looks exactly like the real thing to everything but
+    // `symlink_metadata` — and losing it turns a deletion into `rm -r` on
+    // whatever the link points at.
+    assert!(matches!(
+        vault.trash_folder("escape"),
+        Err(Error::InvalidPath)
+    ));
 
     assert_eq!(
         fs::read_to_string(outside.path().join("secret.md")).expect("still there"),
         "SSH KEY MATERIAL"
     );
     assert!(!outside.path().join("pwned.md").exists());
+    assert!(
+        outside.path().is_dir(),
+        "the linked-to directory was removed"
+    );
 }
 
 #[cfg(unix)]

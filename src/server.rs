@@ -15,7 +15,7 @@ use axum::extract::{DefaultBodyLimit, Path, Request, State};
 use axum::http::{HeaderMap, Method, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{any, get, post};
+use axum::routing::{any, delete, get, post};
 use rust_embed::Embed;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
@@ -325,6 +325,11 @@ pub fn router(state: AppState) -> Router {
         // GET only. Nothing writes a non-note through the API, so the vault
         // cannot acquire a file its own tree will never show.
         .route("/api/file/{*path}", get(read_file))
+        // DELETE only, and deliberately its own route rather than a recursive
+        // mode on `/api/note`: teaching that one to accept a directory would
+        // mean weakening `resolve`'s `.md` gate, which is the single definition
+        // the tree, the write path and the watcher all share (§04 Rev P).
+        .route("/api/folder/{*path}", delete(delete_folder))
         .route("/api/events", any(events))
         .route("/api/reveal", post(reveal))
         // §04's table listed six endpoints; §08 P9 asks for two more, because
@@ -466,6 +471,19 @@ async fn delete_note(State(state): State<AppState>, Path(path): Path<String>) ->
     let vault = state.vault.clone();
     match blocking(move || vault.trash(&path)).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Trash a folder and everything under it, in one bucket (§04 Rev P).
+///
+/// Answers with what it moved rather than `204`, because the count is the point:
+/// the client confirms against the notes the INDEX draws and cannot see the rest
+/// of the folder, so this is the only honest report of what left.
+async fn delete_folder(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.trash_folder(&path)).await {
+        Ok(trashed) => Json(trashed).into_response(),
         Err(response) => response,
     }
 }
@@ -972,6 +990,7 @@ fn error_response(error: vault::Error) -> Response {
             "etag is stale\n",
         )
             .into_response(),
+        vault::Error::NoSuchFolder => (StatusCode::NOT_FOUND, "no such folder\n").into_response(),
         vault::Error::UnsupportedFont => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "not a woff2, woff, otf or ttf font\n",

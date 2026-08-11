@@ -100,6 +100,19 @@ class FakeVault {
       })
     }
 
+    // §04 Rev P. The real one renames the directory whole, which is why the
+    // counts it answers with are not derivable from the note list alone — the
+    // media rides along and the client never saw it. Modelled here as a folder
+    // holding one such file, so the notice has something to be wrong about.
+    if (path.startsWith('/api/folder/')) {
+      if (method !== 'DELETE') return new Response('no', { status: 405 })
+      const folder = decodeURIComponent(path.replace('/api/folder/', ''))
+      const held = [...this.files.keys()].filter((one) => one.startsWith(`${folder}/`))
+      if (held.length === 0) return new Response('no such folder', { status: 404 })
+      for (const one of held) this.files.delete(one)
+      return json({ notes: held.length, files: 1, bucket: '.register/trash/1700' })
+    }
+
     const notePath = decodeURIComponent(path.replace('/api/note/', ''))
     const held = this.files.get(notePath)
 
@@ -992,5 +1005,84 @@ describe('new note', () => {
   it('reports the vault path for the status bar', async () => {
     await vault.refresh()
     expect(vault.vaultPath).toBe('/tmp/fake-vault')
+  })
+})
+
+describe('trash', () => {
+  it('drops what it held about a note it deleted', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    await settle()
+
+    expect(await vault.trashNote('notes/003-a.md')).toBe(true)
+    await settle()
+
+    // The buffer is not left bound to a path with nothing behind it, and the
+    // corpus does not keep answering ⌘K with a body the vault no longer has —
+    // nothing else prunes it, since #fillCorpus only ever adds.
+    expect(vault.openPath).toBe(null)
+    expect(vault.buffer).toBe('')
+    expect(vault.corpus['notes/003-a.md']).toBeUndefined()
+    expect(vault.notice).toContain('.register/trash/')
+  })
+
+  it('does not save a dirty buffer on its way to deleting it', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    vault.edit(`${NOTE}Something typed.\n`)
+
+    await vault.trashNote('notes/003-a.md')
+    await settle()
+
+    // A pending debounce firing after the delete would write the buffer back to
+    // the path just emptied, resurrecting the note as a side effect of removing
+    // it. The file must stay gone.
+    expect(server.files.has('notes/003-a.md')).toBe(false)
+    expect(vault.dirty).toBe(false)
+  })
+
+  it('reports what the server moved, not what the confirm guessed', async () => {
+    server.seed('notes/projects/010-a.md', NOTE)
+    server.seed('notes/projects/011-b.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/projects/010-a.md')
+    await settle()
+
+    expect(await vault.trashFolder('notes/projects')).toBe(true)
+    await settle()
+
+    // Two notes and the file the INDEX never drew. The count the reader agreed
+    // to was 2; the truth is 2 and an image, and this is where they find out.
+    expect(vault.notice).toContain('2 notes and 1 file')
+    expect(vault.notice).toContain('.register/trash/1700')
+    expect(vault.openPath).toBe(null)
+    expect(vault.corpus['notes/projects/011-b.md']).toBeUndefined()
+  })
+
+  it('leaves a note open when it was not in the folder that went', async () => {
+    server.seed('notes/projects/010-a.md', NOTE)
+    server.seed('notes/007-elsewhere.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/007-elsewhere.md')
+    await settle()
+
+    await vault.trashFolder('notes/projects')
+    await settle()
+
+    expect(vault.openPath).toBe('notes/007-elsewhere.md')
+    expect(vault.buffer).not.toBe('')
+  })
+
+  it('says so and changes nothing when the server refuses', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    await settle()
+
+    expect(await vault.trashFolder('notes/nowhere')).toBe(false)
+    expect(vault.notice).toContain('no such folder')
+    expect(vault.openPath).toBe('notes/003-a.md')
   })
 })

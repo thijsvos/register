@@ -1,4 +1,5 @@
 import { vault } from '../core/store.svelte'
+import { notesUnder } from '../core/tree'
 import { chrome } from './view.svelte'
 
 /**
@@ -43,6 +44,11 @@ export function traverse(event: KeyboardEvent): void {
  * needs is not in the element hierarchy to be walked.
  */
 export function treeTraverse(event: KeyboardEvent): void {
+  if (event.key === 'Delete' || event.key === 'Backspace') {
+    armFromRow(event)
+    return
+  }
+
   const right = event.key === 'ArrowRight' || event.key === 'l'
   const left = event.key === 'ArrowLeft' || event.key === 'h'
   if (!right && !left) {
@@ -80,6 +86,32 @@ export function treeTraverse(event: KeyboardEvent): void {
   // A note, or an already-folded folder: step out. The first row above with a
   // smaller depth is the parent, whatever is in between.
   focus(event, parentOf(row))
+}
+
+/**
+ * `⌫` on a focused INDEX row: arm the palette against what that row names.
+ *
+ * The row is the natural place to point at a folder — the palette can only
+ * infer one from the open note — and this is what lets the INDEX offer a
+ * deletion without the nav row itself changing at all. No new button, no
+ * context menu, no §02b state the matrix does not already describe.
+ *
+ * Both keys, because they are the same key: `Delete` is what a full keyboard
+ * sends and `Backspace` is what the one labelled ⌫ on a Mac sends, and a reader
+ * pressing the key that says delete on it should not have to know which.
+ */
+function armFromRow(event: KeyboardEvent): void {
+  const row = event.currentTarget
+  if (!(row instanceof HTMLElement)) return
+  const path = row.dataset.path
+  if (path === undefined) return
+
+  event.preventDefault()
+  chrome.arm(
+    row.dataset.kind === 'folder'
+      ? { kind: 'folder', path, notes: notesUnder(vault.tree, path) }
+      : { kind: 'note', path, notes: 1 },
+  )
 }
 
 /**

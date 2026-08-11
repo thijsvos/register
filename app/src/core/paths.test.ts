@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   folders,
+  inside,
   isConflictCopy,
   isContract,
   isDaily,
@@ -146,5 +147,25 @@ describe('resolveSrc', () => {
   it('resolves against a note at the vault root', () => {
     expect(resolveSrc('000-inbox.md', 'shot.png')).toBe('shot.png')
     expect(resolveSrc('000-inbox.md', 'assets/shot.png')).toBe('assets/shot.png')
+  })
+})
+
+describe('inside', () => {
+  it('holds for a path under the folder, at any depth', () => {
+    expect(inside('notes/projects/010-a.md', 'notes/projects')).toBe(true)
+    expect(inside('notes/projects/deep/011-b.md', 'notes/projects')).toBe(true)
+    expect(inside('notes/projects/010-a.md', 'notes')).toBe(true)
+  })
+
+  it('does not hold for the folder beside it', () => {
+    // The trailing separator is the whole function. A bare prefix test puts
+    // this note inside `notes/projects`, which is one folder too many to
+    // delete.
+    expect(inside('notes/projects-old/010-a.md', 'notes/projects')).toBe(false)
+    expect(inside('notes/projectsomething.md', 'notes/projects')).toBe(false)
+  })
+
+  it('does not hold for the folder itself', () => {
+    expect(inside('notes/projects', 'notes/projects')).toBe(false)
   })
 })

@@ -55,6 +55,17 @@ export function folders(path: string): string[] {
 }
 
 /**
+ * Whether a path lies inside a folder.
+ *
+ * The trailing separator is the whole content of this function: a bare prefix
+ * test puts `notes/projects-old/001.md` inside `notes/projects`, which is the
+ * difference between deleting one folder and deleting the one beside it.
+ */
+export function inside(path: string, folder: string): boolean {
+  return path.startsWith(`${folder}/`)
+}
+
+/**
  * The vault path a note's `![alt](src)` points at, or `null` if it points
  * somewhere this app will not serve from.
  *

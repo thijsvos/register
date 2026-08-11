@@ -1,6 +1,7 @@
 import { isoStamp } from '../lib/time'
 import {
   ApiError,
+  deleteFolder,
   deleteNote,
   type Entry,
   type GitStatus,
@@ -9,12 +10,13 @@ import {
   type Loaded,
   openEvents,
   putNote,
+  type Trashed,
   type VaultEvent,
 } from './api'
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
-import { basename, DAILY_TEMPLATE, isListed } from './paths'
+import { basename, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
 
@@ -576,6 +578,78 @@ class VaultStore {
   }
 
   /**
+   * Move one note to the trash (§04 Rev P).
+   *
+   * A dirty buffer is **not** saved first, unlike every other navigation: the
+   * point of the operation is that this text is not wanted, and writing it to
+   * disk on the way to deleting it is work whose only effect is a larger file in
+   * the trash.
+   */
+  async trashNote(path: string): Promise<boolean> {
+    try {
+      await deleteNote(path)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+    this.#forget(path)
+    // Where it went, because §04 never hard-deletes and a message that does not
+    // say where to look makes a recoverable operation feel final.
+    this.notice = `Trashed ${basename(path)} → .register/trash/`
+    await this.refresh()
+    return true
+  }
+
+  /**
+   * Move a folder and everything under it to the trash (§04 Rev P).
+   *
+   * The notice reports the server's counts rather than the one the confirm was
+   * built from. They differ by exactly what the INDEX cannot draw — media above
+   * all — and a folder that took an image with it should say so rather than let
+   * the reader find out in Finder.
+   */
+  async trashFolder(path: string): Promise<boolean> {
+    let moved: Trashed
+    try {
+      moved = await deleteFolder(path)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+
+    for (const held of Object.keys(this.corpus)) {
+      if (inside(held, path)) this.#forget(held)
+    }
+    this.notice = `Trashed ${path} — ${count(moved.notes, 'note')}${
+      moved.files === 0 ? '' : ` and ${count(moved.files, 'file')}`
+    } → ${moved.bucket}`
+    await this.refresh()
+    return true
+  }
+
+  /**
+   * Drop everything held about a path that is no longer on disk.
+   *
+   * The corpus matters as much as the buffer: nothing else prunes it —
+   * `#fillCorpus` only ever adds — so a trashed note would keep answering ⌘K
+   * with a body the vault no longer has.
+   */
+  #forget(path: string): void {
+    delete this.corpus[path]
+    this.#parked.delete(path)
+    if (this.openPath !== path) return
+    // A pending save would otherwise write the buffer straight back to the path
+    // that was just emptied, resurrecting the note as a side effect of deleting
+    // it. Cleared before the flags so the debounce has nothing left to aim at.
+    clearTimeout(this.#saveTimer)
+    this.openPath = null
+    this.buffer = ''
+    this.etag = null
+    this.dirty = false
+    this.externalEdit = false
+  }
+
+  /**
    * Write a merged note over the original and retire the copy (§02b Screen 4).
    *
    * Returns whether the vault now holds the merge. The order is the whole
@@ -783,6 +857,16 @@ class VaultStore {
     )
     await Promise.all(workers)
   }
+}
+
+/**
+ * "1 note" / "2 notes" — the plural that would otherwise read as a bug.
+ *
+ * A notice saying "1 notes" is the kind of thing that makes a reader distrust
+ * the number beside it, which is the one thing this message exists to carry.
+ */
+function count(n: number, noun: string): string {
+  return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
 function describe(error: unknown): string {

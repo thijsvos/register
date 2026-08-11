@@ -15,12 +15,36 @@ import { measure } from '../lib/render.svelte'
  *  code that runs under Vitest in node. */
 const inBrowser = typeof document !== 'undefined'
 
+/**
+ * A deletion waiting to be confirmed.
+ *
+ * `notes` is what the INDEX can see under it, which is what the confirm names —
+ * and deliberately not what will actually be moved: the server takes the media
+ * too, and the notice afterwards reports its own count. Promising a number the
+ * client cannot know would be worse than showing the one it can and correcting
+ * it with the truth.
+ */
+export interface Pending {
+  kind: 'note' | 'folder'
+  path: string
+  notes: number
+}
+
 class ChromeState {
   /** Read back from the pre-paint boot script rather than asked again. */
   dark = $state(inBrowser && document.documentElement.classList.contains('dark'))
   inspector = $state(true)
   index = $state(true)
   paletteOpen = $state(false)
+
+  /**
+   * The deletion the palette is currently asking about, or null.
+   *
+   * Held here rather than in the palette so the two surfaces that can start one
+   * — a focused INDEX row and a palette command — hand over the same shape, and
+   * so closing the palette is the only place that has to clear it.
+   */
+  pending = $state<Pending | null>(null)
   /** §02b Screen 6 is showing instead of the note. */
   settings = $state(false)
 
@@ -214,6 +238,27 @@ class ChromeState {
 
   closePalette(): void {
     this.paletteOpen = false
+    // An armed deletion does not survive the surface that was asking about it.
+    // Leaving it set would re-arm the palette the next time ⌘K opened it, which
+    // is the one way a confirm step can be worse than no confirm step.
+    this.pending = null
+  }
+
+  /**
+   * Raise the palette already asking about a deletion (§02b Screen 2, Rev P).
+   *
+   * The palette rather than a new component: it is already the app's dialog, it
+   * is already keyboard-first, and §02b's answer to a modal elsewhere was "never
+   * a modal". So a destructive action arms it instead of inventing a second
+   * surface with its own focus handling to get wrong.
+   *
+   * This is also how the INDEX gets a delete without the nav row growing one.
+   * `⌫` on the focused row hands its target here; the row itself is unchanged,
+   * so the §02b state matrix for a nav row still describes it exactly.
+   */
+  arm(target: Pending): void {
+    this.pending = target
+    this.paletteOpen = true
   }
 }
 

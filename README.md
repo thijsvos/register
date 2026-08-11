@@ -266,6 +266,16 @@ own key — so this table is a convenience, not a manual.
 | `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
 | `j` · `k` | From the frame, step into the index — `j` at the top, `k` at the bottom |
 | `↑` `↓` · `Tab` | Move within the palette — `j` and `k` are letters while you are typing |
+| `→` `←` · `l` `h` | Open and fold a folder in the index; step in and out |
+| `⌫` | On an index row: delete that note or folder — asks first, in the palette |
+
+Deleting asks before it acts, and never hard-deletes. `⌫` on an index row — or
+`DELETE · NOTE` / `DELETE · FOLDER` in ⌘K — arms the palette with a single
+question naming what will go and how many notes that is. Answer it and the files
+move to `.register/trash/<timestamp>/`, keeping the paths they had, so putting
+them back is one `mv`. A folder takes everything under it, images and PDFs
+included, and the notice afterwards says what actually left rather than what was
+counted — the index only ever showed you the notes.
 
 ⌘K is the whole navigation surface. It runs real full-text search over the note
 bodies rather than filtering a fixed list; it matches commands as a subsequence,

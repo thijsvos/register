@@ -333,6 +333,85 @@ async fn delete_moves_the_note_to_trash() {
     assert_eq!(trashed, 1);
 }
 
+#[tokio::test]
+async fn delete_folder_moves_the_subtree_and_reports_what_left() {
+    let tmp = TempVault::new();
+    tmp.put("notes/projects/010-a.md", NOTE);
+    tmp.put("notes/projects/deep/011-b.md", NOTE);
+    tmp.put("notes/projects/diagram.png", "pretend png");
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "DELETE", "/api/folder/notes/projects", &[], "").await;
+    assert_eq!(reply.status, 200);
+    // The counts are the reason this is not a 204: the client confirmed against
+    // two notes and cannot see the PNG, so only the server can say what left.
+    assert!(reply.body.contains("\"notes\":2"), "{}", reply.body);
+    assert!(reply.body.contains("\"files\":1"), "{}", reply.body);
+    assert!(
+        reply.body.contains("\".register/trash/"),
+        "the bucket is where it went and the notice needs to name it: {}",
+        reply.body
+    );
+
+    assert!(!tmp.path().join("notes/projects").exists());
+    assert_eq!(
+        std::fs::read_dir(tmp.path().join(".register/trash"))
+            .expect("read trash")
+            .count(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn the_folder_route_only_deletes() {
+    let tmp = TempVault::new();
+    tmp.put("notes/projects/010-a.md", NOTE);
+    let addr = start(&tmp).await;
+
+    for method in ["GET", "PUT", "POST"] {
+        let reply = request(addr, method, "/api/folder/notes/projects", &[], "").await;
+        assert_eq!(
+            reply.status, 405,
+            "{method} /api/folder should not be routed"
+        );
+    }
+    assert!(tmp.path().join("notes/projects/010-a.md").is_file());
+}
+
+#[tokio::test]
+async fn a_folder_delete_cannot_reach_out_of_the_vault() {
+    // The same table `/api/note` and `/api/file` are held to. Each of these
+    // names something that exists, so a 404 would prove nothing.
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    tmp.put(".register/config.json", "{}");
+    let addr = start(&tmp).await;
+
+    for path in [
+        "/api/folder/../..",
+        "/api/folder/%2e%2e/%2e%2e",
+        "/api/folder/.register",
+        "/api/folder/notes/../../etc",
+    ] {
+        let reply = request(addr, "DELETE", path, &[], "").await;
+        assert_eq!(reply.status, 400, "{path} was not refused");
+    }
+    assert!(tmp.path().join(".register/config.json").is_file());
+    assert!(tmp.path().join("notes/003-a.md").is_file());
+}
+
+#[tokio::test]
+async fn a_note_is_not_a_folder_over_http() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", NOTE);
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "DELETE", "/api/folder/notes/003-a.md", &[], "").await;
+    assert_eq!(reply.status, 404);
+    assert!(reply.body.contains("no such folder"), "{}", reply.body);
+    assert!(tmp.path().join("notes/003-a.md").is_file());
+}
+
 // ---------------------------------------------------------------- security
 
 #[tokio::test]

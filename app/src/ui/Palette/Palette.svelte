@@ -1,8 +1,9 @@
 <script lang="ts">
+import { basename } from '../../core/paths'
 import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
-import { go } from '../nav'
-import { chrome } from '../view.svelte'
+import { enterIndex, go } from '../nav'
+import { chrome, type Pending } from '../view.svelte'
 import { type Command, matchCommands, templateChoices } from './commands'
 
 /** What the list can show before it scrolls past being useful. */
@@ -22,17 +23,45 @@ let list: HTMLDivElement | null = $state(null)
  * tree and the corpus, this derived re-runs when either moves.
  */
 let notes = $derived.by(() => {
+  // An armed deletion owns the whole surface: a list of notes under a question
+  // about deleting one of them is an invitation to press Enter on the wrong row.
+  if (chrome.pending !== null) return []
   search.sync(vault.tree, vault.corpus)
   return search.find(query, LIMIT)
 })
 
-let commands = $derived(matchCommands(query))
-let templates = $derived(templateChoices(query))
+// Two rows and no filtering when armed. The query box stays — focus already
+// goes there and moving it would be a second thing to get right — but what is
+// typed cannot reach these, so a confirm cannot be narrowed out of existence.
+let commands = $derived(
+  chrome.pending === null ? matchCommands(query) : confirmRows(chrome.pending),
+)
+let templates = $derived(chrome.pending === null ? templateChoices(query) : [])
 let total = $derived(notes.length + commands.length + templates.length)
 
 // The selection must never point past the end when the query narrows.
 $effect(() => {
   if (selected >= total) selected = Math.max(0, total - 1)
+})
+
+// Arming puts the selection on the confirm row and the caret back in the box.
+//
+// The selection, because otherwise the palette's default answer depends on how
+// you got here: armed from a command row it is clamped down to CANCEL, armed
+// from a keystroke it sits at 0. Two different default answers to the same
+// question is the kind of thing a reader learns as "it sometimes deletes and
+// sometimes does not".
+//
+// The focus, because arming can happen while the palette is *already* open —
+// choosing DELETE · FOLDER with the mouse — and the row that was clicked is
+// then replaced by the confirm rows. Focus falls to <body>, and the question on
+// screen cannot be answered with the keyboard at all: measured as a confirm
+// that sat there ignoring Enter. The mount-time effect below does not cover it,
+// because the component is never remounted.
+$effect(() => {
+  void chrome.pending
+  selected = 0
+  input?.focus()
 })
 
 // Focus goes into the palette on open and back where it came from on close.
@@ -58,6 +87,55 @@ $effect(() => {
 function excerpt(hit: Hit): string {
   const held = vault.corpus[hit.entry.path]
   return held === undefined ? '' : snippet(held.body, hit.terms)
+}
+
+/**
+ * The two rows an armed deletion shows (§02b Screen 2, Rev P).
+ *
+ * Built here rather than in `commands.ts` because they are about *this* pending
+ * target rather than about the app: `allCommands()` answers "what can be done",
+ * and these answer "do you mean it".
+ *
+ * CANCEL is a row rather than only a key, because ESC is the app's way out of
+ * every other surface and a destructive question is the one place where the way
+ * out should be visible rather than remembered.
+ */
+function confirmRows(pending: Pending): Command[] {
+  const what =
+    pending.kind === 'note'
+      ? basename(pending.path)
+      : `${pending.path} · ${pending.notes} ${pending.notes === 1 ? 'note' : 'notes'}`
+
+  return [
+    {
+      id: 'confirm-trash',
+      label: `CONFIRM · TRASH ${what}`,
+      keys: '↵',
+      // Focus lands back on the INDEX afterwards rather than on <body>. The row
+      // this was launched from is the thing that was just deleted, so the
+      // palette's own focus-restore has nothing to return to — §01's mouse-free
+      // promise breaks on the *next* keystroke, which is exactly where it is
+      // hardest to notice.
+      takesFocus: true,
+      run: async () => {
+        const gone =
+          pending.kind === 'note'
+            ? await vault.trashNote(pending.path)
+            : await vault.trashFolder(pending.path)
+        // Only on success: a refused deletion leaves the row it came from on
+        // screen, and moving focus off it would lose the reader's place for no
+        // reason. `enterIndex` is a no-op when the INDEX is hidden.
+        if (gone) enterIndex('first')
+      },
+    },
+    {
+      id: 'cancel-trash',
+      label: 'CANCEL',
+      keys: 'ESC',
+      // Closing is the whole effect: `closePalette` disarms.
+      run: () => {},
+    },
+  ]
 }
 
 /** Set when the palette navigated, so its focus-restore stands down and the
@@ -155,7 +233,8 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
 >
   <div class="pal" role="dialog" aria-modal="true" aria-label="Command and search">
     <div class="head">
-      <span>Command &amp; search</span><span class="esc">[ESC]</span>
+      <span>{chrome.pending === null ? 'Command & search' : 'Confirm deletion'}</span
+      ><span class="esc">[ESC]</span>
     </div>
 
     <div class="entry">
@@ -212,7 +291,9 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
       {/if}
 
       {#if commands.length > 0}
-        <div class="section">Commands · {commands.length}</div>
+        <div class="section">
+          {chrome.pending === null ? `Commands · ${commands.length}` : 'Confirm'}
+        </div>
         {#each commands as command, index (command.id)}
           {@const position = notes.length + index}
           <button
@@ -265,7 +346,13 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
     </div>
 
     <div class="foot">
-      <span>↑↓ navigate · ↵ open/run</span><span>{total} results</span>
+      {#if chrome.pending === null}
+        <span>↑↓ navigate · ↵ open/run</span><span>{total} results</span>
+      {:else}
+        <!-- §04 never hard-deletes, and a confirm that does not say so asks the
+             reader to be braver than the operation requires. -->
+        <span>↵ confirm · ESC cancel</span><span>Recoverable in .register/trash/</span>
+      {/if}
     </div>
   </div>
 </div>

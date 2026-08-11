@@ -1,6 +1,10 @@
 /**
- * The whole server surface (§04). Eight endpoints, nothing else — refs, links,
+ * The whole server surface (§04). Ten endpoints, nothing else — refs, links,
  * tasks, tags and search are all client-side derivations of plain text.
+ *
+ * Eight until Rev O added `GET /api/file` and Rev P `DELETE /api/folder`; this
+ * count went stale at the first of those, which is the argument for it being
+ * here at all rather than left to the reader to take on trust.
  */
 
 /**
@@ -83,7 +87,19 @@ export class ApiError extends Error {
  * anything, and it would break every path that has a folder in it.
  */
 function noteUrl(path: string): string {
-  return `/api/note/${path.split('/').map(encodeURIComponent).join('/')}`
+  return `/api/note/${urlPath(path)}`
+}
+
+/**
+ * A vault path as URL path segments.
+ *
+ * Per segment, so the separators survive: `encodeURIComponent` on the whole
+ * path would escape every `/` — see `noteUrl`'s note above for why that
+ * protects nothing and breaks every path with a folder in it. Three routes
+ * spell this now, which is one too many for a copy each.
+ */
+function urlPath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/')
 }
 
 /**
@@ -95,7 +111,7 @@ function noteUrl(path: string): string {
  * better than this module could, and none of which shows up in the bundle.
  */
 export function fileUrl(path: string): string {
-  return `/api/file/${path.split('/').map(encodeURIComponent).join('/')}`
+  return `/api/file/${urlPath(path)}`
 }
 
 async function refuse(response: Response): Promise<never> {
@@ -149,6 +165,30 @@ export async function revealVault(): Promise<void> {
 export async function deleteNote(path: string): Promise<void> {
   const response = await fetch(noteUrl(path), { method: 'DELETE' })
   if (!response.ok) await refuse(response)
+}
+
+/** What a folder deletion moved (§04 Rev P). */
+export interface Trashed {
+  notes: number
+  /** Everything else that went with it — media above all, which the INDEX never
+   *  drew and the confirm therefore could not count. */
+  files: number
+  /** Vault-relative bucket it all landed in, for the notice to name. */
+  bucket: string
+}
+
+/**
+ * Trash a folder and everything under it (§04 Rev P).
+ *
+ * Its own route rather than a loop over `deleteNote`: one deletion is one trash
+ * bucket, and a loop scatters a folder across as many as it held notes — see
+ * `vault.rs::trash_folder` for the rest of that argument, including why the loop
+ * cannot move the images either.
+ */
+export async function deleteFolder(path: string): Promise<Trashed> {
+  const response = await fetch(`/api/folder/${urlPath(path)}`, { method: 'DELETE' })
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Trashed
 }
 
 /**

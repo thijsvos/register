@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Entry } from '../../core/api'
 import { vault } from '../../core/store.svelte'
-import { fuzzyScore, templateChoices, UNTITLED } from './commands'
+import { fuzzyScore, openFolder, templateChoices, UNTITLED } from './commands'
 
 describe('fuzzyScore', () => {
   it('matches an empty query against anything', () => {
@@ -100,5 +100,33 @@ describe('templateChoices', () => {
 
   it('offers stencils only, never ordinary notes', () => {
     expect(templateChoices('x').map((one) => one.path)).toEqual(['templates/daily.md'])
+  })
+})
+
+describe('the folder a delete command can name', () => {
+  const AT: Entry = {
+    path: 'notes/003-a.md',
+    ref: '003',
+    title: 'Alpha',
+    tags: [],
+    mtime: 0,
+    size: 0,
+    etag: 'v1',
+  }
+
+  beforeEach(() => {
+    vault.tree = [AT]
+  })
+
+  it('offers the folder the open note is in, deepest first', () => {
+    vault.openPath = 'notes/projects/deep/011-b.md'
+    expect(openFolder()).toBe('notes/projects/deep')
+  })
+
+  it('offers nothing for a note at the vault root, or none open', () => {
+    vault.openPath = '000-inbox.md'
+    expect(openFolder()).toBeNull()
+    vault.openPath = null
+    expect(openFolder()).toBeNull()
   })
 })
