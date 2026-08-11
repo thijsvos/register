@@ -52,6 +52,12 @@ test.beforeAll(async () => {
           'A note: [another](002-other.md) and the web: [out](https://example.com)\n\n' +
           'And one that is not there:\n\n![A plan](nowhere.png)\n',
       }),
+      // Two references on one line, for the click-target test.
+      'notes/002-pair.md': note({
+        ref: '002',
+        title: 'Pair',
+        body: 'Both on one line: ![d](diagram.png) and [s](spec.pdf)\n',
+      }),
       'notes/diagram.png': PNG,
       'notes/spec.pdf': pdf(),
     }),
@@ -121,8 +127,7 @@ test('a link to a PDF opens it in a frame the CSP permits', async ({ page }) => 
   const refused = watchCsp(page)
   await openTheNote(page)
 
-  await expect(page.locator('.cm-filelink')).toHaveCount(1)
-  await page.locator('.cm-filelink').first().click()
+  await page.locator('.cm-filelink', { hasText: 'spec.pdf' }).click()
 
   const frame = page.locator('.media iframe')
   await expect(frame).toBeVisible()
@@ -131,14 +136,50 @@ test('a link to a PDF opens it in a frame the CSP permits', async ({ page }) => 
   expect(refused, 'the browser refused to frame the document').toEqual([])
 })
 
-test('only a link to a servable file is dressed as one', async ({ page }) => {
-  // Three links in that note and exactly one of them opens a surface. Marking
-  // every link would promise a viewer for targets there is none for — and
-  // `fileUrl` resolves any vault-relative path, `.md` included, so a link to
-  // another note would have opened Screen 8 onto its own 415.
+test('the reference text opens the file, not only the image below it', async ({
+  page,
+}) => {
+  // What a reader actually clicks. The image is drawn *under* its reference, so
+  // for the first moment — and forever, if the file is missing — the text is the
+  // only thing on screen. Clicking it did nothing at all.
   await openTheNote(page)
-  await expect(page.locator('.cm-filelink')).toHaveCount(1)
-  await expect(page.locator('.cm-filelink')).toContainText('the spec')
+  const reference = page.locator('.cm-filelink', { hasText: 'diagram.png' })
+  await expect(reference).toHaveCount(1)
+  await reference.click()
+
+  await expect(page.locator('.media img')).toBeVisible()
+  await expect(page.locator('header .crumb')).toContainText('diagram.png')
+})
+
+test('two references on one line open their own targets', async ({ page }) => {
+  // The click handler used to recover the target by re-running a regex over the
+  // clicked line, which takes the first match — so the second reference on a
+  // line opened the first. Each mark carries its own target now.
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Pair/ }).first().click()
+  await expect(page.locator('.cm-content')).toBeVisible()
+
+  const links = page.locator('.cm-filelink')
+  await expect(links).toHaveCount(2)
+  await links.nth(1).click()
+  await expect(page.locator('header .crumb')).toContainText('spec.pdf')
+})
+
+test('only references to servable files are dressed as links', async ({ page }) => {
+  // That note holds five references. Three open a surface — two images and the
+  // PDF — and two must not: a link to another note, which Screen 8 answers 415
+  // for, and a link to the web, which is not the vault's to show. Marking every
+  // link would promise a viewer for targets there is none for.
+  await openTheNote(page)
+  const dressed = page.locator('.cm-filelink')
+  await expect(dressed).toHaveCount(3)
+
+  const targets = await dressed.evaluateAll((nodes) =>
+    nodes.map((node) => node.getAttribute('data-src')),
+  )
+  expect(targets.sort()).toEqual(['diagram.png', 'nowhere.png', 'spec.pdf'])
+  expect(targets).not.toContain('002-other.md')
+  expect(targets).not.toContain('https://example.com')
 })
 
 test('leaving the viewer puts the note back, not the file', async ({ page }) => {

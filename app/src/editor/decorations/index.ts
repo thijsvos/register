@@ -7,7 +7,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view'
-import { imageEmbeds } from './media'
+import { IMAGE, imageEmbeds } from './media'
 import { TaskToggle } from './tasks'
 import { WIKILINK, wikiLinkHost } from './wikilinks'
 
@@ -36,16 +36,24 @@ const wikiMissing = Decoration.mark({
   attributes: { role: 'link', tabindex: '0' },
 })
 /**
- * A `[text](spec.pdf)` whose target is a file this app can show.
+ * A reference whose target is a file this app can show — `[text](spec.pdf)` or
+ * `![alt](diagram.png)` alike.
  *
  * Only those: an ordinary link to another note, or to the web, keeps the demoted
  * ink the HighlightStyle already gives it. Marking every link would promise a
  * surface for targets there is none for.
+ *
+ * Built per reference rather than hoisted, because it carries its own target.
+ * The alternative — recovering the target by re-running a regex over the clicked
+ * line — takes the first match on that line, so two references on one line open
+ * whichever came first. Written that way at first; the attribute is both simpler
+ * and correct.
  */
-const fileLink = Decoration.mark({
-  class: 'cm-filelink',
-  attributes: { role: 'link', tabindex: '0' },
-})
+const fileLink = (target: string) =>
+  Decoration.mark({
+    class: 'cm-filelink',
+    attributes: { role: 'link', tabindex: '0', 'data-src': target },
+  })
 
 /** The destination of a markdown inline link, as the tree hands it over. */
 const LINK = /^\[[^\]]*\]\(\s*<?([^)\s>]+)/
@@ -95,7 +103,18 @@ function build(view: EditorView): DecorationSet {
           // linked with `[[wikilinks]]`; this is for the files beside them.
           const servable = target !== '' && !/\.md$/i.test(target)
           if (servable && host.fileUrl(target) !== null) {
-            marks.push(fileLink.range(node.from, node.to))
+            marks.push(fileLink(target).range(node.from, node.to))
+          }
+          return
+        }
+        // The reference itself, not only the image drawn beneath it. A reader
+        // who wants a closer look clicks what they can see — and the text is
+        // what they can see before the image has decoded.
+        if (node.name === 'Image') {
+          const target =
+            IMAGE.exec(view.state.doc.sliceString(node.from, node.to))?.[2] ?? ''
+          if (target !== '' && host.fileUrl(target) !== null) {
+            marks.push(fileLink(target).range(node.from, node.to))
           }
           return
         }
@@ -162,16 +181,11 @@ const plugin = ViewPlugin.fromClass(
         // wikilink branch because the two marks never overlap and this one is
         // the cheaper test.
         const file = target.closest('.cm-filelink')
-        if (file !== null) {
-          const position = view.posAtDOM(file)
-          const line = view.state.doc.lineAt(position)
-          const found = LINK.exec(line.text.slice(position - line.from))?.[1]
-          const written = found ?? LINK.exec(line.text)?.[1]
-          if (written !== undefined) {
-            event.preventDefault()
-            view.state.facet(wikiLinkHost).openFile(written)
-            return true
-          }
+        const written = file?.getAttribute('data-src')
+        if (written !== null && written !== undefined) {
+          event.preventDefault()
+          view.state.facet(wikiLinkHost).openFile(written)
+          return true
         }
 
         const link = target.closest('.cm-wiki')

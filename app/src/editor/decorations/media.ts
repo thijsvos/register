@@ -11,7 +11,7 @@ import { wikiLinkHost } from './wikilinks'
  * code block is not one. Only the two fields are pulled with a regex, over the
  * node's own ~60 characters rather than the document.
  */
-const IMAGE = /^!\[([^\]]*)\]\(\s*<?([^)\s>]+)/
+export const IMAGE = /^!\[([^\]]*)\]\(\s*<?([^)\s>]+)/
 
 /**
  * What CodeMirror should assume an undecoded image occupies.
