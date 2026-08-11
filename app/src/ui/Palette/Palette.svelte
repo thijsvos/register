@@ -1,4 +1,5 @@
 <script lang="ts">
+import { tick } from 'svelte'
 import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
 import { enterIndex, go, traverse } from '../nav'
@@ -117,7 +118,18 @@ async function answer(pending: Pending): Promise<void> {
       : await vault.trashFolder(pending.path)
   // §01's mouse-free promise breaks on the *next* keystroke, not this one, which
   // is where it is hardest to notice. `enterIndex` is a no-op with no INDEX.
-  if (gone) enterIndex('first')
+  //
+  // After the redraw, not before. A deletion can *re-key* the index rather than
+  // only shorten it: take the last loose note out of `notes/` and it holds one
+  // folder and nothing else, so the chain compacts — the row keyed `notes` is
+  // destroyed and one keyed `notes/projects` takes its place. Focusing first
+  // lands on an element the flush is about to remove, and focus falls to
+  // <body>. Measured on CI, where the flush happens to run after this call;
+  // locally it ran before, which is why the suite was green either way.
+  if (gone) {
+    await tick()
+    enterIndex('first')
+  }
 }
 
 /**

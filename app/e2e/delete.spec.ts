@@ -225,6 +225,16 @@ test('deleting from the index leaves the keyboard in the index', async ({ page }
   await page.keyboard.press('Enter')
 
   await expect(page.getByRole('button', { name: /Alpha/ })).toHaveCount(0)
+
+  // The index does not merely lose a row here, it is re-keyed: `notes/` is left
+  // holding one folder and nothing else, so the chain compacts and the row that
+  // was first is destroyed rather than kept. That is what makes *when* focus is
+  // placed matter — before the redraw it lands on an element about to go.
+  const after = await rows(page)
+  expect(after[0]).toMatch(/^▾ NOTES\/PROJECTS/)
+  // A bare row is NOTES followed by its count; the compacted one has a slash.
+  expect(after.some((row) => /^▾ NOTES\s/.test(row))).toBe(false)
+
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.tagName))
     .toBe('BUTTON')
