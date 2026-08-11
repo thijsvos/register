@@ -151,3 +151,24 @@ export function notesUnder(entries: Entry[], folder: string): number {
   return entries.filter((entry) => isListed(entry.path) && inside(entry.path, folder))
     .length
 }
+
+/**
+ * Every folder that holds a listed note, as real vault paths.
+ *
+ * Uncompacted, unlike `folderTree`: compaction is a drawing decision for a
+ * 250px rail, and `notes/projects` is still two folders on disk. A create
+ * target has to name what is actually there or the note lands somewhere the
+ * reader did not pick.
+ *
+ * Derived from listed notes, which is also the guard: `daily/` and `templates/`
+ * hold no listed note, so they are never offered — a note created in either
+ * would vanish from the INDEX the moment it was made.
+ */
+export function folderTargets(entries: Entry[]): string[] {
+  const found = new Set<string>()
+  for (const entry of entries) {
+    if (!isListed(entry.path)) continue
+    for (const folder of ancestors(entry.path)) found.add(folder)
+  }
+  return [...found]
+}

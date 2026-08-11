@@ -74,7 +74,12 @@ describe('go', () => {
     expect(vault.open).toHaveBeenCalledWith('notes/003-a.md')
 
     go.create('A title', 'templates/daily.md')
-    expect(vault.create).toHaveBeenCalledWith('A title', 'templates/daily.md')
+    expect(vault.create).toHaveBeenCalledWith('A title', 'templates/daily.md', undefined)
+
+    // The third argument is where it goes. Passing it is the whole of `go`'s
+    // part in creating into a folder — the decision is the caller's.
+    go.create('A title', undefined, 'notes/projects')
+    expect(vault.create).toHaveBeenCalledWith('A title', undefined, 'notes/projects')
 
     go.daily()
     expect(vault.openDaily).toHaveBeenCalled()

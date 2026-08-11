@@ -18,9 +18,18 @@ export function slug(title: string): string {
   return kebab === '' ? 'untitled' : kebab
 }
 
-/** `notes/003-terminal-aesthetics.md` for ref 003. */
-export function notePath(ref: string, title: string): string {
-  return `notes/${ref}-${slug(title)}.md`
+/** Where a note goes when nobody says otherwise — §04's layout. */
+export const DEFAULT_FOLDER = 'notes'
+
+/**
+ * `notes/003-terminal-aesthetics.md` for ref 003, or the same under any folder.
+ *
+ * The ref is unaffected by the folder: `next_ref` walks the whole vault, so a
+ * note three levels down still takes the next number in the register. Nesting
+ * changes where a note lives, never what it is called.
+ */
+export function notePath(ref: string, title: string, folder = DEFAULT_FOLDER): string {
+  return `${folder}/${ref}-${slug(title)}.md`
 }
 
 /**

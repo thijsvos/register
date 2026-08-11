@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  cleanFolder,
   folders,
   inside,
   isConflictCopy,
@@ -9,6 +10,7 @@ import {
   isListed,
   isTemplate,
   resolveSrc,
+  splitFolder,
 } from './paths'
 
 const CONFLICT = 'notes/003-a.conflict-20260805T101500000Z.md'
@@ -167,5 +169,86 @@ describe('inside', () => {
 
   it('does not hold for the folder itself', () => {
     expect(inside('notes/projects', 'notes/projects')).toBe(false)
+  })
+})
+
+describe('splitFolder', () => {
+  it('reads the folder off the last separator', () => {
+    expect(splitFolder('notes/projects/Launch plan')).toEqual({
+      folder: 'notes/projects',
+      title: 'Launch plan',
+    })
+  })
+
+  it('leaves a plain title alone', () => {
+    // What every existing route into creation passes, including a wikilink
+    // followed to a note that does not exist yet.
+    expect(splitFolder('Terminal aesthetics')).toEqual({
+      folder: null,
+      title: 'Terminal aesthetics',
+    })
+  })
+
+  it('reads a completed folder with no title yet', () => {
+    // Exactly what choosing a suggestion types for you.
+    expect(splitFolder('notes/projects/')).toEqual({
+      folder: 'notes/projects',
+      title: '',
+    })
+  })
+
+  it('trims either side, since the separator is typed by hand', () => {
+    expect(splitFolder(' notes/projects / Launch ')).toEqual({
+      folder: 'notes/projects',
+      title: 'Launch',
+    })
+  })
+})
+
+describe('cleanFolder', () => {
+  it('keeps a plain nested path as it is', () => {
+    expect(cleanFolder('notes/projects')).toBe('notes/projects')
+    expect(cleanFolder('archive')).toBe('archive')
+  })
+
+  it('refuses a separator with nothing either side of it', () => {
+    // `/Foo` used to yield an empty folder, an absolute path on the wire, and a
+    // create that failed with "already exists" about a note that never existed.
+    expect(cleanFolder('/notes')).toBeNull()
+    expect(cleanFolder('notes/')).toBeNull()
+    expect(cleanFolder('notes//projects')).toBeNull()
+    expect(cleanFolder('')).toBeNull()
+  })
+
+  it('refuses a dot segment, which is three rules in one', () => {
+    // `..` never reached the server as `..`: fetch collapses it in the URL, so
+    // `notes/../templates` arrived as `templates` and was accepted. The only
+    // place that can be caught is before the request is built.
+    expect(cleanFolder('notes/../templates')).toBeNull()
+    expect(cleanFolder('..')).toBeNull()
+    expect(cleanFolder('.')).toBeNull()
+    expect(cleanFolder('.register')).toBeNull()
+    expect(cleanFolder('notes/.hidden')).toBeNull()
+  })
+
+  it('refuses the separators the server refuses', () => {
+    expect(cleanFolder('notes\\projects')).toBeNull()
+    expect(cleanFolder('notes\u0000')).toBeNull()
+  })
+
+  it('refuses the vault furniture whatever case it is typed in', () => {
+    // The filesystem folds case and the guard did not, so `Templates/Launch`
+    // landed in the real `templates/`: written, hidden from the INDEX, and
+    // offered back as a phantom stencil.
+    expect(cleanFolder('templates')).toBeNull()
+    expect(cleanFolder('Templates')).toBeNull()
+    expect(cleanFolder('TEMPLATES/deep')).toBeNull()
+    expect(cleanFolder('daily')).toBeNull()
+    expect(cleanFolder('Daily/2026')).toBeNull()
+  })
+
+  it('allows a nested folder that merely shares the name', () => {
+    // `isTemplate` is a top-level rule, so this is a folder like any other.
+    expect(cleanFolder('notes/templates')).toBe('notes/templates')
   })
 })

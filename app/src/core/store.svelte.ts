@@ -16,7 +16,7 @@ import {
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
-import { basename, DAILY_TEMPLATE, inside, isListed } from './paths'
+import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
 
@@ -58,6 +58,15 @@ const CORPUS_CONCURRENCY = 3
  * zero-delay timer only merges events that arrive in the same tick.
  */
 const REFRESH_COALESCE_MS = 0
+
+/**
+ * What asking the server about a name told us.
+ *
+ * Three answers, not two: "free", "somebody has it", and "the server will not
+ * have it at all" — which used to collapse into the second and print
+ * "already exists" over a path that never could have.
+ */
+type Vacancy = { state: 'free' } | { state: 'taken' } | { state: 'refused'; why: string }
 
 class VaultStore {
   /** Every note, from `/api/tree`. The sidebar's only source. */
@@ -149,7 +158,15 @@ class VaultStore {
     await this.refresh()
 
     if (!this.tree.some((entry) => entry.path === path)) {
-      if (!(await this.#isFree(path))) {
+      // Anything but `free` means do not write: taken is today's log, already
+      // there, and refused means we could not find out — and guessing free
+      // would put the stencil straight over whatever is on disk.
+      //
+      // Spelled against the state rather than as `!isFree(...)`, which is how
+      // this read before the answer grew a third case. `!` on an object is
+      // always false and is not a type error, so that spelling compiled, always
+      // took the create branch, and would have overwritten a real daily log.
+      if ((await this.#isFree(path)).state !== 'free') {
         await this.open(path)
         return
       }
@@ -386,7 +403,7 @@ class VaultStore {
    * path either way, so the free-name guard and the ref allocation cannot drift
    * between a blank note and a templated one.
    */
-  async create(title: string, from?: string): Promise<void> {
+  async create(title: string, from?: string, folder?: string): Promise<void> {
     // Refresh first so the ref is the vault's current one, not the one it had
     // when this tab was opened.
     await this.refresh()
@@ -398,14 +415,36 @@ class VaultStore {
       this.notice = 'Vault not loaded.'
       return
     }
-    const path = notePath(ref, title)
+    // A folder the INDEX cannot draw is refused rather than written into: a note
+    // in `daily/` or `templates/` is `isListed`-hidden, so creating one there
+    // succeeds and then appears to have done nothing. `folderTargets` never
+    // offers those, but a typed path can name anything — and the check has to
+    // run per segment, before the filesystem or the URL parser rewrites it.
+    // `cleanFolder` carries the two measurements that prove why.
+    let target: string | undefined
+    if (folder !== undefined) {
+      const clean = cleanFolder(folder)
+      if (clean === null) {
+        this.notice = `${folder} is not a folder notes can go in.`
+        return
+      }
+      target = clean
+    }
+    const path = notePath(ref, title, target)
 
     // §04's PUT has no create-if-absent mode — without If-Match it writes
     // unconditionally — so the name has to be confirmed free before writing,
     // not inferred from the response. The tree alone is not enough: it can be a
     // refresh behind whatever an agent just created.
-    if (!(await this.#isFree(path))) {
+    const vacancy = await this.#isFree(path)
+    if (vacancy.state === 'taken') {
       this.notice = `${path} already exists.`
+      return
+    }
+    if (vacancy.state === 'refused') {
+      // Not "already exists". A path the server will not accept never could
+      // have existed, and saying it did sends the reader looking for a file.
+      this.notice = `${path}: ${vacancy.why}`
       return
     }
 
@@ -433,7 +472,14 @@ class VaultStore {
     }
 
     await this.refresh()
-    await this.open(path)
+    // The path the *server* wrote, not the string that was typed. A filesystem
+    // that folds case or unicode writes a different one, and `openPath` is
+    // compared by string in three places — the active INDEX row, the folder
+    // reveal, and the external-edit latch — every one of which silently stops
+    // matching for the note just made. The ref is the join: the server
+    // allocated it, and nothing else in the vault carries it.
+    const written = this.tree.find((entry) => entry.ref === ref)
+    await this.open(written?.path ?? path)
   }
 
   /**
@@ -825,14 +871,17 @@ class VaultStore {
   }
 
   /** Whether nothing occupies `path` on disk right now. */
-  async #isFree(path: string): Promise<boolean> {
+  async #isFree(path: string): Promise<Vacancy> {
     try {
       await getNote(path)
-      return false
+      return { state: 'taken' }
     } catch (error) {
       // Only a genuine 404 means free. A transport failure means unknown, and
       // guessing "free" there would overwrite a note we simply could not read.
-      return error instanceof ApiError && error.status === 404
+      if (error instanceof ApiError && error.status === 404) return { state: 'free' }
+      // Distinct from taken, because the caller says different things about
+      // them: a path the server refuses is not a name somebody else has.
+      return { state: 'refused', why: describe(error) }
     }
   }
 

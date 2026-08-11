@@ -1,10 +1,11 @@
 <script lang="ts">
 import { tick } from 'svelte'
+import { DEFAULT_FOLDER } from '../../core/refs'
 import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
 import { enterIndex, go, traverse } from '../nav'
 import { chrome, type Pending } from '../view.svelte'
-import { type Command, matchCommands, templateChoices } from './commands'
+import { type Command, folderChoices, matchCommands, templateChoices } from './commands'
 
 /** What the list can show before it scrolls past being useful. */
 const LIMIT = 20
@@ -34,7 +35,13 @@ let notes = $derived.by(() => {
 
 let commands = $derived(chrome.pending === null ? matchCommands(query) : [])
 let templates = $derived(chrome.pending === null ? templateChoices(query) : [])
-let total = $derived(notes.length + commands.length + templates.length)
+// Existing folders the query could mean. Self-limiting: choosing one types a
+// trailing separator, which stops matching, so these clear themselves once the
+// destination is settled and what follows is a title.
+let folderRows = $derived(chrome.pending === null ? folderChoices(query) : [])
+let total = $derived(
+  notes.length + commands.length + folderRows.length + templates.length,
+)
 
 // The selection must never point past the end when the query narrows.
 $effect(() => {
@@ -184,12 +191,23 @@ function choose(index: number) {
     return
   }
 
-  const template = templates[index - notes.length - commands.length]
+  const folder = folderRows[index - notes.length - commands.length]
+  if (folder !== undefined) {
+    // Completes rather than creates. Nothing is written by picking a place to
+    // write it, and the palette stays open so the title can follow — which is
+    // also why the caret goes back to the end of the box.
+    query = `${folder.path}/`
+    selected = 0
+    input?.focus()
+    return
+  }
+
+  const template = templates[index - notes.length - commands.length - folderRows.length]
   if (template !== undefined) {
     // Lands the caret in the new note, like every other route into one.
     navigated = true
     chrome.closePalette()
-    go.create(template.title, template.path)
+    go.create(template.title, template.path, template.folder ?? undefined)
   }
 }
 
@@ -387,9 +405,9 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
         {/each}
       {/if}
 
-      {#if templates.length > 0}
-        <div class="section">New from template · {templates.length}</div>
-        {#each templates as template, index (template.path)}
+      {#if folderRows.length > 0}
+        <div class="section">Folders · {folderRows.length}</div>
+        {#each folderRows as folder, index (folder.path)}
           {@const position = notes.length + commands.length + index}
           <button
             class="row"
@@ -403,8 +421,37 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
             onclick={() => choose(position)}
           >
             <span class="ref"></span>
+            <span class="name">
+              {#each segments(folder.path, query) as part, n (n)}
+                <span class:hit={part.hit}>{part.text}</span>
+              {/each}
+            </span>
+            <span class="hint">{folder.notes} · new note here</span>
+          </button>
+        {/each}
+      {/if}
+
+      {#if templates.length > 0}
+        <div class="section">New from template · {templates.length}</div>
+        {#each templates as template, index (template.path)}
+          {@const position =
+            notes.length + commands.length + folderRows.length + index}
+          <button
+            class="row"
+            role="option"
+            id="pal-row-{position}"
+            class:sel={selected === position}
+            aria-selected={selected === position}
+            onmousemove={() => {
+              selected = position
+            }}
+            onclick={() => choose(position)}
+          >
+            <span class="ref"></span>
             <span class="name">{template.name}</span>
-            <span class="hint">{template.title}</span>
+            <span class="hint"
+              >{template.folder ?? DEFAULT_FOLDER}/ · {template.title}</span
+            >
           </button>
         {/each}
       {/if}

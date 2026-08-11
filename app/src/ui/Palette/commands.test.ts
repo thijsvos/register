@@ -1,7 +1,13 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { Entry } from '../../core/api'
 import { vault } from '../../core/store.svelte'
-import { fuzzyScore, openFolder, templateChoices, UNTITLED } from './commands'
+import {
+  folderChoices,
+  fuzzyScore,
+  openFolder,
+  templateChoices,
+  UNTITLED,
+} from './commands'
 
 describe('fuzzyScore', () => {
   it('matches an empty query against anything', () => {
@@ -128,5 +134,111 @@ describe('the folder a delete command can name', () => {
     expect(openFolder()).toBeNull()
     vault.openPath = null
     expect(openFolder()).toBeNull()
+  })
+})
+
+describe('folderChoices', () => {
+  const AT: Entry = {
+    path: 'notes/003-a.md',
+    ref: '003',
+    title: 'Alpha',
+    tags: [],
+    mtime: 0,
+    size: 0,
+    etag: 'v1',
+  }
+  const under = (path: string): Entry => ({ ...AT, path })
+
+  beforeEach(() => {
+    vault.tree = [
+      under('notes/projects/010-a.md'),
+      under('notes/projects/deep/011-b.md'),
+      under('notes/personal/012-c.md'),
+      under('notes/007-loose.md'),
+      under('daily/2026-08-11.md'),
+    ]
+  })
+
+  const paths = (query: string) => folderChoices(query).map((row) => row.path)
+
+  it('finds a folder from a prefix of its name', () => {
+    expect(paths('proj')).toContain('notes/projects')
+  })
+
+  it('finds one from a subsequence, the way the commands match', () => {
+    // The rule ⌘K already uses — `tgi` finds TOGGLE INSPECTOR — applied to a
+    // path. Two letters is what the request was: `pr`.
+    expect(paths('pr')).toContain('notes/projects')
+  })
+
+  it('says nothing to one character', () => {
+    // A single letter matches nearly every folder a vault has, on a surface
+    // whose other rows are what the reader is usually after.
+    expect(paths('p')).toEqual([])
+    expect(paths('')).toEqual([])
+  })
+
+  it('narrows to what is inside a folder once one is settled', () => {
+    // Choosing a row types `notes/projects/`. What still matches from there is
+    // only what is *inside* it, which is the next completion rather than noise —
+    // the folder itself no longer does, because the trailing separator is not
+    // part of its path.
+    expect(paths('notes/projects')).toContain('notes/projects')
+    expect(paths('notes/projects/')).toEqual(['notes/projects/deep'])
+  })
+
+  it('clears itself the moment a title follows the separator', () => {
+    // The property that makes this need no mode: nothing has to notice that you
+    // stopped naming a place and started naming a note.
+    expect(paths('notes/projects/Launch plan')).toEqual([])
+    expect(paths('notes/Terminal aesthetics')).toEqual([])
+  })
+
+  it('never offers a folder the INDEX does not draw', () => {
+    expect(paths('dai')).toEqual([])
+  })
+
+  it('ranks the closer match first', () => {
+    const ranked = paths('pe')
+    expect(ranked[0]).toBe('notes/personal')
+  })
+
+  it('reports how many notes are already there', () => {
+    const found = folderChoices('proj').find((row) => row.path === 'notes/projects')
+    expect(found?.notes).toBe(2)
+  })
+})
+
+describe('templateChoices with a folder', () => {
+  const DAILY: Entry = {
+    path: 'templates/daily.md',
+    ref: null,
+    title: 'TEMPLATE',
+    tags: [],
+    mtime: 0,
+    size: 0,
+    etag: 'v1',
+  }
+
+  beforeEach(() => {
+    vault.tree = [DAILY]
+  })
+
+  it('splits a typed path into a destination and a title', () => {
+    const [choice] = templateChoices('notes/projects/Launch plan')
+    expect(choice?.folder).toBe('notes/projects')
+    expect(choice?.title).toBe('Launch plan')
+  })
+
+  it('keeps the untitled fallback when only a folder was typed', () => {
+    const [choice] = templateChoices('notes/projects/')
+    expect(choice?.folder).toBe('notes/projects')
+    expect(choice?.title).toBe(UNTITLED)
+  })
+
+  it('means §04s default when no folder was typed', () => {
+    const [choice] = templateChoices('Launch plan')
+    expect(choice?.folder).toBeNull()
+    expect(choice?.title).toBe('Launch plan')
   })
 })

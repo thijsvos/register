@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Entry } from './api'
-import { ancestors, type Folder, folderTree, type Node, notesUnder } from './tree'
+import {
+  ancestors,
+  type Folder,
+  folderTargets,
+  folderTree,
+  type Node,
+  notesUnder,
+} from './tree'
 
 const at = (path: string, ref: string | null = null): Entry => ({
   path,
@@ -187,5 +194,41 @@ describe('notesUnder', () => {
     // still go if the folder goes, and the server reports that afterwards.
     expect(notesUnder(TREE, 'daily')).toBe(0)
     expect(notesUnder(TREE, 'templates')).toBe(0)
+  })
+})
+
+describe('folderTargets', () => {
+  const AT: Entry = {
+    path: 'notes/003-a.md',
+    ref: '003',
+    title: 'Alpha',
+    tags: [],
+    mtime: 0,
+    size: 0,
+    etag: 'v1',
+  }
+  const under = (path: string): Entry => ({ ...AT, path })
+
+  it('names every real folder, uncompacted', () => {
+    // `folderTree` draws `notes/projects` as one row because a chain offering no
+    // choice does not earn indentation. On disk it is two folders, and a create
+    // target has to name what is actually there.
+    expect(folderTargets([under('notes/projects/deep/010-a.md')])).toEqual([
+      'notes',
+      'notes/projects',
+      'notes/projects/deep',
+    ])
+  })
+
+  it('offers nothing the INDEX does not draw', () => {
+    // A note created in `daily/` or `templates/` is isListed-hidden: it would be
+    // written, and then appear to have done nothing.
+    expect(
+      folderTargets([under('daily/2026-08-11.md'), under('templates/daily.md')]),
+    ).toEqual([])
+  })
+
+  it('says nothing about a vault with every note at the root', () => {
+    expect(folderTargets([under('000-inbox.md')])).toEqual([])
   })
 })

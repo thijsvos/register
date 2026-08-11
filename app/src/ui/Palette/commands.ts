@@ -1,7 +1,7 @@
 import { revealVault } from '../../core/api'
-import { folders, isListed, isTemplate } from '../../core/paths'
+import { folders, isListed, isTemplate, splitFolder } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
-import { notesUnder } from '../../core/tree'
+import { folderTargets, notesUnder } from '../../core/tree'
 import { enterIndex, go } from '../nav'
 import { chrome } from '../view.svelte'
 
@@ -187,6 +187,49 @@ export function openFolder(): string | null {
   return trail.length === 0 ? null : trail.join('/')
 }
 
+/**
+ * How short a query has to be before folder suggestions are noise.
+ *
+ * One character matches almost every folder a vault has, on a surface whose
+ * other rows are what the reader is usually after. Two is what "pr" needs.
+ */
+const FOLDER_MIN = 2
+
+/** How many to offer. A completion list that scrolls is not a completion list. */
+const FOLDER_LIMIT = 5
+
+/** An existing folder the typed query could mean. */
+export interface FolderChoice {
+  /** The real vault path, which is also what choosing it types for you. */
+  path: string
+  /** Listed notes already in it, so the row says how big a place this is. */
+  notes: number
+}
+
+/**
+ * Existing folders the query could be naming, best match first.
+ *
+ * Subsequence matching against the **whole** path, which is the same rule the
+ * commands take — `tgi` finds TOGGLE INSPECTOR, and `pr` finds `notes/projects`.
+ * Matching the full path rather than the last segment is what makes this need no
+ * mode. Choosing a row types `notes/projects/`, and from there the only paths
+ * still matching are the ones *inside* it — so the list narrows to the nested
+ * folders, which is the next completion rather than noise. The moment a title
+ * follows the separator nothing matches and the section clears itself. There is
+ * no flag, and nothing to turn off.
+ */
+export function folderChoices(query: string): FolderChoice[] {
+  const typed = query.trim()
+  if (typed.length < FOLDER_MIN) return []
+
+  return folderTargets(vault.tree)
+    .map((path) => ({ path, score: fuzzyScore(path, typed) }))
+    .filter((row): row is { path: string; score: number } => row.score !== null)
+    .sort((a, b) => a.score - b.score || a.path.localeCompare(b.path))
+    .slice(0, FOLDER_LIMIT)
+    .map((row) => ({ path: row.path, notes: notesUnder(vault.tree, row.path) }))
+}
+
 /** A stencil in `templates/`, offered as an action rather than as a note. */
 export interface TemplateChoice {
   path: string
@@ -194,6 +237,8 @@ export interface TemplateChoice {
   name: string
   /** The title the new note will take if it is chosen now. */
   title: string
+  /** Where it goes, or null for §04's default. Read from the typed path. */
+  folder: string | null
 }
 
 /** What a note gets called when it is cut from a stencil with nothing typed. */
@@ -215,14 +260,17 @@ export const UNTITLED = 'Untitled note'
  * fallback is what `N` already calls a note nobody has named.
  */
 export function templateChoices(query: string): TemplateChoice[] {
-  const wanted = query.trim()
+  // The query may name where the note goes as well as what it is called, so the
+  // title is what is left after the last separator rather than the whole line.
+  const { folder, title } = splitFolder(query)
 
   return vault.tree
     .filter((entry) => isTemplate(entry.path))
     .map((entry) => ({
       path: entry.path,
       name: entry.title ?? basename(entry.path),
-      title: wanted === '' ? UNTITLED : wanted,
+      title: title === '' ? UNTITLED : title,
+      folder,
     }))
 }
 

@@ -62,7 +62,7 @@ so this table is a convenience, not a manual.
 | `Esc` · `↵` | Leave the editor · go back into it |
 | `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
 | `→` `←` · `l` `h` | Open and fold a folder in the index |
-| `⌫` | On an index row: delete that note or folder — it asks first |
+| `⌫` · `N` | On an index row: delete what it names, or create a note inside it |
 
 **⌘K is the whole navigation surface.** Real full-text search over note bodies,
 not a filter over a fixed list; commands match as a subsequence, so `tgi` finds
@@ -74,6 +74,13 @@ vault and ticking one writes through to that line in that file. The inspector
 does the same for one note — properties, outline, backlinks, tags — recomputed
 from the buffer as you type. Following a `[[wikilink]]` to a note that does not
 exist creates it.
+
+**Folders are made by writing into them.** There is no "new folder" command —
+an empty folder is not something the index can show, because a folder exists
+exactly while a note is under it. So `⌘K`, type `pr`, and it offers
+`notes/projects`; choose it and the path is typed for you, then add a title. A
+path that does not exist yet is created by the note that goes in it. `N` on a
+focused index row puts the new note in that folder.
 
 **Nothing is ever hard-deleted.** `⌫` on an index row asks a single question,
 then moves the files to `.register/trash/<timestamp>/` keeping the paths they

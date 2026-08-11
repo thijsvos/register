@@ -1,4 +1,4 @@
-import { enterIndex, go } from './nav'
+import { enterIndex, focusedFolder, go } from './nav'
 import { UNTITLED } from './Palette/commands'
 import { chrome } from './view.svelte'
 
@@ -248,7 +248,9 @@ export function installKeymap(): () => void {
       }
       case 'n':
         event.preventDefault()
-        go.create(UNTITLED)
+        // Into the folder the INDEX is pointing at, when it is pointing at one.
+        // Anywhere else this is exactly what it always was.
+        go.create(UNTITLED, undefined, focusedFolder() ?? undefined)
         return
       case 'i':
         event.preventDefault()

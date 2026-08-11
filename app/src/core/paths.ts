@@ -55,6 +55,64 @@ export function folders(path: string): string[] {
 }
 
 /**
+ * Split a typed target into the folder it names and the title left over.
+ *
+ * The **last** separator, so `notes/projects/Launch plan` means the folder
+ * `notes/projects` and the title `Launch plan` — a title may not contain a
+ * slash, which is the whole cost of typing a path here and is why this only
+ * ever runs on what was typed into ⌘K. A `[[wikilink]]` that happens to carry
+ * a slash creates a note called that, exactly as it always has.
+ *
+ * `null` for no separator at all: what was typed is a title and the note goes
+ * where notes have always gone.
+ */
+export function splitFolder(typed: string): { folder: string | null; title: string } {
+  const at = typed.lastIndexOf('/')
+  if (at === -1) return { folder: null, title: typed.trim() }
+  return {
+    folder: typed.slice(0, at).trim(),
+    title: typed.slice(at + 1).trim(),
+  }
+}
+
+/**
+ * A typed folder path, normalised, or `null` if notes may not go there.
+ *
+ * The client's mirror of `vault.rs::resolve_within`, and it exists because a
+ * guard on the *typed* string is not a guard on the path that reaches disk. Two
+ * rewrites happen after that point and both defeated the whole-string check
+ * that used to be here — measured end to end against the real server:
+ *
+ * - `Templates/x` passed an `isTemplate` test that is a lowercase prefix match,
+ *   then landed in the real `templates/` because macOS and Windows filesystems
+ *   are case-insensitive. The note was written, hidden from the INDEX by the
+ *   client's own `isListed`, and offered back as a phantom stencil.
+ * - `notes/../templates/x` passed because it is not a `templates/` prefix, and
+ *   the browser's URL parser then collapsed the `..` on its way out of `fetch`.
+ *   The string this saw and the path the server received were different
+ *   strings; the server was right about the one it got.
+ *
+ * So: judge each segment before anything can rewrite it, and casefold before
+ * asking whether the INDEX would draw the result.
+ */
+export function cleanFolder(folder: string): string | null {
+  const out: string[] = []
+  for (const raw of folder.normalize('NFC').split('/')) {
+    const segment = raw.trim()
+    // Empty means a leading, trailing or doubled separator: `/a`, `a/`, `a//b`.
+    if (segment === '') return null
+    // `.`, `..` and `.register` in one rule, the same one `resolve_within` uses.
+    if (segment.startsWith('.')) return null
+    if (segment.includes('\\') || segment.includes('\0')) return null
+    out.push(segment)
+  }
+  const path = out.join('/')
+  // Casefolded, because the filesystem is: `Templates/` and `templates/` are one
+  // directory on every platform this ships to.
+  return isListed(`${path.toLowerCase()}/x.md`) ? path : null
+}
+
+/**
  * Whether a path lies inside a folder.
  *
  * The trailing separator is the whole content of this function: a bare prefix

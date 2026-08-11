@@ -21,6 +21,19 @@ class FakeVault {
    *  which counts `.register/trash/` so a ref is issued at most once. */
   #everUsed = new Set<number>()
 
+  /** Emulate a case-insensitive filesystem, which macOS and Windows are. */
+  foldsCase = false
+
+  /**
+   * Served on GET, absent from the tree — an agent's write the tree has not
+   * caught up with. The one state in which the on-disk checks matter at all.
+   */
+  #unlisted = new Set<string>()
+
+  hideFromTree(path: string): void {
+    this.#unlisted.add(path)
+  }
+
   /** Paths that answer with a status instead of their content. */
   #broken = new Map<string, number>()
 
@@ -82,6 +95,7 @@ class FakeVault {
 
     if (path === '/api/tree') {
       const tree = [...this.files.entries()]
+        .filter(([notePath]) => !this.#unlisted.has(notePath))
         .map(([notePath, held]) => ({
           path: notePath,
           ref: /(?:^|\/)(\d+)-/.exec(notePath)?.[1] ?? null,
@@ -124,6 +138,9 @@ class FakeVault {
         : new Response('no such note', { status: 404 })
     }
     if (method === 'PUT') {
+      // A folding filesystem stores under the name it already had, not the one
+      // you sent — which is the whole point of the case this fixture serves.
+      const stored = this.foldsCase ? notePath.toLowerCase() : notePath
       const ifMatch = new Headers(init?.headers).get('If-Match')
       if (ifMatch !== null && ifMatch !== (held?.etag ?? '')) {
         return new Response('etag is stale', {
@@ -132,8 +149,8 @@ class FakeVault {
         })
       }
       const etag = `etag-${++this.#version}`
-      this.files.set(notePath, { body: String(init?.body ?? ''), etag })
-      this.#remember(notePath)
+      this.files.set(stored, { body: String(init?.body ?? ''), etag })
+      this.#remember(stored)
       return new Response('', { headers: { etag: `"${etag}"` } })
     }
     if (method === 'DELETE') {
@@ -1084,5 +1101,129 @@ describe('trash', () => {
     expect(await vault.trashFolder('notes/nowhere')).toBe(false)
     expect(vault.notice).toContain('no such folder')
     expect(vault.openPath).toBe('notes/003-a.md')
+  })
+})
+
+describe('creating into a folder', () => {
+  it('writes the note where it was told to', async () => {
+    await vault.refresh()
+    await vault.create('Launch plan', undefined, 'notes/projects')
+    await settle()
+
+    expect(server.files.has('notes/projects/000-launch-plan.md')).toBe(true)
+  })
+
+  it('still takes the next ref in the register, wherever it lands', async () => {
+    // `next_ref` walks the whole vault, so nesting changes where a note lives
+    // and never what it is called.
+    server.seed('notes/007-a.md', NOTE)
+    await vault.refresh()
+    await vault.create('Deep one', undefined, 'notes/projects/deep')
+    await settle()
+
+    expect(server.files.has('notes/projects/deep/008-deep-one.md')).toBe(true)
+  })
+
+  it('goes where notes have always gone when told nothing', async () => {
+    await vault.refresh()
+    await vault.create('Loose')
+    await settle()
+
+    expect(server.files.has('notes/000-loose.md')).toBe(true)
+  })
+
+  it('refuses a folder the INDEX cannot draw', async () => {
+    // A note in `daily/` or `templates/` is isListed-hidden: it would be
+    // written, and then appear to have done nothing.
+    await vault.refresh()
+    await vault.create('Sneaky', undefined, 'daily')
+    await settle()
+
+    expect(server.files.has('daily/000-sneaky.md')).toBe(false)
+    expect(vault.notice).toContain('not a folder notes can go in')
+
+    await vault.create('Sneaky', undefined, 'templates')
+    await settle()
+    expect(server.files.has('templates/000-sneaky.md')).toBe(false)
+  })
+})
+
+describe('creating into a folder the server would rewrite', () => {
+  it('refuses the furniture whatever case it is typed in', async () => {
+    await vault.refresh()
+    await vault.create('Sneaky', undefined, 'Templates')
+    await settle()
+
+    expect([...server.files.keys()].some((p) => /templates/i.test(p))).toBe(false)
+    expect(vault.notice).toContain('not a folder notes can go in')
+  })
+
+  it('refuses a path that would leave the folder it names', async () => {
+    // It never reached the server as `..`; fetch collapsed it in the URL, so
+    // this can only be caught before the request is built.
+    await vault.refresh()
+    await vault.create('Sneaky', undefined, 'notes/../templates')
+    await settle()
+
+    expect([...server.files.keys()].some((p) => /templates/i.test(p))).toBe(false)
+  })
+
+  it('refuses a leading separator instead of blaming a note that never was', async () => {
+    await vault.refresh()
+    await vault.create('Loose', undefined, '/notes')
+    await settle()
+
+    expect(vault.notice).not.toContain('already exists')
+    expect(vault.notice).toContain('not a folder notes can go in')
+  })
+
+  it('opens the path the server wrote, not the one that was typed', async () => {
+    // Emulates a filesystem that folds case: the client asks for one string and
+    // the vault ends up holding another. openPath is compared by string for the
+    // active INDEX row, the folder reveal and the external-edit latch, so a
+    // mismatch makes all three quietly stop working on the note just made.
+    server.foldsCase = true
+    await vault.refresh()
+    await vault.create('Launch plan', undefined, 'notes/Projects')
+    await settle()
+
+    expect(vault.openPath).toBe('notes/projects/000-launch-plan.md')
+    expect(vault.tree.some((entry) => entry.path === vault.openPath)).toBe(true)
+  })
+})
+
+describe('what the on-disk checks are for', () => {
+  it('opens a daily log the tree has not caught up with, rather than writing over it', async () => {
+    // The whole reason `openDaily` asks the *disk* and not only the tree: an
+    // agent can write today's log between the refresh and the check. Treating
+    // the answer as a bare boolean made this branch unreachable — `!` on an
+    // object is always false and is not a type error — so the stencil went
+    // straight over a real day's writing.
+    const day = new Date('2026-08-05T09:16:40Z')
+    server.seed('templates/daily.md', '---\ntitle: TEMPLATE\n---\nStencil.\n')
+    server.seed('daily/2026-08-05.md', '---\ntitle: 2026-08-05\n---\nA day of writing.\n')
+    server.hideFromTree('daily/2026-08-05.md')
+    await vault.refresh()
+
+    await vault.openDaily(day)
+    await settle()
+
+    expect(server.files.get('daily/2026-08-05.md')?.body).toContain('A day of writing.')
+    expect(server.files.get('daily/2026-08-05.md')?.body).not.toContain('Stencil.')
+    expect(vault.openPath).toBe('daily/2026-08-05.md')
+  })
+
+  it('says what the server said when it refuses a name, not "already exists"', async () => {
+    // A path the server will not accept never could have existed, and calling
+    // that "already exists" sends the reader looking for a file.
+    await vault.refresh()
+    server.fail('notes/000-refused.md', 400)
+
+    await vault.create('Refused')
+    await settle()
+
+    expect(vault.notice).not.toContain('already exists')
+    expect(vault.notice).toContain('unreadable')
+    expect(server.files.has('notes/000-refused.md')).toBe(false)
   })
 })

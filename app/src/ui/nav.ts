@@ -1,3 +1,4 @@
+import { folders } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import { notesUnder } from '../core/tree'
 import { chrome } from './view.svelte'
@@ -89,6 +90,27 @@ export function treeTraverse(event: KeyboardEvent): void {
 }
 
 /**
+ * The folder a focused INDEX row would create a note into, or null.
+ *
+ * A folder row means itself; a note row means the folder it is in, so `N` puts
+ * the new note beside the one you were reading rather than back at the top of
+ * the vault. Null when focus is not on a row at all, which is how `N` keeps its
+ * old meaning everywhere else.
+ */
+export function focusedFolder(): string | null {
+  const row = document.activeElement
+  if (!(row instanceof HTMLElement)) return null
+  if (row.closest('[aria-label="Index"]') === null) return null
+
+  const path = row.dataset.path
+  if (path === undefined) return null
+  if (row.dataset.kind === 'folder') return path
+
+  const trail = folders(path)
+  return trail.length === 0 ? null : trail.join('/')
+}
+
+/**
  * `⌫` on a focused INDEX row: arm the palette against what that row names.
  *
  * The row is the natural place to point at a folder — the palette can only
@@ -176,9 +198,9 @@ export const go = {
     void vault.open(path)
   },
 
-  create(title: string, from?: string): void {
+  create(title: string, from?: string, folder?: string): void {
     chrome.showNotes()
-    void vault.create(title, from)
+    void vault.create(title, from, folder)
   },
 
   daily(): void {
