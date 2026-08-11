@@ -230,7 +230,7 @@ the machine it runs on and nowhere else. Three things before you widen it:
 - Agents still run on the **host**, against the same mounted folder. The
   container only serves the UI.
 
-Images are published to `ghcr.io/thijsvos/register` on tags: `v0.4.3`, `0.4.3`
+Images are published to `ghcr.io/thijsvos/register` on tags: `v0.5.0`, `0.5.0`
 and `latest`.
 
 `latest` is there so nobody has to find a version string to try the product.
