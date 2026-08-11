@@ -63,15 +63,15 @@ test('a note is not deleted until the question is answered', async ({ page }) =>
 
   // Armed, not done. The palette is the confirm surface — §02b's answer to a
   // modal was "never a modal", and this is already the app's dialog.
-  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toBeVisible()
   await expect(page.locator('.pal .head')).toContainText('Confirm deletion')
   await expect(page.locator('.pal .foot')).toContainText(
     'Recoverable in .register/trash/',
   )
-  await expect(
-    page.getByRole('option', { name: /CONFIRM · TRASH 001-alpha\.md/ }),
-  ).toBeVisible()
-  await expect(page.getByRole('option', { name: 'CANCEL' })).toBeVisible()
+  // The question carries the target; the buttons carry the answers.
+  await expect(page.locator('#pal-question')).toHaveText('Delete notes/001-alpha.md?')
+  await expect(page.getByRole('button', { name: /CONFIRM · TRASH/ })).toBeFocused()
+  await expect(page.getByRole('button', { name: 'CANCEL' })).toBeVisible()
 
   // Still there while the question stands.
   expect(await page.request.get(`${server.url}/api/note/notes/001-alpha.md`)).toBeOK()
@@ -87,10 +87,10 @@ test('a note is not deleted until the question is answered', async ({ page }) =>
 test('escape answers no, and nothing is deleted', async ({ page }) => {
   await focusRow(page, /Alpha/)
   await page.keyboard.press('Backspace')
-  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('alertdialog')).toBeVisible()
 
   await page.keyboard.press('Escape')
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
   await expect(page.getByRole('button', { name: /Alpha/ })).toBeVisible()
   expect(await page.request.get(`${server.url}/api/note/notes/001-alpha.md`)).toBeOK()
 
@@ -104,22 +104,71 @@ test('CANCEL is a row, not only a key', async ({ page }) => {
   await focusRow(page, /Alpha/)
   await page.keyboard.press('Backspace')
 
-  await page.getByRole('option', { name: 'CANCEL' }).click()
-  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await page.getByRole('button', { name: 'CANCEL' }).click()
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
   expect(await page.request.get(`${server.url}/api/note/notes/001-alpha.md`)).toBeOK()
 })
 
 test('the confirm is the only thing on offer while it stands', async ({ page }) => {
   // A list of notes under a question about deleting one is an invitation to
-  // press Enter on the wrong row — and the palette's Enter runs whatever is
-  // selected. Two rows, and typing cannot reach past them.
+  // press Enter on the wrong row. There is nothing else here to press it on —
+  // and, since the search box went, nothing to type into either: it accepted
+  // typing and ignored it, which is a distraction on the one surface that
+  // should have none.
   await focusRow(page, /Alpha/)
   await page.keyboard.press('Backspace')
 
-  await expect(page.getByRole('option')).toHaveCount(2)
-  await page.keyboard.type('alpha')
-  await expect(page.getByRole('option')).toHaveCount(2)
-  await expect(page.locator('.pal .section')).toContainText('Confirm')
+  await expect(page.getByRole('textbox')).toHaveCount(0)
+  await expect(page.getByRole('option')).toHaveCount(0)
+  await expect(page.locator('.pal .row')).toHaveCount(2)
+  await expect(page.locator('.pal .section')).toHaveCount(0)
+})
+
+test('the two answers are the whole keyboard, and Tab cannot leave', async ({ page }) => {
+  // `aria-modal` says focus is trapped and nothing enforces that by itself; the
+  // text field used to intercept Tab, and it is gone.
+  await focusRow(page, /Alpha/)
+  await page.keyboard.press('Backspace')
+
+  const confirm = page.getByRole('button', { name: /CONFIRM · TRASH/ })
+  const cancel = page.getByRole('button', { name: 'CANCEL' })
+  await expect(confirm).toBeFocused()
+
+  // ↑↓ and j–k, the same traversal every nav row takes (§02b).
+  await page.keyboard.press('ArrowDown')
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press('k')
+  await expect(confirm).toBeFocused()
+
+  // Tab cycles between the two rather than walking out of the dialog.
+  await page.keyboard.press('Tab')
+  await expect(cancel).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(confirm).toBeFocused()
+})
+
+test('the answer the keyboard is on is the one that reads as chosen', async ({
+  page,
+}) => {
+  // Arming from a *click* leaves `:focus-visible` unmatched, so a rule written
+  // that way would draw the question with no visible answer selected while
+  // Enter would still confirm.
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Launch plan/ }).click()
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('option', { name: /DELETE · NOTE/ }).click()
+
+  const confirm = page.getByRole('button', { name: /CONFIRM · TRASH/ })
+  await expect(confirm).toBeFocused()
+  const inverse = await confirm.evaluate((node) => {
+    const seen = getComputedStyle(node)
+    return { background: seen.backgroundColor, outline: seen.outlineStyle }
+  })
+  const plain = await page
+    .getByRole('button', { name: 'CANCEL' })
+    .evaluate((node) => getComputedStyle(node).backgroundColor)
+  expect(inverse.background).not.toBe(plain)
+  expect(inverse.outline).toBe('dashed')
 })
 
 test('a folder takes its notes, its nesting and its images', async ({ page }) => {
@@ -127,9 +176,9 @@ test('a folder takes its notes, its nesting and its images', async ({ page }) =>
   await page.keyboard.press('Backspace')
 
   // The count is what the INDEX draws: three notes, not the PNG it never showed.
-  await expect(
-    page.getByRole('option', { name: /CONFIRM · TRASH notes\/projects · 3 notes/ }),
-  ).toBeVisible()
+  await expect(page.locator('#pal-question')).toHaveText(
+    'Delete notes/projects and everything under it? 3 notes.',
+  )
 
   await page.keyboard.press('Enter')
 
@@ -158,9 +207,7 @@ test('deleting the folder you are reading in closes the note', async ({ page }) 
 
   await page.keyboard.press('ControlOrMeta+k')
   await page.getByRole('option', { name: /DELETE · FOLDER/ }).click()
-  await expect(
-    page.getByRole('option', { name: /CONFIRM · TRASH notes\/projects/ }),
-  ).toBeVisible()
+  await expect(page.locator('#pal-question')).toContainText('notes/projects')
   await page.keyboard.press('Enter')
 
   // A buffer still bound to a path with nothing behind it would be written
