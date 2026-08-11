@@ -1,81 +1,26 @@
 # REGISTER
 
-A file-native second brain. Your entire knowledge base is a folder of plain
-markdown files; a single small Rust binary (`register serve ~/vault`) renders it
-as a fast, keyboard-first, terminal-grade UI on localhost. Humans edit through
-the UI, agents edit the files directly, and a watcher keeps both views identical
-within 100 ms.
+A file-native second brain. Your knowledge base is a folder of plain markdown
+files; one small Rust binary renders it as a fast, keyboard-first, terminal-grade
+UI on localhost. You edit through the UI, agents edit the files, and a watcher
+keeps both views identical within 100 ms.
 
-- **Files are the truth.** No database, no hidden state. Every capability of the
-  UI is a plain file edit; derived data (backlinks, tasks, index) is computed,
-  never stored.
-- **Agent-compatible by construction.** `register init` writes a `CLAUDE.md`
-  agent contract into every vault, so Claude Code works with it out of the box.
-- **Instrument, not lounge.** Engineering-grade monochrome, one typeface family
-  in two working weights, 1px hairlines, a single signal color for live status.
-  Latency is a material:
-  16 ms interactions, sub-100 ms agent-edit-to-paint, enforced in CI.
-
-V1 ships five things to instrument grade — notes, links, tags, tasks, search —
-and stages everything else (§12). The full contract is in **`SPEC.html`**.
+- **Files are the truth.** No database, no hidden state. Backlinks, tags, tasks
+  and the search index are computed on read and thrown away.
+- **Agents are first-class.** Every vault carries a `CLAUDE.md` contract, so
+  Claude Code works with it out of the box — no API, no plugin, no sync.
+- **An instrument, not a lounge.** Monochrome, hairlines, one signal colour, zero
+  animation. Latency is a material and the budgets are asserted in CI.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
   <img alt="The editor: index and tag meters on the left, a note with headings, wikilinks and inline code in the middle, outline and backlinks on the right, and the status bar reading GIT MAIN" src="docs/screenshot.png">
 </picture>
 
-<sup>Both themes, because §02 says dark is *tuned per surface* rather than
-inverted — the picture follows whichever one you read GitHub in.</sup>
+<sup>Both themes, because dark is *tuned per surface* rather than inverted — the
+picture follows whichever one you read GitHub in.</sup>
 
-## The thesis
-
-Every note-taking app eventually asks you to trust its database. REGISTER does
-not have one. Your notes are the files; everything else — backlinks, tags, the
-task list, the search index — is computed on read and thrown away.
-
-That is not asceticism, it is what makes an agent a first-class editor. Claude
-Code does not need an API, a plugin or a sync protocol to work with your vault;
-it needs a folder and a contract, and `register init` writes the contract into
-the folder. A human edits through the UI, an agent edits the files, and a
-watcher keeps both views identical inside 100 ms. Neither side is a guest.
-
-Nothing is ever hard-deleted, either. A removed note moves to `.register/trash/`,
-which the server still counts when it hands out the next reference number — so a
-`[[003]]` written last month can never quietly start pointing at different prose.
-That is the whole of the vault's bookkeeping.
-
-The design follows from the same idea. If files are the truth, the interface is
-an instrument for reading them, not a place things live — so it is monochrome,
-hairlined, keyboard-first, and free of animation that would cost latency for
-decoration.
-
-## Budgets
-
-Not aspirations. Every one is asserted in CI. Where a number is given it is what
-the last commit produced on an M-series laptop; `asserted` means the budget is
-checked on every run but the figure is the machine's rather than the product's.
-
-The three latency budgets are asserted at 2.5× under `CI`: a shared two-vCPU
-runner measured ~2.4× slower across all three at once, which is a CPU ratio and
-not a regression. The raw figure is printed either way, and `BUDGET_FACTOR=1`
-runs the promise as written on any machine.
-
-| Budget | Limit | Measured | Enforced by |
-|---|---|---|---|
-| Release binary | ≤ 10 MB | 3.04 MB macOS arm64 · 3.65 MB linux x64, the largest | `release.yml` per platform |
-| Shell JS (initial) | ≤ 60 kB gz | 41.57 kB | `size-limit` |
-| Editor chunk (lazy) | ≤ 150 kB gz | 101.36 kB | `size-limit` |
-| Idle RAM, 1k notes | ≤ 50 MB | asserted | Playwright + `ps` |
-| Agent edit → visible | ≤ 100 ms | asserted | Playwright, real file write |
-| Document switch | < 16 ms | asserted | status-bar RENDER + Playwright |
-| Server start → editable | < 500 ms | asserted | Playwright |
-| Repository size | < 5 MB | asserted | CI `git count-objects` |
-
-If a change breaks a budget, the change shrinks. Not the budget.
-
-## Running it
-
-### Try it — one command
+## Run it
 
 ```sh
 docker run -d --name register -p 127.0.0.1:7777:7777 \
@@ -84,341 +29,122 @@ docker run -d --name register -p 127.0.0.1:7777:7777 \
 
 Open <http://localhost:7777>. That is the whole of setup.
 
-`~/vault` does not have to exist and does not have to contain anything: pointing
-the app at a folder with no vault in it scaffolds one — `CLAUDE.md`, the daily
-stencil, an inbox, the folders — and says which files it wrote. Point it at a
-folder that already holds notes and it changes nothing, because a folder with
-markdown in it is somebody's writing.
+`~/vault` does not have to exist. Pointing the app at an empty or missing folder
+scaffolds a vault into it and says what it wrote; pointing it at a folder that
+already holds markdown changes nothing. Your notes are plain files on your own
+disk — delete the container and they are still there.
 
-Your notes are plain markdown in `~/vault` on your own disk. Nothing is stored
-inside Docker; delete the container and the notes are still there.
+On Linux add `--user $(id -u):$(id -g)`, or every note ends up owned by uid 1000.
 
-**On Linux, add `--user $(id -u):$(id -g)`** or every note is owned by uid 1000.
-On macOS and Windows leave it off — Docker Desktop maps ownership to you
-whatever the container says.
-
-To stop and remove it: `docker rm -f register`.
-
-### Or with compose
-
-For something you keep running. `deploy/docker-compose.yml` pulls the published
-image — it has no `build:` in it, so it cannot accidentally compile:
+**Prebuilt binaries** for macOS, Linux and Windows are on the
+[releases page](https://github.com/thijsvos/register/releases) if you would
+rather not use Docker:
 
 ```sh
-cp deploy/.env.example deploy/.env     # then set VAULT_PATH
-docker compose -f deploy/docker-compose.yml up -d
-```
-
-`VAULT_PATH` is required and has no default. It used to fall back to a folder
-next to the compose file, which quietly put real notes inside the checkout;
-compose now refuses to start and tells you what to set.
-
-### Native
-
-```sh
-register init ~/vault --git   # scaffold: folders, CLAUDE.md, .gitignore, git repo
 register serve ~/vault        # UI on http://127.0.0.1:7777
 ```
 
-Then, in another terminal, point an agent at the same folder:
+Compose, building from source, and the container's internals:
+[`docs/install.md`](docs/install.md).
+
+## Using it
+
+Everything is reachable from the keyboard, and every control prints its own key —
+so this table is a convenience, not a manual.
+
+| Key | Does |
+|---|---|
+| `⌘K` / `Ctrl-K` | Command palette — search, commands, templates |
+| `⌘D` | TODAY — every open task in the vault, grouped by note |
+| `G` `D` · `G` `I` | The daily log · the inbox, note `000` |
+| `N` · `I` | New note · switch light ↔ dark |
+| `[` · `]` | Toggle the index · the inspector |
+| `Esc` · `↵` | Leave the editor · go back into it |
+| `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
+| `→` `←` · `l` `h` | Open and fold a folder in the index |
+| `⌫` | On an index row: delete that note or folder — it asks first |
+
+**⌘K is the whole navigation surface.** Real full-text search over note bodies,
+not a filter over a fixed list; commands match as a subsequence, so `tgi` finds
+TOGGLE INSPECTOR; and everything in `templates/` is offered under NEW FROM
+TEMPLATE, where whatever you have typed becomes the new note's title.
+
+**TODAY and the inspector store nothing.** TODAY re-derives every `- [ ]` in the
+vault and ticking one writes through to that line in that file. The inspector
+does the same for one note — properties, outline, backlinks, tags — recomputed
+from the buffer as you type. Following a `[[wikilink]]` to a note that does not
+exist creates it.
+
+**Nothing is ever hard-deleted.** `⌫` on an index row asks a single question,
+then moves the files to `.register/trash/<timestamp>/` keeping the paths they
+had, so putting them back is one `mv`. A folder takes everything under it,
+images and PDFs included. Trashed notes still count when the server hands out the
+next reference number, so a `[[003]]` written last month can never quietly start
+pointing at different prose.
+
+**Settings** (`GO · SETTINGS` in ⌘K) keeps the scheme and the body face in
+`.register/config.json`, and your own licensed font in `.register/fonts/` —
+nothing in browser storage, because the vault is the only state there is.
+
+## Agents
+
+Point one at the same folder and leave it running:
 
 ```sh
 cd ~/vault && claude
 ```
 
-Nothing syncs between them. The agent writes files; the app notices, within
-100 ms. See [`docs/agents.md`](docs/agents.md).
+Nothing syncs. The agent writes files, the app notices within 100 ms, and neither
+side is a guest. The contract every vault carries is what makes this work without
+an integration — see [`docs/agents.md`](docs/agents.md).
 
-`register serve` binds to loopback unless told otherwise. `register new "Title"`
-creates a conforming note from inside a vault and prints its path.
+## What it promises
 
-**Installing.** Until the first tagged release, build it yourself:
+Budgets, not aspirations: each is asserted on every CI run, and a change that
+breaks one gets smaller — the budget does not.
 
-```sh
-cd app && pnpm build          # the UI is embedded in the binary
-cd .. && cargo install --path . --force
-```
+| Budget | Limit | Measured |
+|---|---|---|
+| Release binary | ≤ 10 MB | 3.3–4.3 MB depending on platform |
+| Shell JS (initial) | ≤ 60 kB gz | 43.6 kB |
+| Editor chunk (lazy) | ≤ 150 kB gz | 102.2 kB |
+| Agent edit → visible | ≤ 100 ms | asserted, real file write |
+| Server start → editable | < 500 ms | asserted |
 
-`--force` is belt and braces. Cargo 1.97 does replace an installed binary whose
-source changed even without it — measured — but it has not always, the message
-it prints when it declines is easy to miss, and the failure it prevents is the
-expensive one: a fix that appears not to work because you are still running last
-week's binary.
-
-**Working on the UI?** The binary carries the UI inside it, so every change
-otherwise needs that full reinstall — and a stale binary looks exactly like a
-fix that did not work. `--assets` skips it:
-
-```sh
-register serve ~/vault --assets app/dist    # from the repo root
-```
-
-Now `cd app && pnpm build` is enough; reload the browser and the change is
-there. The server says so at startup, because this is the one mode where what
-you are looking at is not what the binary would ship. For live reload while
-typing, `pnpm dev` is still faster — this is for seeing the *built* UI without
-paying for a reinstall.
-
-From v1.0 onward: prebuilt binaries on the GitHub release page for macOS
-(arm64/x64), Linux (x64/arm64, musl) and Windows x64. Until then, the two
-commands above are the whole story.
-
-Two install commands you will not find here, both deliberately.
-
-**No `cargo install --git`.** `app/dist/` is gitignored, so the checkout cargo
-makes for itself has no UI to embed — and that build *succeeds*. It starts, it
-serves `/api`, and it answers every page request with `no UI bundled; run cd app
-&& pnpm build`: a working server behind a blank 404, which is a worse failure
-than not compiling at all. Build the UI first and install from the path.
-
-**No `cargo install register-notes`.** The name is not claimed on crates.io, and
-printing an install command for a package someone else could publish is how you
-get a supply-chain incident with your own README as the delivery mechanism.
-
-### Container
-
-Running it is two commands up the page; this is what is in the image and how to
-change it.
-
-**Building from source** is an overlay on the same compose file, so the default
-path stays incapable of compiling:
-
-```sh
-docker compose -f deploy/docker-compose.yml \
-               -f deploy/docker-compose.build.yml up -d --build
-```
-
-**`--build` is not optional here.** Without it, compose reuses whatever image it
-built last time — so your changes are simply absent, and the symptom is
-identical to the code not working. It cost an investigation before it was
-written down. The overlay tags what it builds `register:source` rather than the
-published name, so a local build cannot sit in the image store pretending to be
-the release.
-
-**Two files, one image.** `deploy/Dockerfile` builds from source; `deploy/
-Dockerfile.release` copies the binaries the release matrix already cross-built
-on native runners, which is how one build publishes both architectures without
-compiling Rust under emulation. Both end at the same runtime — `alpine:3.24`
-plus `git`, about **25 MB** — and `tests/release.rs` compares their runtime
-stanzas line for line so the half nobody develops against cannot drift.
-
-`git` is in there because the status bar's GIT field is derived by shelling out
-to it: on the `scratch` image this started as, that field read `—` however your
-vault was stored. It costs one `RUN` executing per target architecture, so the
-release workflow installs binfmt — the emulation is for `apk add` only, never
-for the Rust build.
-
-The live-reload works through the bind mount: edit a note on the host and the
-watcher inside the container reports it in about 15 ms, so an agent running on
-your machine and the UI in the container stay in step.
-
-The compose file publishes on `127.0.0.1` only, so out of the box this reaches
-the machine it runs on and nowhere else. Three things before you widen it:
-
-- The container binds `0.0.0.0` because a published port needs it, not because
-  the server is meant to be reachable from a network. The Origin and Host guards
-  still hold, and `/api/reveal` refuses outright on a non-loopback bind — but
-  putting this on a network is a decision. Behind Tailscale is the intended
-  shape.
-- Widening the `ports` line means adding a token in the same edit. The container
-  runs with `--allow-tokenless-network`, which is safe only because compose
-  publishes to `127.0.0.1`; a browser reaching it by the host's LAN address gets
-  **403** from the Host guard, but that guard is a browser-integrity check and
-  any non-browser client simply sets the header. Give it a real credential:
-  `command: ["--token-file", "/vault/.register/token"]` in the compose file,
-  appended to the image ENTRYPOINT.
-- Agents still run on the **host**, against the same mounted folder. The
-  container only serves the UI.
-
-Images are published to `ghcr.io/thijsvos/register` on tags: `v0.5.0`, `0.5.0`
-and `latest`.
-
-`latest` is there so nobody has to find a version string to try the product.
-**Depend on a versioned tag**, and note that `deploy/docker-compose.yml` names
-one for exactly that reason — a checked-in file that silently changes what it
-runs is the drift worth avoiding, and `tests/release.rs` fails the build if that
-pin falls behind `Cargo.toml`. The rule against floating tags governs what this
-project *consumes*: no `FROM …:latest`, no `uses: …@latest`, still enforced.
-
-They are multi-platform: one manifest carrying `linux/amd64` and `linux/arm64`,
-so `docker pull` gets the right one on an Apple Silicon machine or a Pi without
-being asked. The image is assembled from the binaries the release matrix already
-cross-builds on native runners rather than compiled under emulation, which is why
-adding the second platform cost no build time.
-
-## Using it
-
-Everything is reachable from the keyboard, and every control on screen prints its
-own key — so this table is a convenience, not a manual.
-
-| Key | Does |
-|---|---|
-| `⌘K` / `Ctrl-K` | Command palette — full-text search, commands, templates |
-| `⌘D` / `Ctrl-D` | TODAY — every open task in the vault, grouped by note |
-| `G` `D` | The daily log for today's date |
-| `G` `I` | The inbox, note `000` |
-| `G` `T` | TODAY, the chord form |
-| `N` | New note |
-| `I` | Switch light ↔ dark — kept in the vault, same as Settings |
-| `[` · `]` | Toggle the index · the inspector |
-| `Esc` | Leave the editor — the caret vanishing is the mode indicator |
-| `↵` | Back into the editor |
-| `↑` `↓` · `j` `k` | Walk a list: index, outline, backlinks, TODAY |
-| `j` · `k` | From the frame, step into the index — `j` at the top, `k` at the bottom |
-| `↑` `↓` · `Tab` | Move within the palette — `j` and `k` are letters while you are typing |
-| `→` `←` · `l` `h` | Open and fold a folder in the index; step in and out |
-| `⌫` | On an index row: delete that note or folder — asks first, in the palette |
-
-Deleting asks before it acts, and never hard-deletes. `⌫` on an index row — or
-`DELETE · NOTE` / `DELETE · FOLDER` in ⌘K — arms the palette with a single
-question naming what will go and how many notes that is. Answer it and the files
-move to `.register/trash/<timestamp>/`, keeping the paths they had, so putting
-them back is one `mv`. A folder takes everything under it, images and PDFs
-included, and the notice afterwards says what actually left rather than what was
-counted — the index only ever showed you the notes.
-
-⌘K is the whole navigation surface. It runs real full-text search over the note
-bodies rather than filtering a fixed list; it matches commands as a subsequence,
-so `tgi` finds TOGGLE INSPECTOR; and it lists everything in `templates/` under
-NEW FROM TEMPLATE, where whatever you have typed becomes the new note's title.
-
-**The daily log.** `G D` opens `daily/YYYY-MM-DD.md`, cutting it from
-`templates/daily.md` the first time each day and opening it every time after. The
-date is UTC, like every other timestamp in the chrome.
-
-**TODAY** is an aggregate that stores nothing. It re-derives every `- [ ]` in the
-vault, groups them under the note each came from, and ticking one writes through
-to that line in that file — the count in the header is the vault's, not a
-list's.
-
-**The inspector** is the same trick applied to one note: properties, outline,
-backlinks and tag counts, all recomputed from the buffer as you type. The
-backlinks are `[[wikilinks]]` inverted; following one to a note that does not
-exist creates it.
-
-**Settings** (`GO · SETTINGS / BYOF` in ⌘K) holds three things, none of them in
-browser storage: the scheme (light, dark, or press the lit one again to follow
-the OS — `I` and the INV key do the same thing and are kept the same way) and the body face (Commit, or Server Mono as a "teletype" theme), both
-written to `.register/config.json`; and BYOF, whose font bytes go to
-`.register/fonts/` — a directory `register init --git` adds to `.gitignore`,
-because a licensed face is yours and not the repository's. See below.
-
+Idle RAM on a 1k-note vault, document-switch time and repository size are held
+the same way. The full table and the reasoning are in `SPEC.html` §06.
 
 ## Remote access, and history
 
-Both are off by default and neither adds an account, a service or any telemetry.
+Off by default, and neither adds an account or any telemetry. REGISTER can commit
+your vault for you if it is a git repository, and can serve beyond localhost
+behind a token — Tailscale is the intended shape. Both in
+[`docs/remote.md`](docs/remote.md).
 
-### Git checkpoints
+## More
 
-If your vault is a git repository of its own, REGISTER can commit it for you
-after it has been quiet for 90 seconds:
+- **[`SPEC.html`](SPEC.html)** — the contract. Vault format, design system,
+  screens, budgets, phases. Everything here is downstream of it.
+- **[`CONTRIBUTING.md`](CONTRIBUTING.md)** — scope fence, how ideas get parked
+  and promoted, what "green" means.
+- **[`docs/ROADMAP.md`](docs/ROADMAP.md)** — everything deliberately not built
+  yet, with the trigger that would change that.
+- **[`docs/ADRs/`](docs/ADRs)** — decisions that needed an argument.
 
-```jsonc
-// .register/config.json
-{ "checkpoints": true }
-```
+Built with Claude Code, phase by phase, against `SPEC.html` §08.
 
-Commits are `checkpoint: 14:07Z`. It **never pushes** — that is a decision about
-somebody else's repository — and it never commits a folder that merely *contains*
-your vault, so a vault nested inside a larger repo checkpoints itself or not at
-all. Nothing changes? Nothing is committed. The status bar's GIT field shows
-`CLEAN`, `DIRTY`, or `N AHEAD` when there is an upstream to be ahead of.
+## Fonts
 
-Turn it off by deleting the flag. Your history is ordinary git: `git log`,
-`git revert`, `git checkout` all work, because there was never anything else.
+Three faces ship here, all **SIL OFL 1.1** with their `OFL.txt` beside them:
+**Commit Mono** (UI and body), **Departure Mono** (the 11px micro layer) and
+**Server Mono** (an alternate "teletype" body theme).
 
-Not in the container, though. The image is `FROM scratch` and has no git binary,
-so checkpoints cannot run there and the status bar's GIT field stays dashed even
-for a vault that is a repository. Run `register serve` natively if you want them.
-
-### Remote mode
-
-```sh
-openssl rand -hex 24 > ~/.register-token
-register serve ~/vault --host 0.0.0.0 --token-file ~/.register-token
-```
-
-`--token-file` rather than `--token`, because a command line is public: `ps`
-shows it to every other user on the machine. `REGISTER_TOKEN` in the environment
-works too and is nearly as good — on Linux `/proc/<pid>/environ` is readable by
-the same user, but not by others. `--token` still exists for a throwaway, and
-the three are mutually exclusive.
-
-Then open `http://<host>:7777/?token=<the token>` once. The token is stored as
-an HttpOnly cookie, which is what carries it into the WebSocket — that API
-cannot send an `Authorization` header, so a bearer-only scheme would leave live
-reload either unauthenticated or unreachable. Scripts can use
-`Authorization: Bearer <token>` instead.
-
-The page then redirects to itself without the token, so the secret does not sit
-in the address bar, in history, in a bookmark, or in the `Referer` of every link
-you later click. The WebSocket is exempt: it cannot follow a redirect, and
-`?token=` is how it authenticates before any cookie exists.
-
-Binding a real interface with no token is **refused at startup**, because the
-origin guard alone does not cover it: the `Host` header it checks is chosen by
-the client, which stops a browser being rebound onto your loopback but stops
-nothing that speaks HTTP directly. `--allow-tokenless-network` overrides the
-refusal when something else already limits who can reach the port.
-
-**Localhost stays tokenless.** A request that reached 127.0.0.1 came from the
-machine the vault is on, where the files are readable anyway.
-
-**Behind Tailscale is the intended shape** (§07). Put the machine on your
-tailnet and bind to its tailnet address rather than to the whole world:
-
-```sh
-register serve ~/vault --host "$(tailscale ip -4)" --token "$(openssl rand -hex 24)"
-```
-
-Every device you own reaches it; nothing else can route to it at all. The token
-is then a second lock rather than the only one. There is no TLS here — a tailnet
-is already encrypted, and terminating TLS is your reverse proxy's job if you put
-one in front.
-
-No accounts. No user table. No telemetry. The token is a string you chose,
-compared in constant time, and forgotten when the process exits.
-
-## Contributing
-
-Under construction with Claude Code, phase by phase per `SPEC.html` §08. Read the
-spec end to end first, then `CLAUDE.md`; `register-prototype.html` is the visual
-+ interaction reference.
-
-```sh
-cargo run -- health                  # server toolchain
-cargo run -- serve ./devvault        # server, with the UI built into it
-cd app && pnpm install && pnpm dev   # UI on :5173, /api proxied to :7777
-```
-
-`pnpm dev` serves the shell only. It proxies `/api` to a `register serve` on
-7777, so leave one running in another terminal or the page boots with an empty
-index and a dead status bar.
-
-[`CONTRIBUTING.md`](CONTRIBUTING.md) has the v1 scope fence, the
-park-and-promote process, and what "green" means.
-
-## Fonts and licensing
-
-One family does the reading — Commit Mono at 400 and 700, which is what §02
-means by "one typeface family in two working weights". The other two are not a
-second body family: one draws the 11px micro layer, the other is a body theme
-you have to go and choose. Three faces ship in this repository, all **SIL OFL
-1.1**, each with its `OFL.txt` beside it:
-
-| Face | Role |
-|---|---|
-| **Commit Mono** | default UI and body |
-| **Departure Mono** | the micro layer — labels, status bar, on an 11px pixel grid |
-| **Server Mono** | the alternate "teletype" body theme |
-
-**Berkeley Mono / TX-02 is commercial and is never bundled.** U.S. Graphics
-states its licences are not compatible with open-source apps and generally
-disallows embedding in editors. It sits first in the font stack and resolves to
-nothing unless *you* own it — Settings → BYOF loads your licensed file from your
-own disk into your own vault, under `.register/fonts/`, which `register init
---git` puts in `.gitignore`. The bytes never leave your machine and are never
-committed. (Not legal advice; read the licences.)
+**Berkeley Mono / TX-02 is commercial and is never bundled.** It sits first in
+the stack and resolves to nothing unless *you* own it; Settings → BYOF loads your
+licensed file from your own disk into your own vault, which `register init --git`
+puts in `.gitignore`. The bytes never leave your machine. (Not legal advice; read
+the licences.)
 
 ## License
+
 MIT (code) · SIL OFL 1.1 (bundled fonts).

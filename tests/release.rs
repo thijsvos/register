@@ -699,8 +699,16 @@ fn the_documented_compose_command_rebuilds() {
     // no `up` on it and an `up` line with no command — and the filter below
     // silently matched neither. A test that stops seeing the thing it guards
     // reports success.
-    let readme = read("README.md").replace("\\\n", " ");
-    let compose_lines: Vec<&str> = readme
+    // Every place a reader could copy one from, not only the README. The install
+    // detail moved to `docs/install.md` when the README was cut down, and a rule
+    // about "the documented command" has to follow the documentation or it
+    // quietly starts guarding an empty file.
+    let documented = ["README.md", "docs/install.md"]
+        .iter()
+        .map(|file| read(file).replace("\\\n", " "))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let compose_lines: Vec<&str> = documented
         .lines()
         .map(str::trim)
         .filter(|line| line.contains("docker compose") && line.contains(" up"))
@@ -708,19 +716,21 @@ fn the_documented_compose_command_rebuilds() {
 
     assert!(
         !compose_lines.is_empty(),
-        "the README stopped documenting it"
+        "nothing documents `docker compose up` any more"
     );
 
     let mut builds = 0;
     for line in &compose_lines {
-        // The overlay is what makes a build possible; the README continues it
-        // across two lines, so the flag may be on either.
-        let is_build_path = line.contains("docker-compose.build.yml") || line.contains("--build");
-        if is_build_path {
+        // The overlay is what makes a build possible, so it — and not the flag —
+        // is what identifies a build command. Testing for either meant the
+        // assertion below restated its own branch condition and could not fail:
+        // dropping `--build` from the documented command survived, which is how
+        // a tautology announces itself.
+        if line.contains("docker-compose.build.yml") {
             builds += 1;
             assert!(
-                line.contains("--build") || line.contains("docker-compose.build.yml"),
-                "the README teaches a compose build that reuses a stale image: {line}"
+                line.contains("--build"),
+                "documents a compose build that reuses a stale image: {line}"
             );
         } else {
             assert!(
@@ -731,7 +741,7 @@ fn the_documented_compose_command_rebuilds() {
     }
     assert!(
         builds > 0,
-        "the README no longer documents how to build from source at all"
+        "nothing documents how to build the container from source any more"
     );
 }
 
