@@ -55,6 +55,15 @@ const fileLink = (target: string) =>
     attributes: { role: 'link', tabindex: '0', 'data-src': target },
   })
 
+/**
+ * A reference whose target has already failed to load.
+ *
+ * Dotted and dim, and carrying no `role="link"` — §02b's own vocabulary for "the
+ * target is not there", the same the wikilink uses. Inert rather than dressed,
+ * because a click could only open a surface saying what this already says.
+ */
+const fileGone = Decoration.mark({ class: 'cm-fileref-missing' })
+
 /** The destination of a markdown inline link, as the tree hands it over. */
 const LINK = /^\[[^\]]*\]\(\s*<?([^)\s>]+)/
 
@@ -103,7 +112,12 @@ function build(view: EditorView): DecorationSet {
           // linked with `[[wikilinks]]`; this is for the files beside them.
           const servable = target !== '' && !/\.md$/i.test(target)
           if (servable && host.fileUrl(target) !== null) {
-            marks.push(fileLink(target).range(node.from, node.to))
+            marks.push(
+              (host.fileMissing(target) ? fileGone : fileLink(target)).range(
+                node.from,
+                node.to,
+              ),
+            )
           }
           return
         }
@@ -114,7 +128,12 @@ function build(view: EditorView): DecorationSet {
           const target =
             IMAGE.exec(view.state.doc.sliceString(node.from, node.to))?.[2] ?? ''
           if (target !== '' && host.fileUrl(target) !== null) {
-            marks.push(fileLink(target).range(node.from, node.to))
+            marks.push(
+              (host.fileMissing(target) ? fileGone : fileLink(target)).range(
+                node.from,
+                node.to,
+              ),
+            )
           }
           return
         }

@@ -1,6 +1,7 @@
 <script lang="ts">
 import { fileUrl } from '../core/api'
 import { bodyOffset } from '../core/frontmatter'
+import { misses } from '../core/media.svelte'
 import { resolveSrc } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
@@ -93,6 +94,9 @@ $effect(() => {
   // that holds it: without this the host still points at the previous note and
   // every relative reference in the new one loads from the wrong folder.
   void vault.openPath
+  // …and a failed load, which is the only way a missing target becomes known.
+  // Reading it here is what turns the reference inert once its image 404s.
+  void misses.version
   handle?.setHost(wikiHost())
 })
 
@@ -113,6 +117,7 @@ function wikiHost() {
       const path = resolveSrc(from, src)
       if (path !== null) go.file(path)
     },
+    fileMissing: (src: string) => misses.missing(src),
   }
 }
 </script>

@@ -50,7 +50,8 @@ test.beforeAll(async () => {
           'A diagram:\n\n![The frame](diagram.png)\n\n' +
           'And a document: [the spec](spec.pdf)\n\n' +
           'A note: [another](002-other.md) and the web: [out](https://example.com)\n\n' +
-          'And one that is not there:\n\n![A plan](nowhere.png)\n',
+          'And one that is not there:\n\n![A plan](nowhere.png)\n\n' +
+          'Linked as well: [the plan](nowhere.png)\n',
       }),
       // Two references on one line, for the click-target test.
       'notes/002-pair.md': note({
@@ -106,6 +107,46 @@ test('a reference with nothing behind it says so', async ({ page }) => {
   const missing = page.locator('.cm-embed-missing')
   await expect(missing).toHaveCount(1)
   await expect(missing).toContainText(/not in the vault/i)
+})
+
+test('a reference whose target is absent goes inert', async ({ page }) => {
+  // The client cannot know a file is missing until a browser has tried, so the
+  // reference starts dressed as a link and demotes itself once its image 404s.
+  // Asserted after that has happened, which is why it waits for the box first.
+  await openTheNote(page)
+  await expect(page.locator('.cm-embed-missing')).toHaveCount(1)
+
+  // Both references to it: the image and the plain link. Which syntax wrote it
+  // does not change that the file is not there — and only the image can ever
+  // find that out, so the link's inertness is the image's discovery reaching it.
+  const gone = page.locator('.cm-fileref-missing')
+  await expect(gone).toHaveCount(2)
+  await expect(gone.first()).toContainText('![A plan](nowhere.png)')
+  await expect(gone.last()).toContainText('[the plan](nowhere.png)')
+  // Dotted and dim, and carrying no `role="link"` — nothing to open.
+  await expect(gone.first()).not.toHaveAttribute('role', 'link')
+  await expect(gone.last()).not.toHaveAttribute('role', 'link')
+
+  const dressed = await page
+    .locator('.cm-filelink')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-src')))
+  expect(dressed).not.toContain('nowhere.png')
+
+  // And clicking either does nothing: no surface, the note stays open.
+  await gone.first().click()
+  await gone.last().click()
+  await expect(page.locator('.media')).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toBeVisible()
+})
+
+test('the box for a missing file is inert too', async ({ page }) => {
+  await openTheNote(page)
+  const box = page.locator('.cm-embed-missing')
+  await expect(box).toBeVisible()
+  await box.click()
+  // It already says "not in the vault"; opening a surface to repeat that is
+  // motion for nothing.
+  await expect(page.locator('.media')).toHaveCount(0)
 })
 
 test('clicking an image opens it on its own surface', async ({ page }) => {
@@ -166,18 +207,22 @@ test('two references on one line open their own targets', async ({ page }) => {
 })
 
 test('only references to servable files are dressed as links', async ({ page }) => {
-  // That note holds five references. Three open a surface — two images and the
-  // PDF — and two must not: a link to another note, which Screen 8 answers 415
-  // for, and a link to the web, which is not the vault's to show. Marking every
-  // link would promise a viewer for targets there is none for.
+  // That note holds six references and exactly two are dressed once the page
+  // has settled. Two never are: a link to another note, which Screen 8 answers
+  // 415 for, and a link to the web, which is not the vault's to show — marking
+  // every link would promise a viewer for targets there is none for. The other
+  // two are `nowhere.png`, written both ways: both start dressed and demote
+  // themselves when the image 404s, which is what the box below is waited on.
   await openTheNote(page)
+  await expect(page.locator('.cm-embed-missing')).toHaveCount(1)
+
   const dressed = page.locator('.cm-filelink')
-  await expect(dressed).toHaveCount(3)
+  await expect(dressed).toHaveCount(2)
 
   const targets = await dressed.evaluateAll((nodes) =>
     nodes.map((node) => node.getAttribute('data-src')),
   )
-  expect(targets.sort()).toEqual(['diagram.png', 'nowhere.png', 'spec.pdf'])
+  expect(targets.sort()).toEqual(['diagram.png', 'spec.pdf'])
   expect(targets).not.toContain('002-other.md')
   expect(targets).not.toContain('https://example.com')
 })

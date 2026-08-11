@@ -1,6 +1,7 @@
 import { syntaxTree } from '@codemirror/language'
 import { type EditorState, type Range, StateField } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
+import { misses } from '../../core/media.svelte'
 import { wikiLinkHost } from './wikilinks'
 
 /**
@@ -93,7 +94,12 @@ export class ImageEmbed extends WidgetType {
     image.loading = 'lazy'
     image.decoding = 'async'
 
+    let gone = false
     image.addEventListener('error', () => {
+      gone = true
+      // The only place this is knowable. Recorded so the reference *text* can go
+      // inert too, rather than staying dressed as a link to this same message.
+      misses.mark(this.src)
       // §02b's wikilink matrix already has a word for "the target is not
       // there" — dotted and dim. Reused rather than invented, and it says what
       // is wrong instead of showing a broken-image glyph.
@@ -109,6 +115,9 @@ export class ImageEmbed extends WidgetType {
     // mousedown rather than click: click fires after the browser has moved the
     // selection, which reads as the caret jumping before the surface opens.
     figure.addEventListener('mousedown', (event: MouseEvent) => {
+      // Inert once the target has proved absent: opening the viewer would show
+      // the same sentence this box is already showing.
+      if (gone) return
       event.preventDefault()
       view.state.facet(wikiLinkHost).openFile(this.src)
     })

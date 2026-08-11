@@ -22,6 +22,14 @@ export interface WikiLinkHost {
   fileUrl: (src: string) => string | null
   /** Open a referenced file on its own surface (§02b Screen 8). */
   openFile: (src: string) => void
+  /**
+   * Has this reference already failed to load in this session?
+   *
+   * Only ever true after a browser has tried, because nothing else can know —
+   * media is not in the tree. So a reference starts out dressed as a link and
+   * goes inert once its target proves absent.
+   */
+  fileMissing: (src: string) => boolean
 }
 
 const inert: WikiLinkHost = {
@@ -29,6 +37,7 @@ const inert: WikiLinkHost = {
   open: () => {},
   fileUrl: () => null,
   openFile: () => {},
+  fileMissing: () => false,
 }
 
 /**

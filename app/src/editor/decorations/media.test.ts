@@ -18,6 +18,7 @@ const host: WikiLinkHost = {
   // matters here is that a `null` suppresses the widget and a string draws one.
   fileUrl: (src) => (src.startsWith('http') ? null : `/api/file/notes/${src}`),
   openFile: () => {},
+  fileMissing: () => false,
 }
 
 function embedsIn(doc: string): { at: number; url: string; alt: string }[] {

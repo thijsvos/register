@@ -105,6 +105,15 @@ const theme = EditorView.theme({
     cursor: 'pointer',
   },
 
+  // A reference whose target proved absent. §02b's own words for it, borrowed
+  // from the wikilink: dotted and dim. No pointer — there is nothing to open.
+  '.cm-fileref-missing': {
+    textDecoration: 'underline',
+    textDecorationStyle: 'dotted',
+    textUnderlineOffset: 'var(--underline-gap)',
+    color: 'var(--dim)',
+  },
+
   // §02b Task: `[ ]` fg, `[x]` plus dim strikethrough on the text.
   '.cm-task-toggle': {
     display: 'inline-block',
