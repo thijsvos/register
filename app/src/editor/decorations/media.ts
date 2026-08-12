@@ -79,9 +79,16 @@ export class ImageEmbed extends WidgetType {
   }
 
   override toDOM(view: EditorView): HTMLElement {
+    // Two elements, not one: the outer carries the gap as padding and the inner
+    // carries the rule. A margin here would be outside the box CodeMirror
+    // measures, which puts its height map out by exactly that much — see
+    // `.cm-embed` in the theme for what that cost.
     const figure = document.createElement('div')
     figure.className = 'cm-embed'
     figure.contentEditable = 'false'
+
+    const box = document.createElement('div')
+    box.className = 'cm-embed-box'
 
     const image = document.createElement('img')
     image.className = 'cm-embed-image'
@@ -109,7 +116,7 @@ export class ImageEmbed extends WidgetType {
       said.className = 'cm-embed-said'
       said.textContent =
         this.alt === '' ? 'Not in the vault' : `${this.alt} — not in the vault`
-      figure.append(said)
+      box.append(said)
     })
 
     // mousedown rather than click: click fires after the browser has moved the
@@ -122,7 +129,8 @@ export class ImageEmbed extends WidgetType {
       view.state.facet(wikiLinkHost).openFile(this.src)
     })
 
-    figure.append(image)
+    box.append(image)
+    figure.append(box)
     return figure
   }
 

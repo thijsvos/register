@@ -137,12 +137,21 @@ const theme = EditorView.theme({
   // The image under its own `![alt](src)`. §02 allows exactly one kind of
   // chrome — a 1px hairline — so the frame is a rule and nothing else: no
   // radius, no shadow, no caption plate, and no transition as it decodes.
+  // **No margin on this element, ever.** CodeMirror measures a block widget by
+  // its border box, and a margin sits outside that — so the height map ends up
+  // short by exactly the margin and every coordinate below the image maps to the
+  // wrong document position. Measured: `var(--s3) 0` is 24px against a 21px
+  // line, so a click below one image landed a line out, below two images two
+  // lines out. The gap is padding on this wrapper instead, and the rule that
+  // draws the box moved inside it.
   '.cm-embed': {
     display: 'block',
-    margin: 'var(--s3) 0',
+    padding: 'var(--s3) 0',
+    cursor: 'pointer',
+  },
+  '.cm-embed-box': {
     padding: 'var(--s2)',
     border: 'var(--hairline) solid var(--line)',
-    cursor: 'pointer',
   },
   '.cm-embed-image': {
     display: 'block',
@@ -153,8 +162,10 @@ const theme = EditorView.theme({
   },
   // The wikilink's own "target is not there" idiom, reused rather than invented.
   '.cm-embed-missing': {
-    borderStyle: 'dotted',
     color: 'var(--dim)',
+  },
+  '.cm-embed-missing .cm-embed-box': {
+    borderStyle: 'dotted',
   },
   '.cm-embed-said': {
     fontFamily: 'var(--font-micro)',
