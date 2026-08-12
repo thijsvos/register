@@ -34,6 +34,20 @@ class FakeVault {
     this.#unlisted.add(path)
   }
 
+  /**
+   * Answer the next tree request with the vault as it is *now*.
+   *
+   * What a superseded refresh looks like from the store's side: it asked, and
+   * what came back does not include the change it just made. In the real thing
+   * the staleness comes from `refresh` abandoning its own result when the
+   * watcher's refresh overtakes it; the observable effect is identical.
+   */
+  serveStaleTreeOnce(): void {
+    this.#staleTree = [...this.files.keys()]
+  }
+
+  #staleTree: string[] | null = null
+
   /** Paths that answer with a status instead of their content. */
   #broken = new Map<string, number>()
 
@@ -94,7 +108,19 @@ class FakeVault {
     this.requests.push(`${method} ${path}`)
 
     if (path === '/api/tree') {
-      const tree = [...this.files.entries()]
+      const snapshot = this.#staleTree
+      this.#staleTree = null
+      const source =
+        snapshot === null
+          ? [...this.files.entries()]
+          : snapshot.map(
+              (p) =>
+                [p, this.files.get(p) ?? { body: '', etag: 'stale' }] as [
+                  string,
+                  { body: string; etag: string },
+                ],
+            )
+      const tree = source
         .filter(([notePath]) => !this.#unlisted.has(notePath))
         .map(([notePath, held]) => ({
           path: notePath,
@@ -1225,5 +1251,37 @@ describe('what the on-disk checks are for', () => {
     expect(vault.notice).not.toContain('already exists')
     expect(vault.notice).toContain('unreadable')
     expect(server.files.has('notes/000-refused.md')).toBe(false)
+  })
+})
+
+describe('a deletion the tree has not caught up with', () => {
+  it('does not report success while the tree still lists the note', async () => {
+    // `refresh` abandons its result when a newer refresh supersedes it, and
+    // deleting a file makes the watcher fire one. Ours can lose that race and
+    // install nothing, so the tree still lists a note that is gone — and the UI
+    // then puts focus on a row the next refresh destroys. Cost two red CI runs
+    // that no local run reproduced.
+    server.seed('notes/003-a.md', NOTE)
+    server.seed('notes/004-b.md', NOTE)
+    await vault.refresh()
+
+    server.serveStaleTreeOnce()
+    expect(await vault.trashNote('notes/003-a.md')).toBe(true)
+    await settle()
+
+    expect(vault.tree.map((entry) => entry.path)).not.toContain('notes/003-a.md')
+  })
+
+  it('holds for a folder too', async () => {
+    server.seed('notes/projects/010-a.md', NOTE)
+    server.seed('notes/007-loose.md', NOTE)
+    await vault.refresh()
+
+    server.serveStaleTreeOnce()
+    expect(await vault.trashFolder('notes/projects')).toBe(true)
+    await settle()
+
+    expect(vault.tree.map((entry) => entry.path)).not.toContain('notes/projects/010-a.md')
+    expect(vault.tree.map((entry) => entry.path)).toContain('notes/007-loose.md')
   })
 })

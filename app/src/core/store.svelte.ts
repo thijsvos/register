@@ -642,7 +642,7 @@ class VaultStore {
     // Where it went, because §04 never hard-deletes and a message that does not
     // say where to look makes a recoverable operation feel final.
     this.notice = `Trashed ${basename(path)} → .register/trash/`
-    await this.refresh()
+    await this.#refreshUntilGone((held) => held === path)
     return true
   }
 
@@ -669,8 +669,30 @@ class VaultStore {
     this.notice = `Trashed ${path} — ${count(moved.notes, 'note')}${
       moved.files === 0 ? '' : ` and ${count(moved.files, 'file')}`
     } → ${moved.bucket}`
-    await this.refresh()
+    await this.#refreshUntilGone((held) => inside(held, path))
     return true
+  }
+
+  /**
+   * Refresh until the tree stops listing what was just deleted.
+   *
+   * `refresh` abandons its result when a newer refresh supersedes it, and
+   * deleting a file makes the *watcher* fire one — so ours can lose the race and
+   * return having installed nothing, leaving the tree still listing a note that
+   * is gone. Reporting success there makes the store's promise mean less than
+   * callers read it as: the UI then places focus against a row the next refresh
+   * destroys, and focus falls to <body>.
+   *
+   * Measured, twice, as one e2e failure on a two-vCPU runner that no local run
+   * reproduced. Bounded rather than looped until true: two attempts settle the
+   * race this closes, and a tree that still disagrees after that is a bug worth
+   * seeing rather than one worth spinning on.
+   */
+  async #refreshUntilGone(deleted: (path: string) => boolean): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await this.refresh()
+      if (!this.tree.some((entry) => deleted(entry.path))) return
+    }
   }
 
   /**
