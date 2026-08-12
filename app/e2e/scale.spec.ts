@@ -232,10 +232,15 @@ test('choosing a scale does not discard the other settings', async ({ page }) =>
   await expect.poll(() => storedScale(page), { timeout: 3000 }).toBe(1)
 
   const config = await (await page.request.get(`${server.url}/api/config`)).json()
+  // The whole document, not a subset: this test exists because `#save` writes an
+  // explicit literal, so a field it forgets is silently never persisted. That is
+  // also why `expanded` is named here — the journal's fold state is stored, and
+  // a config that dropped it would forget the folder was ever opened.
   expect(config).toEqual({
     scheme: 'dark',
     bodyFace: 'teletype',
     scale: 1,
     collapsed: [],
+    expanded: [],
   })
 })
