@@ -8,6 +8,7 @@
  * `register init` so they cannot leak into a public repo (§03).
  */
 import { deleteFont, getConfig, getFont, putConfig, putFont } from './api'
+import { DAILY_DIR } from './paths'
 
 /** Unset means "follow the OS", which is the default and the way back. */
 export type Scheme = 'system' | 'light' | 'dark'
@@ -44,6 +45,15 @@ export interface Config {
    * between machines is right here in a way a display scale was not.
    */
   collapsed: string[]
+  /**
+   * Folders the reader has opened that would otherwise start closed.
+   *
+   * The mirror of `collapsed`, and it exists for one folder: `daily/`. Every
+   * other folder starts open, so remembering what was *shut* is enough — but a
+   * journal that opened three hundred rows tall would defeat the reason it is
+   * drawn at all, so that one starts shut and this remembers it was opened.
+   */
+  expanded: string[]
 }
 
 const DEFAULTS: Config = {
@@ -51,6 +61,7 @@ const DEFAULTS: Config = {
   bodyFace: 'default',
   scale: 'auto',
   collapsed: [],
+  expanded: [],
 }
 
 /**
@@ -65,11 +76,22 @@ const FAMILY = 'TX-02'
 /** How a BYOF face is doing. §02b draws the loaded state as "◉ Loaded". */
 export type FontState = 'none' | 'loading' | 'loaded' | 'error'
 
+/**
+ * Folders drawn shut until the reader says otherwise.
+ *
+ * One entry, and it should stay that way: this is a rule about a folder whose
+ * size grows without anybody deciding to grow it.
+ */
+function startsClosed(path: string): boolean {
+  return path === DAILY_DIR
+}
+
 class Settings {
   scheme = $state<Scheme>(DEFAULTS.scheme)
   bodyFace = $state<BodyFace>(DEFAULTS.bodyFace)
   scale = $state<Scale>(DEFAULTS.scale)
   collapsed = $state<string[]>([])
+  expanded = $state<string[]>([])
   font = $state<FontState>('none')
   /** One line of instrument-voiced trouble, or nothing. */
   notice = $state<string | null>(null)
@@ -94,6 +116,7 @@ class Settings {
       this.bodyFace = stored.bodyFace
       this.scale = stored.scale
       this.collapsed = stored.collapsed
+      this.expanded = stored.expanded
     } catch {
       // Defaults already hold.
     }
@@ -124,6 +147,21 @@ class Settings {
     await this.#save()
   }
 
+  /**
+   * Whether this folder is drawn open.
+   *
+   * Two lists rather than one because two folders want opposite defaults: every
+   * folder you made starts open and remembers being shut, and the journal
+   * starts shut and remembers being opened. A single list would have to store
+   * `daily` to mean "open", which is the sort of inversion that reads as a bug
+   * to anyone opening `config.json`.
+   */
+  isOpen(path: string): boolean {
+    return startsClosed(path)
+      ? this.expanded.includes(path)
+      : !this.collapsed.includes(path)
+  }
+
   /** Whether the reader has collapsed this folder. */
   isCollapsed(path: string): boolean {
     return this.collapsed.includes(path)
@@ -138,9 +176,15 @@ class Settings {
    * ⌘K lands somewhere.
    */
   async toggleFolder(path: string): Promise<void> {
-    this.collapsed = this.isCollapsed(path)
-      ? this.collapsed.filter((folder) => folder !== path)
-      : [...this.collapsed, path]
+    if (startsClosed(path)) {
+      this.expanded = this.expanded.includes(path)
+        ? this.expanded.filter((folder) => folder !== path)
+        : [...this.expanded, path]
+    } else {
+      this.collapsed = this.isCollapsed(path)
+        ? this.collapsed.filter((folder) => folder !== path)
+        : [...this.collapsed, path]
+    }
     await this.#save()
   }
 
@@ -230,6 +274,7 @@ class Settings {
         bodyFace: this.bodyFace,
         scale: this.scale,
         collapsed: this.collapsed,
+        expanded: this.expanded,
       })
       this.notice = null
     } catch (error) {
@@ -248,6 +293,7 @@ export function asConfig(value: unknown): Config {
     bodyFace: isBodyFace(record.bodyFace) ? record.bodyFace : DEFAULTS.bodyFace,
     scale: isScale(record.scale) ? record.scale : DEFAULTS.scale,
     collapsed: asFolders(record.collapsed),
+    expanded: asFolders(record.expanded),
   }
 }
 

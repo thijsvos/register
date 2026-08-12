@@ -1,5 +1,5 @@
 <script lang="ts">
-import { basename, isConflictCopy, isListed } from '../../core/paths'
+import { basename, dailyDate, isConflictCopy, isIndexed } from '../../core/paths'
 import { settings } from '../../core/settings.svelte'
 import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
@@ -8,24 +8,41 @@ import { go, treeTraverse } from '../nav'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
-// Your notes, not the vault's own furniture. `CLAUDE.md` is the agent's brief
-// and `templates/` are stencils: both are still in ⌘K, and a stencil is also a
-// row under NEW FROM TEMPLATE, so this hides them from a list rather than from
-// the app. The journal is out for the same reason it always was — one log per
-// day forever — and folders do not change that, they only draw what is here.
-let notes = $derived(vault.tree.filter((entry) => isListed(entry.path)))
+// Your notes and your journal. `CLAUDE.md` is the agent's brief and
+// `templates/` are stencils: both stay out, still reachable through ⌘K, and a
+// stencil is also a row under NEW FROM TEMPLATE.
+//
+// The journal is in now. It was hidden because there is one log per day
+// forever and `daily/` sorts before `notes/`, so a year of dated rows would sit
+// above everything you wrote — true of a flat list, and no longer true of a
+// folder that starts shut. It costs one row, newest first, and it is the only
+// way to reach a day you did not write a link to.
+let notes = $derived(vault.tree.filter((entry) => isIndexed(entry.path)))
 let tree = $derived(folderTree(notes))
 
 // The open note is always visible, whatever is folded shut. Computed here
 // rather than by un-collapsing on open, so what is stored stays what the reader
 // chose instead of drifting every time ⌘K lands inside a folded folder.
 let revealed = $derived(new Set(vault.openPath === null ? [] : ancestors(vault.openPath)))
-const shown = (folder: string) => !settings.isCollapsed(folder) || revealed.has(folder)
+const shown = (folder: string) => settings.isOpen(folder) || revealed.has(folder)
 let tags = $derived(tagCounts(vault.tree))
 // The meter is relative to the commonest tag, not to the note count: a vault
 // where nothing is tagged twice should read as a flat row of equals, not as
 // twenty bars all one pixel wide.
 let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
+
+/**
+ * `MON`…`SUN` for a `YYYY-MM-DD`.
+ *
+ * UTC, like every other date the chrome shows — reading it in local time would
+ * name the wrong day for anyone west of Greenwich, on the one row whose entire
+ * job is saying which day it is.
+ */
+function weekday(date: string): string {
+  return new Date(`${date}T00:00:00Z`)
+    .toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })
+    .toUpperCase()
+}
 </script>
 
 <aside class="side" aria-label="Index">
@@ -90,6 +107,7 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
       {@const entry = node.entry}
       {@const words = vault.words(entry.path)}
       {@const artefact = isConflictCopy(entry.path)}
+      {@const day = dailyDate(entry.path)}
       <!-- §04: a conflict copy is "an artefact to merge, not a note". It
            carries the original's ref and title verbatim, so drawn as a note it
            is indistinguishable from the note it came from — which is how one
@@ -106,8 +124,15 @@ let busiest = $derived(Math.max(1, ...tags.map((tag) => tag.count)))
         onclick={() => (artefact ? go.conflict(entry.path) : go.note(entry.path))}
         onkeydown={treeTraverse}
       >
-        <span class="ref">{artefact ? '—' : (entry.ref ?? '—')}</span>
-        <span class="name">{artefact ? basename(entry.path) : (entry.title ?? entry.path)}</span>
+        <!-- A daily log has no ref — §04 gives it a date instead of a number — so
+             the column that would carry one carries the weekday, which is what
+             makes a list of dates scannable. The date itself comes from the
+             filename rather than the title: the filename is what §04 fixes, and
+             a log written by an older build can be titled anything at all. -->
+        <span class="ref">{day === null ? (artefact ? '—' : (entry.ref ?? '—')) : weekday(day)}</span>
+        <span class="name"
+          >{day ?? (artefact ? basename(entry.path) : (entry.title ?? entry.path))}</span
+        >
         {#if artefact}
           <span class="unresolved">Unresolved</span>
         {:else}

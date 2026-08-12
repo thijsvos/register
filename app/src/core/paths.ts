@@ -75,6 +75,41 @@ export function splitFolder(typed: string): { folder: string | null; title: stri
   }
 }
 
+/** The folder §04 keeps the journal in. */
+export const DAILY_DIR = 'daily'
+
+/**
+ * The date a daily log is for, read from its **filename**.
+ *
+ * The filename is the authority, not the frontmatter title. §04 gives a daily
+ * log its name — `daily/YYYY-MM-DD.md` — and a title is whatever the last
+ * writer claimed, which is not always a date: a vault that has been through an
+ * older build can hold logs titled `TEMPLATE`, and an index that repeated that
+ * back would be unusable exactly where a journal has to be reliable.
+ *
+ * `null` for anything that is not shaped like one.
+ */
+export function dailyDate(path: string): string | null {
+  const found = /^daily\/(\d{4}-\d{2}-\d{2})\.md$/.exec(path)
+  return found?.[1] ?? null
+}
+
+/**
+ * Whether the INDEX draws it.
+ *
+ * Wider than `isListed` by exactly the journal. The two were the same rule
+ * while the pane was a flat list, because a year of dated rows above your notes
+ * is not an index — but a folder that starts closed costs one line, so the
+ * argument for hiding them stopped applying when the tree landed.
+ *
+ * Still distinct from `isListed`, which governs what counts as *your notes*:
+ * the status bar's file count, and the folders a new note may be created into.
+ * A daily log is drawn, and is not a note you filed.
+ */
+export function isIndexed(path: string): boolean {
+  return isListed(path) || isDaily(path)
+}
+
 /**
  * A typed folder path, normalised, or `null` if notes may not go there.
  *

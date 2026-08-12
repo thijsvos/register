@@ -89,6 +89,11 @@ images and PDFs included. Trashed notes still count when the server hands out th
 next reference number, so a `[[003]]` written last month can never quietly start
 pointing at different prose.
 
+**The journal is a folder that stays shut.** `G` `D` opens today's log; the
+DAILY folder in the index holds every other day, newest first, each row showing
+its date and weekday. It costs one row until you open it, which is why a year of
+daily logs doesn't bury the notes you actually filed.
+
 **Settings** (`GO · SETTINGS` in ⌘K) keeps the scheme and the body face in
 `.register/config.json`, and your own licensed font in `.register/fonts/` —
 nothing in browser storage, because the vault is the only state there is.

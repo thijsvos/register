@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   cleanFolder,
+  dailyDate,
   folders,
   inside,
   isConflictCopy,
   isContract,
   isDaily,
   isDerived,
+  isIndexed,
   isListed,
   isTemplate,
   resolveSrc,
@@ -250,5 +252,43 @@ describe('cleanFolder', () => {
   it('allows a nested folder that merely shares the name', () => {
     // `isTemplate` is a top-level rule, so this is a folder like any other.
     expect(cleanFolder('notes/templates')).toBe('notes/templates')
+  })
+})
+
+describe('dailyDate', () => {
+  it('reads the date off the filename', () => {
+    expect(dailyDate('daily/2026-08-12.md')).toBe('2026-08-12')
+  })
+
+  it('reads it even when the note calls itself something else', () => {
+    // The point of using the filename. A log written by an older build can be
+    // titled TEMPLATE, and an index repeating that back is unusable exactly
+    // where a journal has to be reliable.
+    expect(dailyDate('daily/2026-08-11.md')).toBe('2026-08-11')
+  })
+
+  it('is null for anything not shaped like a daily log', () => {
+    expect(dailyDate('notes/003-a.md')).toBeNull()
+    expect(dailyDate('daily/notes.md')).toBeNull()
+    expect(dailyDate('daily/2026-08.md')).toBeNull()
+    expect(dailyDate('archive/daily/2026-08-12.md')).toBeNull()
+  })
+})
+
+describe('isIndexed', () => {
+  it('draws your notes and your journal', () => {
+    expect(isIndexed('notes/003-a.md')).toBe(true)
+    expect(isIndexed('daily/2026-08-12.md')).toBe(true)
+  })
+
+  it('still leaves the furniture out', () => {
+    expect(isIndexed('templates/daily.md')).toBe(false)
+    expect(isIndexed('CLAUDE.md')).toBe(false)
+  })
+
+  it('is wider than isListed by exactly the journal', () => {
+    // The two govern different questions: what is drawn, and what counts as a
+    // note you filed. A daily log is drawn and is not one of those.
+    expect(isListed('daily/2026-08-12.md')).toBe(false)
   })
 })

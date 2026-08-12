@@ -189,10 +189,16 @@ describe('notesUnder', () => {
     expect(notesUnder(TREE, 'notes/projects-old')).toBe(1)
   })
 
-  it('leaves furniture and the journal out of the number', () => {
-    // `isListed`-hidden, so the reader cannot see them to agree to them. They
-    // still go if the folder goes, and the server reports that afterwards.
-    expect(notesUnder(TREE, 'daily')).toBe(0)
+  it('counts the journal, because the INDEX draws it', () => {
+    // This asserted zero while the journal was hidden. It is drawn now, so a
+    // count of zero would offer to delete the DAILY folder while promising it
+    // held nothing — the number in a confirm has to be the number on screen.
+    expect(notesUnder(TREE, 'daily')).toBe(1)
+  })
+
+  it('leaves the furniture out of the number', () => {
+    // Stencils are still hidden, so the reader cannot see them to agree to
+    // them. They still go if the folder goes, and the server says so after.
     expect(notesUnder(TREE, 'templates')).toBe(0)
   })
 })
@@ -230,5 +236,45 @@ describe('folderTargets', () => {
 
   it('says nothing about a vault with every note at the root', () => {
     expect(folderTargets([under('000-inbox.md')])).toEqual([])
+  })
+})
+
+describe('the journal reads backwards', () => {
+  const day = (date: string): Entry => ({
+    path: `daily/${date}.md`,
+    ref: null,
+    title: date,
+    tags: ['daily'],
+    mtime: 0,
+    size: 0,
+    etag: 'v1',
+  })
+
+  it('puts the newest day first', () => {
+    // A register reads forwards — 001, 002, 003 — and a journal does not. After
+    // a year the ascending order buries today under three hundred rows nobody
+    // will open.
+    const tree = folderTree([day('2026-08-10'), day('2026-08-12'), day('2026-08-11')])
+    const folder = tree[0] as Folder
+    expect(folder.path).toBe('daily')
+    expect(folder.children.map((child) => child.path)).toEqual([
+      'daily/2026-08-12.md',
+      'daily/2026-08-11.md',
+      'daily/2026-08-10.md',
+    ])
+  })
+
+  it('leaves every other folder reading forwards', () => {
+    const tree = folderTree([
+      at('notes/003-c.md'),
+      at('notes/001-a.md'),
+      at('notes/002-b.md'),
+    ])
+    const folder = tree[0] as Folder
+    expect(folder.children.map((child) => child.path)).toEqual([
+      'notes/001-a.md',
+      'notes/002-b.md',
+      'notes/003-c.md',
+    ])
   })
 })

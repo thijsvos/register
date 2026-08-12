@@ -24,12 +24,14 @@ describe('asConfig', () => {
         bodyFace: 'teletype',
         scale: 2,
         collapsed: ['notes/archive'],
+        expanded: [],
       }),
     ).toEqual({
       scheme: 'dark',
       bodyFace: 'teletype',
       scale: 2,
       collapsed: ['notes/archive'],
+      expanded: [],
     })
   })
 
@@ -40,6 +42,7 @@ describe('asConfig', () => {
       bodyFace: 'default',
       scale: 'auto',
       collapsed: [],
+      expanded: [],
     })
   })
 
@@ -54,6 +57,7 @@ describe('asConfig', () => {
       bodyFace: 'default',
       scale: 'auto',
       collapsed: [],
+      expanded: [],
     })
   })
 
@@ -65,6 +69,7 @@ describe('asConfig', () => {
       bodyFace: 'default',
       scale: 'auto',
       collapsed: [],
+      expanded: [],
     })
   })
 
@@ -74,6 +79,7 @@ describe('asConfig', () => {
       bodyFace: 'default',
       scale: 'auto',
       collapsed: [],
+      expanded: [],
     })
   })
 
@@ -83,6 +89,7 @@ describe('asConfig', () => {
       bodyFace: 'default',
       scale: 'auto',
       collapsed: [],
+      expanded: [],
     })
   })
 
@@ -126,6 +133,7 @@ describe('asConfig', () => {
         bodyFace: 'teletype',
         scale: 'auto',
         collapsed: [],
+        expanded: [],
       })
     })
   })
@@ -160,6 +168,7 @@ describe('asConfig', () => {
         bodyFace: 'default',
         scale: 2,
         collapsed: [],
+        expanded: [],
       })
     })
   })

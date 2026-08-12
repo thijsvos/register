@@ -7,17 +7,19 @@
  * backlink — but nothing drew it, so a vault with structure looked like a vault
  * with a shuffled list.
  *
- * Mirrors the filesystem with no special cases: `notes/` is a folder like any
- * other. Membership is still `isListed`, so the agent contract, the stencils and
- * the journal stay out — folders are a way to show what the index contains, not
- * a decision to change what it contains.
+ * Mirrors the filesystem: `notes/` is a folder like any other. Membership is
+ * `isIndexed` — your notes plus the journal, which a folder that starts closed
+ * finally made affordable to draw. The agent contract and the stencils stay out.
+ *
+ * One special case, and only one: the journal sorts newest first. Everything
+ * else reads forwards, because a register does.
  *
  * Pure, and importing nothing but a type: the sidebar rebuilds this on every
  * tree change, which happens on every agent write, and §06 budgets a keystroke
  * at 16 ms.
  */
 import type { Entry } from './api'
-import { inside, isListed } from './paths'
+import { DAILY_DIR, inside, isIndexed, isListed } from './paths'
 
 export interface Folder {
   kind: 'folder'
@@ -110,9 +112,19 @@ function level(node: Building, prefix: string): Node[] {
 
   folders.sort((a, b) => a.label.localeCompare(b.label))
 
+  // Newest first in the journal, oldest-to-newest everywhere else.
+  //
+  // A register reads forwards: 001, 002, 003. A journal does not — the entry
+  // you want is almost always today's or yesterday's, and after a year the
+  // ascending order buries them under three hundred rows you will never open.
+  // The exception is narrow on purpose: it is the one folder whose filenames
+  // are dates rather than a sequence somebody chose.
+  const backwards = prefix === DAILY_DIR
   const notes: Note[] = node.notes
     .map((entry) => ({ kind: 'note', path: entry.path, entry }) as const)
-    .sort((a, b) => a.path.localeCompare(b.path))
+    .sort((a, b) =>
+      backwards ? b.path.localeCompare(a.path) : a.path.localeCompare(b.path),
+    )
 
   return [...folders, ...notes]
 }
@@ -139,16 +151,18 @@ export function ancestors(path: string): string[] {
 /**
  * How many notes the INDEX draws under a folder — what a delete confirm counts.
  *
- * Listed notes only, because that is what the reader can see and therefore what
- * they are agreeing to. Whatever else is in the folder goes too, and the server
- * says so afterwards.
+ * What the INDEX draws, because that is what the reader can see and therefore
+ * what they are agreeing to — the journal included, now that it is drawn.
+ * Counting with `isListed` here would offer to delete the DAILY folder while
+ * promising it held nothing. Whatever else is in the folder goes too, and the
+ * server reports that afterwards.
  *
  * Here rather than beside the commands that use it: the palette and the index's
  * `⌫` both need it, and `nav.ts` importing it from `Palette/commands.ts` — which
  * imports `nav.ts` — is an import cycle that happens to work today.
  */
 export function notesUnder(entries: Entry[], folder: string): number {
-  return entries.filter((entry) => isListed(entry.path) && inside(entry.path, folder))
+  return entries.filter((entry) => isIndexed(entry.path) && inside(entry.path, folder))
     .length
 }
 
