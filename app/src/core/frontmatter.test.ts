@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   bodyOffset,
+  charCount,
   fields,
   hasFrontmatter,
   join,
@@ -147,6 +148,26 @@ describe('wordCount', () => {
 
   it('is zero for an empty body', () => {
     expect(wordCount('---\ntitle: A\n---\n')).toBe(0)
+  })
+})
+
+describe('charCount', () => {
+  it('counts the body and ignores frontmatter', () => {
+    // `Body is plain markdown.` plus its newline. The frontmatter above it is
+    // five times longer, which is why counting the whole file would be useless.
+    expect(charCount(NOTE)).toBe('Body is plain markdown.\n'.length)
+  })
+
+  it('is zero for an empty body', () => {
+    expect(charCount('---\ntitle: A\n---\n')).toBe(0)
+  })
+
+  it('counts a file with no frontmatter whole', () => {
+    expect(charCount('Just a body.')).toBe(12)
+  })
+
+  it('counts whitespace, which is what a character count means', () => {
+    expect(charCount('a b\n')).toBe(4)
   })
 })
 

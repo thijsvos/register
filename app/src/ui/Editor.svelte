@@ -6,6 +6,7 @@ import { resolveSrc } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
 import { setRenderMs } from '../lib/render.svelte'
+import NoteHead from './NoteHead.svelte'
 import { go } from './nav'
 import { chrome } from './view.svelte'
 
@@ -136,11 +137,22 @@ function wikiHost() {
 }
 </script>
 
-<div class="editor" bind:this={parent}></div>
+<div class="doc">
+  <NoteHead />
+  <div class="editor" bind:this={parent}></div>
+</div>
 
 <style>
-.editor {
+/* Two rows: the header takes what it needs and the editor takes the rest.
+   `minmax(0, 1fr)` rather than `1fr`, or the CodeMirror scroller sizes to its
+   whole document and the note scrolls the pane instead of scrolling itself. */
+.doc {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
+  min-height: 0;
+}
+.editor {
   min-height: 0;
 }
 </style>

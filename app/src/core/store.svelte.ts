@@ -15,7 +15,7 @@ import {
   type VaultEvent,
 } from './api'
 import { type Conflict, conflicts, originalOf } from './conflict'
-import { touchModified, wordCount } from './frontmatter'
+import { charCount, touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
@@ -231,9 +231,14 @@ class VaultStore {
     await this.create(target.trim())
   }
 
-  /** Live word count of the open buffer, for the status bar. */
+  /** Live word count of the open buffer, for §02b Screen 1's meta strip. */
   get openWords(): number | null {
     return this.openPath === null ? null : wordCount(this.buffer)
+  }
+
+  /** And its characters, which P4 asks for in the same breath as its words. */
+  get openChars(): number | null {
+    return this.openPath === null ? null : charCount(this.buffer)
   }
 
   /** Words in a note, or null until its body has loaded. */

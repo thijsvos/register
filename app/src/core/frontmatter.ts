@@ -158,6 +158,19 @@ export function list(value: string | undefined): string[] {
  * bar, and `split(/\s+/)` would allocate an array of every word in the note each
  * time — five thousand strings per character typed on a long note.
  */
+/**
+ * Characters in the body, ignoring frontmatter — the other half of §08 P4's
+ * "Words/chars + RENDER ms live".
+ *
+ * Code units rather than code points. `[...body].length` would count an emoji
+ * once instead of twice, and it allocates an array of every character in the
+ * note on every keystroke — the cost `wordCount` above exists to avoid, for a
+ * difference nothing in a plain-text vault is likely to notice.
+ */
+export function charCount(source: string): number {
+  return split(source).body.length
+}
+
 export function wordCount(source: string): number {
   const body = split(source).body
   let words = 0
