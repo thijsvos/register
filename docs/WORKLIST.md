@@ -118,7 +118,7 @@ roadmap. Most are hardening (races, budgets, fixtures) or §12 expansion.
 - No WebSocket keepalive — *P12 remote mode.*
 - `If-Match: *` — *A second client, or a spec revision that asks for it.*
 - Loopback is read as "the owner", and on a shared host it is not — *Anyone running this on a shared host — or a §04 revision that adds a socket transport.*
-- `the_servers_own_atomic_write_reports_one_change_not_a_temp_file` is flaky — *The first time it fails a pull request that is otherwise green — or sooner, since the repository is now…*
+- ~~`the_servers_own_atomic_write_reports_one_change_not_a_temp_file` is flaky~~ — **done** — *The first time it fails a pull request that is otherwise green — or sooner, since the repository is now…*
 
 **Parked during P3 (client store)**
 

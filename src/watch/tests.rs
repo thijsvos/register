@@ -9,12 +9,38 @@ use notify::event::{AccessKind, AccessMode, DataChange, ModifyKind};
 use super::*;
 use crate::vault::tests::TempVault;
 
-/// Give the platform watcher time to arm before touching anything. macOS
-/// FSEvents in particular only reports events raised after the stream starts.
+/// Give the platform watcher time to arm before touching anything.
+///
+/// This used to say that FSEvents "only reports events raised after the stream
+/// starts". It does not, and believing it is what made these tests flaky: the
+/// fixture creates its temp directory and seeds a note *before* `Watch::start`,
+/// and macOS delivers those events to the stream anyway. Measured on a release
+/// build, where the whole sequence is fast enough to land in one window:
+///
+///   Create(Folder) …/register-test-…      the fixture making the vault
+///   Create(File)   …/notes/003-a.md       the fixture seeding the note
+///   Modify(Data)   …/notes/003-a.md
+///   Create(File)   …/notes/.register-tmp- the write actually under test
+///   Modify(Name)   …/notes/003-a.md       its rename
+///
+/// So `drain` collected the seed's event alongside the write's and the
+/// assertion read as a debouncer leak. It never was one.
 const ARM: Duration = Duration::from_millis(300);
 
 /// Long enough to catch a second batch if the debouncer were leaking one.
 const SETTLE: Duration = Duration::from_millis(600);
+
+/// Wait for the watcher to arm, then throw away what the fixture itself caused.
+///
+/// Waiting alone is not enough — the events are queued in the broadcast, not
+/// discarded by the passage of time — so this empties the channel and then
+/// checks again, because the first pass can fall between two batches.
+async fn arm(rx: &mut broadcast::Receiver<Event>) {
+    for _ in 0..2 {
+        tokio::time::sleep(ARM).await;
+        while rx.try_recv().is_ok() {}
+    }
+}
 
 /// Everything broadcast within `SETTLE`, in arrival order.
 async fn drain(rx: &mut broadcast::Receiver<Event>) -> Vec<Event> {
@@ -33,7 +59,7 @@ async fn an_external_write_emits_exactly_one_event() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault, tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     fs::write(tmp.path().join("notes/003-a.md"), "edited by an agent\n").expect("write");
 
@@ -51,7 +77,7 @@ async fn a_burst_of_writes_coalesces_to_one_event() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault, tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     for n in 0..8 {
         fs::write(tmp.path().join("notes/003-a.md"), format!("revision {n}\n")).expect("write");
@@ -68,7 +94,7 @@ async fn a_new_note_reports_created_and_a_deletion_reports_removed() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault, tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     fs::create_dir_all(tmp.path().join("notes")).expect("mkdir");
     fs::write(tmp.path().join("notes/004-new.md"), "fresh\n").expect("create");
@@ -95,7 +121,7 @@ async fn renaming_a_folder_of_notes_is_reported() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault, tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     // A directory event carries no `.md`, so per-path stats cannot see it at
     // all: without the resync path this rename is completely invisible and the
@@ -126,7 +152,7 @@ async fn the_app_directory_and_dotfiles_are_silent() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault, tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     tmp.put(".register/config.json", "{\"theme\":\"dark\"}");
     tmp.put(".register/trash/003-old.md", "trashed\n");
@@ -144,7 +170,7 @@ async fn the_servers_own_atomic_write_reports_one_change_not_a_temp_file() {
     let vault = Arc::new(tmp.open());
     let (tx, mut rx) = broadcast::channel(64);
     let _watch = Watch::start(vault.clone(), tx).expect("start watcher");
-    tokio::time::sleep(ARM).await;
+    arm(&mut rx).await;
 
     // Exercises the real tmp+rename path, which is what vim and VS Code also do.
     vault
