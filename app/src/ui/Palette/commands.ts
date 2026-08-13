@@ -95,6 +95,22 @@ export function allCommands(): Command[] {
         enterIndex('first')
       },
     },
+    // §01: "every action reachable without a mouse", and the link was the one
+    // that was not — the marks answered a click and nothing else. §02b draws no
+    // keyboard follow, so the key is new and this row is what puts it on screen,
+    // exactly as FOCUS · INDEX above does for its own.
+    //
+    // Offered whenever a note is open rather than only when the caret is in a
+    // link: the palette cannot see the caret, and the editor says so itself when
+    // there is nothing under it.
+    {
+      id: 'follow',
+      label: 'FOLLOW · LINK AT CARET',
+      keys: '⌘↵',
+      enabled: () => vault.openPath !== null,
+      takesFocus: true,
+      run: () => chrome.followLink(),
+    },
     {
       id: 'copy',
       label: 'COPY AS MARKDOWN',

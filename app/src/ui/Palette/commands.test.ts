@@ -2,12 +2,34 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { Entry } from '../../core/api'
 import { vault } from '../../core/store.svelte'
 import {
+  allCommands,
   folderChoices,
   fuzzyScore,
   openFolder,
   templateChoices,
   UNTITLED,
 } from './commands'
+
+describe('allCommands', () => {
+  it('names a key for every binding it has, and shows none where there is none', () => {
+    // §01: "every control shows its key". The palette is where this product
+    // says them, so a command with a global binding and a blank `keys` is a
+    // binding only its author knows about.
+    const named = new Map(allCommands().map((command) => [command.id, command.keys]))
+
+    expect(named.get('new')).toBe('N')
+    expect(named.get('focus-index')).toBe('J')
+    // The one added with the keyboard route to a link: §02b draws no keyboard
+    // follow, so without this row `Mod-Enter` appears nowhere on screen.
+    expect(named.get('follow')).toBe('⌘↵')
+    expect(named.get('settings')).toBe('')
+  })
+
+  it('gives every command a distinct id', () => {
+    const ids = allCommands().map((command) => command.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})
 
 describe('fuzzyScore', () => {
   it('matches an empty query against anything', () => {

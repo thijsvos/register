@@ -105,6 +105,29 @@ const theme = EditorView.theme({
     cursor: 'pointer',
   },
 
+  // §02b state matrix, Wikilink and File reference, hover: "inverse". Inverse
+  // video is the product's only hover idiom and every other component in the
+  // matrix already carried it — so the defining interaction was the one element
+  // on screen that never confirmed it was live before you clicked it.
+  //
+  // A missing wikilink inverts too: it is dotted because its target is not there
+  // yet, not because it is inert, and clicking it creates the note. The one that
+  // stays flat is `.cm-fileref-missing`, which the matrix calls inert outright.
+  '.cm-wiki:hover, .cm-filelink:hover': {
+    background: 'var(--sel-bg)',
+    color: 'var(--sel-fg)',
+    // Or the dashed rule keeps the ink it had and disappears into the wash.
+    textDecorationColor: 'var(--sel-fg)',
+  },
+
+  // §02 a11y floor: "visible dashed focus rings". These marks carry
+  // `role="link"` and `tabindex="0"`, so they are focus targets, and a focus
+  // target with nothing drawn on it is a caret the keyboard cannot see.
+  '.cm-wiki:focus-visible, .cm-filelink:focus-visible': {
+    outline: 'var(--hairline) dashed var(--fg)',
+    outlineOffset: 'var(--focus-offset)',
+  },
+
   // A reference whose target proved absent. §02b's own words for it, borrowed
   // from the wikilink: dotted and dim. No pointer — there is nothing to open.
   '.cm-fileref-missing': {

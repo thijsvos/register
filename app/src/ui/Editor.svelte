@@ -85,6 +85,20 @@ $effect(() => {
   else editor.reveal(target.position)
 })
 
+// ⌘K's FOLLOW · LINK, which is the palette naming the key `Mod-Enter` already
+// carries. Tracked by nonce for `focusAt`'s reason: asking twice in a row has to
+// act twice, and a stale request must not re-fire when the editor is rebuilt.
+let followed = 0
+$effect(() => {
+  const asked = chrome.followAt
+  const editor = handle
+  if (asked === 0 || editor === null || asked === followed) return
+  followed = asked
+  // Said rather than left silent: the command is offered whenever a note is
+  // open, because nothing outside the editor can see where the caret is.
+  if (!editor.follow()) vault.notice = 'No link at the caret.'
+})
+
 // The vault index changes under a still document — an agent can create the note
 // a dotted wikilink points at — so the callbacks are swapped rather than baked
 // in, and the decorations rebuild when they change.

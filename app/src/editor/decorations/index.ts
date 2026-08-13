@@ -1,6 +1,7 @@
 import { syntaxTree } from '@codemirror/language'
 import type { Extension, Range } from '@codemirror/state'
 import {
+  type Command,
   Decoration,
   type DecorationSet,
   EditorView,
@@ -174,6 +175,99 @@ function build(view: EditorView): DecorationSet {
   }
 
   return Decoration.set(marks, true)
+}
+
+/**
+ * What following the link at `at` would do, or null if there is none there.
+ *
+ * A thunk rather than a description, so the two callers — a key and a focused
+ * mark — cannot disagree about what a wikilink means versus what a file
+ * reference means. The rules are `build`'s, read the same way round: a `.md`
+ * target is a note and notes are linked with `[[wikilinks]]`, and a reference
+ * whose target has already proved absent is inert rather than followable.
+ */
+function linkAt(view: EditorView, at: number): (() => void) | null {
+  const host = view.state.facet(wikiLinkHost)
+  const line = view.state.doc.lineAt(at)
+
+  // Wikilinks first, and off the text rather than the tree: they are not a
+  // markdown construct, so the grammar has no node for them.
+  for (const match of line.text.matchAll(WIKILINK)) {
+    const start = line.from + (match.index ?? 0)
+    if (at >= start && at <= start + match[0].length) {
+      const target = (match[1] ?? '').trim()
+      return () => host.open(target)
+    }
+  }
+
+  let found: (() => void) | null = null
+  syntaxTree(view.state).iterate({
+    from: line.from,
+    to: line.to,
+    enter: (node) => {
+      if (found !== null) return false
+      if (node.name !== 'Link' && node.name !== 'Image') return
+      if (at < node.from || at > node.to) return
+
+      const written = view.state.doc.sliceString(node.from, node.to)
+      const target =
+        (node.name === 'Link' ? LINK.exec(written)?.[1] : IMAGE.exec(written)?.[2]) ?? ''
+      if (target === '' || /\.md$/i.test(target)) return
+      if (host.fileUrl(target) === null || host.fileMissing(target)) return
+      found = () => host.openFile(target)
+    },
+  })
+  return found
+}
+
+/**
+ * Follow the link the caret is in (§01: "every action reachable without a
+ * mouse"; §08 P5's done-when: "full session possible without a mouse").
+ *
+ * §02b's state matrix draws no keyboard follow — its Focus column for these two
+ * rows describes the missing-target appearance instead — so this is a binding
+ * the frame does not draw, taken for the reason the INDEX entry keys were:
+ * leaving it out puts a documented hole in §01's central claim. It is named in
+ * ⌘K for the same reason, so the key is on screen rather than only in here.
+ *
+ * False when the caret is not in a link, which lets `Mod-Enter` fall through to
+ * the blank-line insert it means everywhere else in the document.
+ */
+export const followLink: Command = (view) => {
+  const follow = linkAt(view, view.state.selection.main.head)
+  if (follow === null) return false
+  follow()
+  return true
+}
+
+/**
+ * Follow the link that holds DOM focus — Enter or Space on a tabbed-to mark.
+ *
+ * The marks have carried `role="link"` and `tabindex="0"` since they were
+ * built, which tells a screen reader they are links and puts them in the tab
+ * order, and nothing answered the key that announcement promises. Measured: Tab
+ * from the editor does reach them, so the attributes were true and only the
+ * behaviour was missing.
+ *
+ * A keymap entry rather than a `keydown` in the plugin's `eventHandlers`, and
+ * that is not a style preference: written the other way the editor inserted a
+ * newline and this never ran. Precedence is the whole question here, and a
+ * keymap is where CodeMirror lets you state it.
+ *
+ * False when nothing is focused but the document itself, which is every
+ * ordinary keystroke — so Enter stays Enter.
+ */
+export const followFocusedLink: Command = (view) => {
+  const focused = document.activeElement
+  if (!(focused instanceof HTMLElement)) return false
+
+  const mark = focused.closest('.cm-filelink, .cm-wiki')
+  if (mark === null || !view.contentDOM.contains(mark)) return false
+
+  const follow = linkAt(view, view.posAtDOM(mark))
+  if (follow === null) return false
+  follow()
+  return true
 }
 
 const plugin = ViewPlugin.fromClass(

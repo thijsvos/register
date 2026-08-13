@@ -1,5 +1,6 @@
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
+import { followLink } from './decorations'
 import { type WikiLinkHost, wikiLinkHost } from './decorations/wikilinks'
 import { editorExtensions } from './setup'
 import { isUserEdit, loadDoc, syncDoc } from './sync'
@@ -26,6 +27,14 @@ export interface EditorHandle {
   /** Put the caret at an offset and scroll it to the top — the OUTLINE pane. */
   reveal: (position: number) => void
   focus: () => void
+  /**
+   * Follow the link the caret is in, reporting whether there was one.
+   *
+   * The same command `Mod-Enter` runs. It is on the handle as well so ⌘K can
+   * name the key — §01 asks every control to show its key, and the palette is
+   * where this product says them.
+   */
+  follow: () => boolean
   destroy: () => void
   /** Swap the vault callbacks without tearing the editor down. */
   setHost: (host: WikiLinkHost) => void
@@ -83,6 +92,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
       view.focus()
     },
     focus: () => view.focus(),
+    follow: () => followLink(view),
     destroy: () => view.destroy(),
     setHost: (host) => {
       view.dispatch({ effects: hostSlot.reconfigure(wikiLinkHost.of(host)) })

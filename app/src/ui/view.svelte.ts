@@ -185,6 +185,19 @@ class ChromeState {
     this.focusAt = { position: null, nonce: ++this.#nonce }
   }
 
+  /**
+   * A request for the editor to follow the link at its caret (§01).
+   *
+   * A bare nonce, because unlike `focusAt` the request carries nothing: the
+   * caret already knows which link is meant, and the palette — which is what
+   * asks — has no way to find out and no business deciding.
+   */
+  followAt = $state(0)
+
+  followLink(): void {
+    this.followAt = ++this.#nonce
+  }
+
   showSettings(): void {
     this.#only('settings')
   }
