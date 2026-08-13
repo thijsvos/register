@@ -1,3 +1,5 @@
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { note, type Server, serve, vaultWith } from './harness'
 
@@ -72,4 +74,29 @@ test('a chosen scheme survives a reload, however it was chosen', async ({ page }
   await page.reload()
   await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
   await expect.poll(dark, { timeout: 3000 }).toBe(false)
+})
+
+test('a flag the settings screen cannot draw survives it writing one it can', async ({
+  page,
+}) => {
+  // `checkpoints` is read by the server and drawn nowhere: §02b Screen 6 has a
+  // control for the scheme, the body face and the scale, and none for this. A
+  // PUT replaces the whole file (§05), so before this the first scheme change —
+  // or the first folder folded in the INDEX — silently turned it back off.
+  const config = join(server.vault, '.register', 'config.json')
+  writeFileSync(config, JSON.stringify({ checkpoints: true, scheme: 'dark' }))
+
+  const stored = async () =>
+    await (await page.request.get(`${server.url}/api/config`)).json()
+
+  await page.goto(server.url)
+  await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.classList.contains('dark')))
+    .toBe(true)
+
+  await page.keyboard.press('i')
+  await expect
+    .poll(stored, { timeout: 3000, message: 'INV did not reach the vault' })
+    .toMatchObject({ scheme: 'light', checkpoints: true })
 })

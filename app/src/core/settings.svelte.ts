@@ -103,6 +103,22 @@ class Settings {
   #registered: FontFace | null = null
 
   /**
+   * Keys in `.register/config.json` that are not this screen's to hold.
+   *
+   * §04 gives the file to "theme, fonts, flags" and §02b Screen 6 draws three of
+   * those; `"checkpoints": true` is a flag only the server reads, set by hand or
+   * by an agent, and nothing on this screen can show it. PUT replaces the whole
+   * file — §05's table says so, and making it merge server-side would turn a PUT
+   * into a PATCH, which is a §04 surface change — so the client has to carry
+   * back what it does not understand. Without this, folding a folder in the
+   * INDEX silently turned somebody's checkpoints off.
+   */
+  #foreign: Record<string, unknown> = {}
+  /** Whether the file has actually been read. A save before it has must not
+   *  write over keys it never saw. */
+  #foreignKnown = false
+
+  /**
    * Read the vault's config and register its licensed face.
    *
    * Both are best-effort. A vault whose config cannot be read is a vault with
@@ -111,12 +127,15 @@ class Settings {
    */
   async start(): Promise<void> {
     try {
-      const stored = asConfig(await getConfig())
+      const raw = await getConfig()
+      const stored = asConfig(raw)
       this.scheme = stored.scheme
       this.bodyFace = stored.bodyFace
       this.scale = stored.scale
       this.collapsed = stored.collapsed
       this.expanded = stored.expanded
+      this.#foreign = foreign(raw)
+      this.#foreignKnown = true
     } catch {
       // Defaults already hold.
     }
@@ -266,10 +285,28 @@ class Settings {
 
   async #save(): Promise<void> {
     try {
+      // A boot that could not read the file leaves us not knowing what else is
+      // in it, and a write then would erase whatever that was. One read, and
+      // only on the path where the answer is genuinely unknown.
+      if (!this.#foreignKnown) {
+        try {
+          this.#foreign = foreign(await getConfig())
+          this.#foreignKnown = true
+        } catch {
+          // Still unknown. Saving is better than a settings screen that cannot
+          // write — and a config nobody can read holds nothing to preserve.
+        }
+      }
+
       // Every field, explicitly. A spread of `this` would carry the transient
       // ones (font state, notice) into the vault's config; naming them means a
       // new setting that is not added here is silently never persisted.
+      //
+      // The foreign keys go first so ours always win: a hand-edited `"scheme"`
+      // is read at boot and becomes `this.scheme`, and letting the stale copy
+      // overwrite it here would make the screen unable to change its own mind.
       await putConfig({
+        ...this.#foreign,
         scheme: this.scheme,
         bodyFace: this.bodyFace,
         scale: this.scale,
@@ -282,6 +319,34 @@ class Settings {
     }
   }
 }
+
+/**
+ * The keys of a config document this screen does not own.
+ *
+ * The complement of `asConfig`: that one answers "what may I read", this one
+ * answers "what must I put back". Values are returned untouched — an unknown key
+ * is unknown all the way down, so re-serialising it is the most that can be
+ * done honestly with it.
+ */
+export function foreign(value: unknown): Record<string, unknown> {
+  // An array is an object to `typeof`, and iterating one here would put `{"0":
+  // …}` into the vault's config file rather than preserving anything.
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  const kept: Record<string, unknown> = {}
+  for (const [key, held] of Object.entries(value as Record<string, unknown>)) {
+    if (!OURS.has(key)) kept[key] = held
+  }
+  return kept
+}
+
+/** The keys §02b Screen 6 draws, and therefore the only ones it may replace. */
+const OURS = new Set<string>([
+  'scheme',
+  'bodyFace',
+  'scale',
+  'collapsed',
+  'expanded',
+] satisfies (keyof Config)[])
 
 /** Read a config document without trusting its shape. */
 export function asConfig(value: unknown): Config {

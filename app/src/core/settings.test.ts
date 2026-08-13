@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { asConfig } from './settings.svelte'
+import { asConfig, foreign } from './settings.svelte'
 
 /**
  * The config parser, not the class.
@@ -92,7 +92,6 @@ describe('asConfig', () => {
       expanded: [],
     })
   })
-
   describe('scale (§02 "Plate")', () => {
     it.each([['auto', 'auto'] as const, ['1', 1] as const, ['2', 2] as const])(
       'round-trips %s',
@@ -171,5 +170,49 @@ describe('asConfig', () => {
         expanded: [],
       })
     })
+  })
+})
+
+/**
+ * The other half of the same read.
+ *
+ * `asConfig` answers what the settings screen may *use*; this answers what it
+ * must put *back*. PUT replaces the whole file (§05), so a key the screen cannot
+ * show and does not carry is erased by the next thing it writes — which is how
+ * folding a folder in the INDEX turned off a vault's checkpoints.
+ */
+describe('foreign', () => {
+  it('keeps a flag only the server reads', () => {
+    expect(foreign({ scheme: 'dark', checkpoints: true })).toEqual({ checkpoints: true })
+  })
+
+  it('keeps nothing the settings screen owns', () => {
+    expect(
+      foreign({
+        scheme: 'dark',
+        bodyFace: 'teletype',
+        scale: 2,
+        collapsed: ['notes/archive'],
+        expanded: ['daily'],
+      }),
+    ).toEqual({})
+  })
+
+  it('preserves a value it cannot interpret, whatever shape it is', () => {
+    // Untouched all the way down: an unknown key's value is unknown too, so
+    // re-serialising it verbatim is the most that can honestly be done with it.
+    const held = { nested: { deep: [1, 'two', null] }, count: 0, off: false }
+    expect(foreign({ scheme: 'light', ...held })).toEqual(held)
+  })
+
+  it.each([
+    ['null', null],
+    ['a string', 'checkpoints: true'],
+    ['a number', 7],
+    ['an array', ['checkpoints']],
+  ])('has nothing to keep from %s', (_label, value) => {
+    // The array case is not idle: `typeof [] === 'object'`, so without a guard
+    // this returns `{0: 'checkpoints'}` and writes numbered keys into the file.
+    expect(foreign(value)).toEqual({})
   })
 })
