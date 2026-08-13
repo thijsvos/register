@@ -46,13 +46,15 @@ let modified = $derived(chromeStamp(front.get('modified') ?? '') || dash)
   <div class="stamp">{kicker}</div>
   <h2>{title}</h2>
   <dl class="meta">
+    <!-- `title` for the inspector's reason: a hand-written field can be any
+         length, and a value the cell has to clip should still be readable. -->
     <div class="cell">
       <dt>Created</dt>
-      <dd>{created}</dd>
+      <dd title={created}>{created}</dd>
     </div>
     <div class="cell">
       <dt>Modified</dt>
-      <dd>{modified}</dd>
+      <dd title={modified}>{modified}</dd>
     </div>
     <div class="cell">
       <dt>Words</dt>
@@ -91,10 +93,16 @@ h2 {
   padding: var(--s1) 0 var(--s4);
 }
 
-/* The frame draws it as a box with a divider between each cell. */
+/* The frame draws it as a box with a divider between each cell. Four equal
+   columns is what the sketch looks like and it is wrong in practice: a §04
+   `modified` is twenty characters and a word count is two, so equal shares
+   ellipsised the only cell anyone has to read — measured, `2026-08-05 0…`.
+   Weighted by what each cell actually holds instead. */
 .meta {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns:
+    minmax(0, 1fr) minmax(0, 1.55fr)
+    minmax(0, 0.7fr) minmax(0, 0.75fr);
   border: var(--hairline) solid var(--line);
 }
 .cell {

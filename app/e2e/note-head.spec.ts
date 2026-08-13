@@ -57,6 +57,24 @@ test('Screen 1 draws the note above its own body', async ({ page }) => {
   await expect(cells.nth(3)).toContainText(String('One typeface. Two weights.\n'.length))
 })
 
+test('the strip shows a whole timestamp rather than clipping it', async ({ page }) => {
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Terminal aesthetics/ }).click()
+  await expect(page.locator('.cm-content')).toContainText('Two weights')
+
+  // Four equal columns is what the frame's ASCII sketch looks like, and it put
+  // `2026-08-05 0…` in the only cell anyone has to read: a §04 `modified` is
+  // twenty characters and a word count is two. The cells are weighted by what
+  // they hold, and this is the assertion that keeps them that way.
+  const values = page.locator('header.note .meta dd')
+  for (let cell = 0; cell < 4; cell++) {
+    const clipped = await values
+      .nth(cell)
+      .evaluate((el) => el.scrollWidth > el.clientWidth)
+    expect(clipped, `cell ${cell} is clipped`).toBe(false)
+  }
+})
+
 test('the meta strip counts what is typed, as it is typed', async ({ page }) => {
   await page.goto(server.url)
   await page.getByRole('button', { name: /Terminal aesthetics/ }).click()
