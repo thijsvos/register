@@ -113,7 +113,7 @@ running instance, not only in the repository.
 |---|---|---|
 | Commit Mono (400, 700) | © 2023 Eigil Nikolajsen | `/fonts/commit-mono/` |
 | Departure Mono (400) | © 2022–2024 Helena Zhang | `/fonts/departure-mono/` |
-| Server Mono (400) | © 2024 Internet Development Studio Company | `/fonts/server-mono/` |
+| Server Mono (400, 400 oblique) | © 2024 Internet Development Studio Company | `/fonts/server-mono/` |
 
 OFL-1.1 permits redistribution bundled with software provided the licence
 travels with the fonts and the Reserved Font Names are not reused by modified

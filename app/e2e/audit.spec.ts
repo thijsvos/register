@@ -312,3 +312,27 @@ test('the frame’s vertical rules are continuous through the header', async ({ 
   expect(reservedWhenShown).toBeGreaterThan(0)
   expect(narrow.reserved).toBeLessThan(reservedWhenShown)
 })
+
+/**
+ * §03's face table gives Server Mono as "400 + oblique only", and vendoring half
+ * a family is invisible to every other check: the OFL.txt is beside it, the
+ * container is woff2, the count is three. What it costs is that the browser
+ * synthesises the missing member.
+ */
+test('the TELETYPE face ships its own oblique rather than a synthesised slant', async ({
+  page,
+}) => {
+  await page.goto(server.url)
+  await expect(page.getByRole('button', { name: 'INV' })).toBeVisible()
+
+  // §03's face table: "Server Mono ... 400 + oblique only". Only the upright was
+  // ever vendored, so every *emphasis* in this theme was the browser slanting
+  // the upright — visibly coarser at 13px than the oblique the family draws.
+  const loaded = await page.evaluate(async () => {
+    await document.fonts.load('italic 13px "Server Mono"')
+    return [...document.fonts].some(
+      (face) => face.family.includes('Server Mono') && face.style === 'italic',
+    )
+  })
+  expect(loaded).toBe(true)
+})

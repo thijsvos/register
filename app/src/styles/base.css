@@ -29,6 +29,21 @@
   font-display: swap;
   src: url("/fonts/server-mono/server-mono-400-normal.woff2") format("woff2");
 }
+/* §03's face table gives Server Mono as "400 + oblique only", and only the 400
+   was ever vendored — so every *emphasis* in the TELETYPE body theme was drawn
+   by the browser slanting the upright, which at 13px is visibly coarser than
+   the oblique the family ships. This IS that oblique; the descriptor says
+   `italic` because a descriptor names the request a file answers, and the
+   editor asks for `font-style: italic` (editor/theme.ts). Declaring it
+   `oblique` would rely on the italic-to-oblique fallback matching, which is one
+   more thing to be right about for no gain. */
+@font-face {
+  font-family: "Server Mono";
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url("/fonts/server-mono/server-mono-400-italic.woff2") format("woff2");
+}
 
 *,
 *::before,

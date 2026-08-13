@@ -421,6 +421,23 @@ describe('font licensing (rule 7, §03)', () => {
     expect(Object.keys(strayFormats)).toEqual([])
   })
 
+  it('ships every style §03 promises, not only the upright', () => {
+    // A family vendored at half its members passes every other check in this
+    // block — the OFL.txt is beside it, the container is woff2, the count is
+    // three — and costs something no assertion here could see: the browser
+    // synthesises what is missing. §03's table reads "400 + oblique only", and
+    // for as long as only the 400 was vendored every *emphasis* in the TELETYPE
+    // body theme was an algorithmic slant of the upright rather than the
+    // oblique the family draws.
+    expect(Object.keys(faces)).toContain(
+      '../public/fonts/server-mono/server-mono-400-italic.woff2',
+    )
+    // And it is declared, or the bytes sit in the repo answering nothing.
+    expect(baseCss).toMatch(
+      /@font-face\s*\{[^}]*"Server Mono"[^}]*font-style:\s*italic[^}]*\}/,
+    )
+  })
+
   it('never fetches a font from the network (§08 P9)', () => {
     // §03's whole legal position rests on this: the OFL faces are vendored and
     // the licensed one comes from the user's own disk. One `@import` from a font
