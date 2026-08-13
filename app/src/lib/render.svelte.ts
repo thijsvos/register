@@ -1,11 +1,29 @@
 import { flushSync } from 'svelte'
 
-let lastMs = $state<number | null>(null)
+/** The most recent render REGISTER performed, and what caused it. */
+interface Render {
+  ms: number
+  /**
+   * Notes the vault gained or lost in the burst that caused this render, when
+   * the watcher caused it. Null when we did — a keystroke, a scheme flip.
+   *
+   * Null and zero mean different things and the status bar reads both: zero is
+   * an agent editing a note that already existed, which changes no count and is
+   * still a watcher render (§02b Screen 7).
+   */
+  delta: number | null
+}
 
-/** The cost of the most recent render REGISTER performed, in milliseconds. */
+let last = $state<Render | null>(null)
+
 export const render = {
+  /** The cost of the most recent render, in milliseconds. */
   get ms(): number | null {
-    return lastMs
+    return last?.ms ?? null
+  },
+  /** Non-null when the watcher caused it, and by how many notes. */
+  get delta(): number | null {
+    return last?.delta ?? null
   },
 }
 
@@ -25,13 +43,27 @@ export const render = {
  */
 /** Report a cost measured elsewhere — the editor times its own updates. */
 export function setRenderMs(ms: number): void {
-  lastMs = ms
+  last = { ms, delta: null }
+}
+
+/**
+ * Close a watcher round trip: `since` is when the event frame arrived, `delta`
+ * is what the vault's note count did across the burst (§02b Screen 7).
+ *
+ * The flush is the whole point — it brackets the DOM mutation the event caused,
+ * so the figure means "event to repaint" and not "event to state assignment".
+ * It is the same interval §06 budgets at 100 ms and `budgets.spec.ts` measures
+ * from outside with a MutationObserver; this is the app reporting its own.
+ */
+export function setWatcherRender(since: number, delta: number): void {
+  flushSync()
+  last = { ms: performance.now() - since, delta }
 }
 
 export function measure<T>(work: () => T): T {
   const t0 = performance.now()
   const result = work()
   flushSync()
-  lastMs = performance.now() - t0
+  last = { ms: performance.now() - t0, delta: null }
   return result
 }

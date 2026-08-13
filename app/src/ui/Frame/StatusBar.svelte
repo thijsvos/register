@@ -10,6 +10,7 @@
 // rather than a missing feature.
 let {
   renderMs = null,
+  watcherDelta = null,
   watcherLive = false,
   vault = null,
   files = null,
@@ -17,11 +18,15 @@ let {
   notice = null,
   dirty = false,
   externalEdit = false,
-  words = null,
   unresolved = 0,
   onresolve,
 }: {
   renderMs?: number | null
+  /**
+   * Notes the vault gained or lost in the watcher burst that caused the last
+   * render, or null when we caused it ourselves (§02b Screen 7).
+   */
+  watcherDelta?: number | null
   watcherLive?: boolean
   vault?: string | null
   files?: number | null
@@ -29,13 +34,27 @@ let {
   notice?: string | null
   dirty?: boolean
   externalEdit?: boolean
-  words?: number | null
   /** Unresolved `*.conflict-<ts>.md` copies in the vault (§02b Screen 4). */
   unresolved?: number
   onresolve?: () => void
 } = $props()
 
 const dash = '—'
+
+/** `+1` / `-2`, the way §02b Screen 7 writes a delta. */
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n)
+}
+
+// §02b Screen 7 swaps this whole cell rather than adding one: idle reads
+// `RENDER 0.70ms` and an agent write reads `WATCHER +1 4.1ms`. Both are the
+// cost of the last repaint; the label says who asked for it.
+let renderLabel = $derived(watcherDelta === null ? 'Render' : 'Watcher')
+let renderValue = $derived.by(() => {
+  if (renderMs === null) return dash
+  const cost = `${renderMs.toFixed(2)}ms`
+  return watcherDelta ? `${signed(watcherDelta)} ${cost}` : cost
+})
 </script>
 
 <footer>
@@ -44,9 +63,17 @@ const dash = '—'
     <span class="lab">Watcher</span> <b>{watcherLive ? 'Live' : dash}</b>
   </div>
   <div class="cell"><span class="lab">Vault</span> <b>{vault ?? dash}</b></div>
+  {#if watcherDelta !== null && watcherDelta !== 0}
+    <!-- §02b Screen 7 draws the delta twice — once alone and once inside the
+         render cell — and it is the frame, so it is drawn twice. The bare one
+         is the count moving; the one beside the timing says what the timing is
+         of. Absent when the burst changed no count, which is an agent editing a
+         note that was already there. -->
+    <div class="cell"><b>{signed(watcherDelta)}</b></div>
+  {/if}
   <div class="cell">
-    <span class="lab">Render</span>
-    <b>{renderMs === null ? dash : `${renderMs.toFixed(2)}ms`}</b>
+    <span class="lab">{renderLabel}</span>
+    <b>{renderValue}</b>
   </div>
   <div class="cell grow" role="status">
     {#if externalEdit}
@@ -59,9 +86,6 @@ const dash = '—'
       <span class="lab">Saving</span>
     {/if}
   </div>
-  {#if words !== null}
-    <div class="cell"><b>{words}</b> <span class="lab">words</span></div>
-  {/if}
   <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
   {#if unresolved > 0}
     <!-- Vault-wide and latched, so it sits with FILES and GIT rather than in the
@@ -98,7 +122,7 @@ footer {
   border-right: var(--hairline) solid var(--line);
   /* The bar clips at `overflow: hidden` above, and a flex item's default
      min-width:auto refuses to shrink — so in a narrow frame the rightmost cells
-     were pushed past the edge whole rather than tightening: WORDS, FILES, GIT
+     were pushed past the edge whole rather than tightening: FILES, GIT
      and the `N unresolved` button, which is the only route from the bar to
      conflict resolution, all silently gone with no scrollbar to reach them.
      This is reachable today at a narrow window; offering 2x makes a narrow

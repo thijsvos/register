@@ -1,3 +1,4 @@
+import { setWatcherRender } from '../lib/render.svelte'
 import { isoStamp } from '../lib/time'
 import {
   ApiError,
@@ -111,6 +112,17 @@ class VaultStore {
   #disconnect: (() => void) | undefined
   /** Guards against a slow fetch landing after the user moved on. */
   #generation = 0
+
+  /**
+   * When the current burst of watcher events arrived, and what the vault held
+   * before it (§02b Screen 7).
+   *
+   * The *first* frame of a burst, not the last: the server already batches at
+   * 50 ms and the refresh that follows covers all of them, so one repaint
+   * answers the lot and the honest clock starts when the first one landed.
+   */
+  #watcherAt: number | null = null
+  #watcherFiles = 0
 
   /**
    * Link resolution, rebuilt only when the tree is replaced.
@@ -294,6 +306,9 @@ class VaultStore {
       this.notice = describe(error)
       return
     }
+    // The tree is installed, so FILES and the INDEX have moved: if a watcher
+    // event asked for this refresh, that is the repaint it was waiting for.
+    this.#settleWatcher()
     void this.#fillCorpus()
   }
 
@@ -466,6 +481,12 @@ class VaultStore {
         this.notice = 'That note already exists on disk.'
         return
       }
+      // What we just left on disk, recorded here rather than waited for from
+      // `#fillCorpus`. The event this write causes arrives before that fetch
+      // does, and without the etag to recognise it by, making a note from the
+      // palette announced itself in the status bar as an agent's (§02b Screen
+      // 7). It also saves the fetch.
+      this.corpus[path] = { body, etag: result.etag }
     } catch (error) {
       this.notice = describe(error)
       return
@@ -552,6 +573,16 @@ class VaultStore {
 
   /** Fold one vault event into the open note and the tree. */
   apply(event: VaultEvent): void {
+    // Our own write echoing back: the server reports an etag we already hold.
+    // Tested before the clock starts, because §02b Screen 7's readout is about
+    // somebody *else* writing to the vault — timing our own PUT round trip and
+    // labelling it WATCHER would be the fabricated gauge the section retires.
+    const ours = this.#isEcho(event)
+    if (!ours && this.#watcherAt === null) {
+      this.#watcherAt = performance.now()
+      this.#watcherFiles = this.files
+    }
+
     // The open note first, the tree second. Both are wanted, but only one is on
     // screen — and issuing the tree fetch first puts a walk of the whole vault
     // ahead of the single note the reader is looking at.
@@ -560,8 +591,7 @@ class VaultStore {
       return
     }
 
-    // Our own save echoing back: the server reports the etag we already hold.
-    if (event.etag !== null && event.etag === this.etag) {
+    if (ours) {
       this.#scheduleRefresh()
       return
     }
@@ -592,6 +622,36 @@ class VaultStore {
     }
     void this.#reload(event.path)
     this.#scheduleRefresh()
+  }
+
+  /**
+   * Whether this event is the vault repeating something we just wrote.
+   *
+   * The open note's etag is not enough on its own: a task toggled in TODAY, a
+   * note created from the palette and a parked conflict copy are all writes to
+   * a path that is not open, and every one of them comes back as an event. Read
+   * off the corpus, which is where a successful write records what it left on
+   * disk — so "ours" means "the vault holds exactly what we last put there".
+   */
+  #isEcho(event: VaultEvent): boolean {
+    if (event.etag === null) return false
+    if (event.path === this.openPath && event.etag === this.etag) return true
+    return this.corpus[event.path]?.etag === event.etag
+  }
+
+  /**
+   * Close the watcher's round trip, if one is open (§02b Screen 7).
+   *
+   * Called from both paths a watcher event can repaint through — the tree, and
+   * the open note's body — because either can be the one on screen and the
+   * first to land is the one the reader saw. Clearing the stamp is what makes
+   * it first-one-wins.
+   */
+  #settleWatcher(): void {
+    const at = this.#watcherAt
+    if (at === null) return
+    this.#watcherAt = null
+    setWatcherRender(at, this.files - this.#watcherFiles)
   }
 
   /**
@@ -804,6 +864,9 @@ class VaultStore {
       const loaded = await getNote(path)
       if (generation !== this.#generation || this.dirty) return
       this.#adopt(path, loaded)
+      // The open note is the row §02b Screen 7 says is "painted in place", and
+      // on an edit to a note that already exists it moves before the tree does.
+      this.#settleWatcher()
     } catch {
       // The refresh that follows every event will correct the tree.
     }
@@ -878,7 +941,10 @@ class VaultStore {
     this.#parked.add(copy)
 
     try {
-      await putNote(copy, text)
+      const result = await putNote(copy, text)
+      // Same reason `create` records its own: a copy we parked is not an agent
+      // writing to the vault, and the status bar must not say it was.
+      if (result.ok) this.corpus[copy] = { body: text, etag: result.etag }
       return copy
     } catch (error) {
       this.#parked.delete(copy)

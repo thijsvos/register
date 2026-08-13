@@ -157,10 +157,10 @@ $effect(() => {
   </div>
   <StatusBar
     renderMs={render.ms}
+    watcherDelta={render.delta}
     watcherLive={vault.connected}
     vault={vault.vaultPath}
     files={vault.files}
-    words={vault.openWords}
     git={gitField}
     notice={vault.notice}
     dirty={vault.dirty}
