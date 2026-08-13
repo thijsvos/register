@@ -64,8 +64,8 @@ register serve ~/vault        # UI on http://127.0.0.1:7777
 ```
 
 `register serve` binds to loopback unless told otherwise. `register new "Title"`
-creates a conforming note from inside a vault and prints its path. `register
-health` reports the toolchain.
+creates a conforming note and prints its path — from inside a vault, or from
+anywhere with `--vault ~/vault`. `register health` reports the toolchain.
 
 `serve` scaffolds too, so `init` is only needed for `--git`.
 

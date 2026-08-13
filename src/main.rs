@@ -78,6 +78,10 @@ enum Command {
     New {
         /// Note title.
         title: String,
+        /// The vault to create it in. Defaults to the current directory, which
+        /// is what §08 P8 specifies — this only spares an agent a `cd` first.
+        #[arg(long, value_name = "DIR")]
+        vault: Option<PathBuf>,
     },
     /// Print health status.
     Health,
@@ -114,7 +118,7 @@ async fn main() -> ExitCode {
             }
         },
         Command::Init { path, git } => report(init(&path, git)),
-        Command::New { title } => report(create(&title)),
+        Command::New { title, vault } => report(create(&title, vault.as_deref())),
     }
 }
 
@@ -225,10 +229,18 @@ fn init(path: &Path, git: bool) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-fn create(title: &str) -> Result<String, String> {
-    let root = scaffold::here().map_err(|error| format!("current directory: {error}"))?;
+fn create(title: &str, at: Option<&Path>) -> Result<String, String> {
+    // Named, or the current directory. The default is §08 P8's specification and
+    // does not move; `--vault` exists because an agent scripting note creation
+    // had to `cd` first, and a `cd` inside a script is a state change that
+    // outlives the command that needed it.
+    let root = match at {
+        Some(path) => path.to_path_buf(),
+        None => scaffold::here().map_err(|error| format!("current directory: {error}"))?,
+    };
     // A vault is marked by the directory the app owns. Without this check a
-    // mistyped `cd` scatters notes into whatever folder happened to be current.
+    // mistyped `cd` — or a mistyped `--vault` — scatters notes into whatever
+    // folder was named.
     if !root.join(vault::APP_DIR).is_dir() {
         return Err(format!(
             "{} is not a REGISTER vault. `register init` creates one.",

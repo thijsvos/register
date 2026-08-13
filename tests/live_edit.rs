@@ -248,6 +248,57 @@ fn new_refuses_outside_a_vault_rather_than_scattering_notes() {
 }
 
 #[test]
+fn new_can_name_the_vault_instead_of_standing_in_it() {
+    // The point of the flag: an agent scripting note creation had to `cd` first,
+    // and a `cd` inside a script outlives the command that needed it. Run from
+    // somewhere else entirely, naming the vault.
+    let root = scratch("named");
+    let vault = root.join("vault");
+    let elsewhere = root.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).expect("mkdir");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let printed = register(
+        &[
+            "new",
+            "Terminal aesthetics",
+            "--vault",
+            vault.to_str().expect("utf-8"),
+        ],
+        &elsewhere,
+    );
+
+    assert_eq!(printed.trim(), "notes/001-terminal-aesthetics.md");
+    assert!(vault.join(printed.trim()).is_file());
+    // The path it prints is vault-relative, so it must not have landed here.
+    assert!(
+        !elsewhere.join("notes").exists(),
+        "it wrote beside the caller"
+    );
+}
+
+#[test]
+fn a_named_vault_that_is_not_one_is_refused_the_same_way() {
+    // The check moved from "the directory I am in" to "the directory I was
+    // given", and a mistyped `--vault` has to fail exactly as a mistyped `cd`
+    // does — rather than scattering notes into whatever was named.
+    let root = scratch("named-stray");
+    let empty = root.join("empty");
+    std::fs::create_dir_all(&empty).expect("mkdir");
+
+    let out = Command::new(BINARY)
+        .args(["new", "Nowhere", "--vault", empty.to_str().expect("utf-8")])
+        .current_dir(&root)
+        .output()
+        .expect("run register");
+
+    assert!(!out.status.success());
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert!(said.contains("not a REGISTER vault"), "unhelpful: {said}");
+    assert!(!empty.join("notes").exists(), "it wrote anyway");
+}
+
+#[test]
 fn an_agents_append_reaches_a_connected_client_inside_the_budget() {
     let root = scratch("append");
     let vault = root.join("vault");

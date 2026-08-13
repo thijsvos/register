@@ -19,7 +19,7 @@ down as doctrine that is explicitly not mine to change.
 | # | Item | Why it matters |
 |---|---|---|
 | ~~1~~ | ~~The outline ignores setext headings~~ — **done** | A `Title` over `=====` is a heading in CommonMark. The editor does not style it and the outline does not list it. |
-| 2 | `register new` only works inside the vault | No `--vault` flag, so an agent has to `cd` first. The roadmap calls it one line. |
+| ~~2~~ | ~~`register new` only works inside the vault~~ — **done** | No `--vault` flag, so an agent has to `cd` first. The roadmap calls it one line. |
 | 3 | `register serve` has no `--open` | Every run prints a URL you then click. |
 
 ## Needs your ruling first
