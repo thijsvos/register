@@ -131,11 +131,22 @@ $effect(() => {
       {:else if chrome.media !== null}
         <Media path={chrome.media} />
       {:else if vault.openPath === null}
-        <p class="empty">
-          {vault.files === 0
-            ? 'No notes yet. [N] creates the first one. ⌘K opens the console.'
-            : 'No note open. Choose one from the index, or press ⌘K.'}
-        </p>
+        {#if vault.files === 0}
+          <!-- §02b Screen 3, in full. The last sentence is the one the frame is
+               for: an empty vault is not a failure to have written anything, it
+               is the folder an agent writes into while you watch. Saying only
+               the first two lines described the keys and never the product. -->
+          <div class="empty">
+            <p>No notes yet.</p>
+            <p>[N] creates the first one. ⌘K opens the console.</p>
+            <p>
+              Point Claude Code at this folder and it writes straight to disk —
+              you will watch the note appear.
+            </p>
+          </div>
+        {:else}
+          <p class="empty">No note open. Choose one from the index, or press ⌘K.</p>
+        {/if}
       {:else}
         <Editor />
       {/if}
@@ -215,6 +226,11 @@ main {
   padding: var(--s6) var(--s5);
   font-size: var(--text-body);
   color: var(--dim);
+}
+/* One line per sentence, as Screen 3 draws them. A single paragraph would wrap
+   the keys into the prose and lose the shape the frame is making. */
+.empty p + p {
+  margin-top: var(--s2);
 }
 
 @container frame (max-width: 1080px) {
