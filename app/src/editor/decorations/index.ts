@@ -12,6 +12,14 @@ import { TaskToggle } from './tasks'
 import { WIKILINK, wikiLinkHost } from './wikilinks'
 
 const HEADING = new Map([
+  // Setext first, so the pair is visible together: `Title` over `=====` is a
+  // level-1 heading in CommonMark and `-----` a level-2 one. The grammar has
+  // always reported them; nothing here asked. They take the same styles as
+  // their ATX equivalents, because they are the same thing written differently
+  // — and the underline itself is punctuation, so it lands in the `HeaderMark`
+  // branch below and dims like a `#`.
+  ['SetextHeading1', 'cm-h1'],
+  ['SetextHeading2', 'cm-h2'],
   ['ATXHeading1', 'cm-h1'],
   ['ATXHeading2', 'cm-h2'],
   ['ATXHeading3', 'cm-h3'],
