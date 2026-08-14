@@ -30,7 +30,11 @@ function toggle(task: Task) {
 
 <div class="today">
   <div class="head">
-    <div class="stamp">Aggregate · {today} · derived from vault</div>
+    <div class="stamp">
+      <span>Aggregate · {today} · derived from vault</span>
+      <!-- §01: "every control shows its key". Escape leaves any raised view. -->
+      <span class="back">[Esc] back</span>
+    </div>
     <div class="title">
       <h2>Today</h2>
       <span class="counts">{totals.open} open · {totals.total} total</span>
@@ -90,12 +94,20 @@ function toggle(task: Task) {
 }
 
 .stamp {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s3);
   font-family: var(--font-micro);
   font-size: var(--text-micro);
   line-height: var(--lh-micro);
   letter-spacing: var(--track-micro);
   text-transform: uppercase;
   color: var(--dim);
+}
+.back {
+  flex: none;
+  white-space: nowrap;
 }
 .title {
   display: flex;

@@ -10,22 +10,38 @@ import { entersEditor, entersIndex, escapeAction } from './keymap'
  * function and this is the whole of it.
  */
 describe('escapeAction', () => {
+  /** The ordinary case: a note open, nothing raised over it. */
+  const at = (where: Partial<Parameters<typeof escapeAction>[0]>) =>
+    escapeAction({
+      paletteOpen: false,
+      handledAlready: false,
+      typing: false,
+      raised: false,
+      ...where,
+    })
+
   it('closes the palette from anywhere, even mid-word in its own input', () => {
     // The palette is modal: nothing behind it may claim the key first.
-    expect(escapeAction({ paletteOpen: true, handledAlready: false, typing: true })).toBe(
+    expect(at({ paletteOpen: true, typing: true })).toBe('close-palette')
+    expect(at({ paletteOpen: true, handledAlready: true, typing: true })).toBe(
       'close-palette',
     )
-    expect(escapeAction({ paletteOpen: true, handledAlready: true, typing: true })).toBe(
-      'close-palette',
-    )
+    // Including over a raised view, where it would otherwise leave the view and
+    // the palette both — one keystroke doing two things.
+    expect(at({ paletteOpen: true, raised: true })).toBe('close-palette')
   })
 
   it('leaves the editor when the caret is in it', () => {
     // Without this the bare keys — N, I, [, ], G-chords — are unreachable
     // whenever a note is open, which is nearly always.
-    expect(
-      escapeAction({ paletteOpen: false, handledAlready: false, typing: true }),
-    ).toBe('leave-editor')
+    expect(at({ typing: true })).toBe('leave-editor')
+  })
+
+  it('leaves a raised view, which is the only way back to the note', () => {
+    // §02b Screen 8: a media surface "replaces the note like TODAY and SETTINGS
+    // do ... so leaving puts you back". Nothing implemented leaving, so
+    // clicking an image was a one-way trip.
+    expect(at({ raised: true })).toBe('leave-view')
   })
 
   it('stands down when something nearer the event already took it', () => {
@@ -33,15 +49,14 @@ describe('escapeAction', () => {
     // collapses and calls preventDefault; with a plain caret it returns false
     // and never does. So one Escape clears the selection, a second leaves —
     // rather than a single keystroke doing both.
-    expect(escapeAction({ paletteOpen: false, handledAlready: true, typing: true })).toBe(
-      'nothing',
-    )
+    expect(at({ handledAlready: true, typing: true })).toBe('nothing')
+    // And a field in the inspector that reverted itself keeps its own Escape:
+    // the view behind it must not close on the same press.
+    expect(at({ handledAlready: true, raised: true })).toBe('nothing')
   })
 
   it('does nothing when there is nothing to leave', () => {
-    expect(
-      escapeAction({ paletteOpen: false, handledAlready: false, typing: false }),
-    ).toBe('nothing')
+    expect(at({})).toBe('nothing')
   })
 })
 

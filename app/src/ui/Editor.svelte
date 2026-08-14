@@ -26,10 +26,18 @@ $effect(() => {
   let live = true
   void import('../editor').then(({ createEditor }) => {
     if (!live || handle !== null) return
+    // Where this note was left, if it has been read this session. Raising
+    // TODAY, SETTINGS or a media surface destroys this component — they are
+    // alternatives in one `{#if}` — so without this, clicking an image and
+    // coming back rebuilt the note at the top of it.
+    const held = chrome.placeIn(path)
     handle = createEditor({
       parent: target,
       doc: vault.buffer,
-      caret: bodyOffset(vault.buffer),
+      caret: held?.caret ?? bodyOffset(vault.buffer),
+      // Zero rather than absent: the top is where an unread note starts, and
+      // `exactOptionalPropertyTypes` will not take an explicit undefined.
+      scroll: held?.scroll ?? 0,
       host: wikiHost(),
       onEdit: (doc) => vault.edit(doc),
       onRender: setRenderMs,
@@ -40,6 +48,7 @@ $effect(() => {
 
   return () => {
     live = false
+    if (handle !== null && loaded !== null) chrome.rememberPlace(loaded, handle.place())
     handle?.destroy()
     handle = null
     loaded = null
@@ -56,9 +65,13 @@ $effect(() => {
   if (editor === null || path === null) return
 
   if (path !== loaded) {
+    // The note being left keeps its place too, so this works in both
+    // directions: the index, a wikilink and ⌘K all come back to where you were.
+    if (loaded !== null) chrome.rememberPlace(loaded, editor.place())
+    const held = chrome.placeIn(path)
     // Past the frontmatter: at offset 0 the first keystroke lands above the
     // opening fence and the note stops being a note.
-    editor.load(text, bodyOffset(text))
+    editor.load(text, held?.caret ?? bodyOffset(text), held?.scroll)
     loaded = path
     // Opening a note must put the caret in it. Without this the caret stays on
     // <body>, `isTyping` reports false, and every letter typed goes to the

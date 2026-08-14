@@ -244,6 +244,71 @@ test('leaving the viewer puts the note back, not the file', async ({ page }) => 
   await expect(page.locator('.media')).toHaveCount(0)
 })
 
+test('Escape comes back from the viewer', async ({ page }) => {
+  await openTheNote(page)
+  await page.locator('.cm-embed').first().click()
+  await expect(page.locator('.media img')).toBeVisible()
+
+  // §02b Screen 8 says leaving puts you back and drew no way to leave, so this
+  // was a one-way trip: the only routes out were raising a *different* view or
+  // opening the note again from the index. The key is named on the surface.
+  await expect(page.locator('.media .back')).toContainText('Esc')
+  await page.keyboard.press('Escape')
+
+  await expect(page.locator('.media')).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toBeVisible()
+})
+
+test('and back to where the note was being read, not the top of it', async ({ page }) => {
+  // Short enough that the note has somewhere to scroll to. Asserted below
+  // rather than assumed: a viewport that fits the whole note would make the
+  // rest of this test pass without proving anything.
+  await page.setViewportSize({ width: 1400, height: 420 })
+  await openTheNote(page)
+
+  const scroller = page.locator('.cm-scroller')
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  const left = await scroller.evaluate((el) => el.scrollTop)
+  expect(left, 'the note has to be scrollable for this to mean anything').toBeGreaterThan(
+    0,
+  )
+
+  await page.locator('.cm-embed').first().click()
+  await expect(page.locator('.media')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.cm-content')).toBeVisible()
+
+  // The editor is destroyed and rebuilt by that round trip — the views are
+  // alternatives in one `{#if}`, not layers — so coming back used to mean the
+  // caret past the frontmatter and the scroll at zero.
+  await expect
+    .poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 3000 })
+    .toBeGreaterThan(left - 40)
+})
+
+test('a note keeps its place when another one is read in between', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 420 })
+  await openTheNote(page)
+
+  const scroller = page.locator('.cm-scroller')
+  await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+  })
+  const left = await scroller.evaluate((el) => el.scrollTop)
+  expect(left).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: /Pair/ }).first().click()
+  await expect(page.locator('.cm-content')).toContainText('Both on one line')
+  await page.getByRole('button', { name: /Note/ }).first().click()
+  await expect(page.locator('.cm-content')).toContainText('A diagram')
+
+  await expect
+    .poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 3000 })
+    .toBeGreaterThan(left - 40)
+})
+
 test('the app itself still refuses to be framed', async ({ page }) => {
   // The carve-out must be one route wide. If it leaked to the shell, the
   // clickjacking protection the whole app relies on would be gone.

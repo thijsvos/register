@@ -49,7 +49,7 @@ function isTyping(target: EventTarget | null): boolean {
   return target.closest('.cm-editor') !== null
 }
 
-export type EscapeAction = 'close-palette' | 'leave-editor' | 'nothing'
+export type EscapeAction = 'close-palette' | 'leave-editor' | 'leave-view' | 'nothing'
 
 /**
  * What Escape does — stated as a function of three facts, so the rule can be
@@ -72,10 +72,18 @@ export function escapeAction(where: {
   /** Something nearer the target already consumed it. */
   handledAlready: boolean
   typing: boolean
+  /** A main view is showing instead of the note (§02b Screens 5, 6 and 8). */
+  raised: boolean
 }): EscapeAction {
   if (where.paletteOpen) return 'close-palette'
   if (where.handledAlready) return 'nothing'
-  return where.typing ? 'leave-editor' : 'nothing'
+  if (where.typing) return 'leave-editor'
+  // Screen 8 says a media surface "replaces the note like TODAY and SETTINGS
+  // do; the inspector keeps describing the note, so leaving puts you back" —
+  // and nothing implemented leaving. Clicking an image was a one-way trip: the
+  // only routes out were raising a *different* view or opening the note again
+  // from the index, which is how the media spec had to write its own way home.
+  return where.raised ? 'leave-view' : 'nothing'
 }
 
 /**
@@ -171,11 +179,18 @@ export function installKeymap(): () => void {
         paletteOpen: chrome.paletteOpen,
         handledAlready: event.defaultPrevented,
         typing: isTyping(focused),
+        raised: chrome.raised,
       })
 
       if (action === 'close-palette') {
         event.preventDefault()
         chrome.closePalette()
+      } else if (action === 'leave-view') {
+        event.preventDefault()
+        // Back to the note, and back to where it was being read: the editor is
+        // rebuilt from scratch here, so the caret and the scroll are restored
+        // from what `chrome` remembered when it was torn down.
+        chrome.showNotes()
       } else if (action === 'leave-editor' && focused instanceof HTMLElement) {
         event.preventDefault()
         // Focus falls to <body>, where isTyping is false and the bare keys

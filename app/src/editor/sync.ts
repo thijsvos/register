@@ -103,11 +103,34 @@ export function syncDoc(view: EditorView, next: string): void {
  * editor is told the offset rather than working it out, so `core/frontmatter`
  * stays out of the lazy chunk.
  */
-export function loadDoc(view: EditorView, text: string, caret = 0): void {
+export function loadDoc(view: EditorView, text: string, caret = 0, scroll = 0): void {
   view.dispatch({
     changes: { from: 0, to: view.state.doc.length, insert: text },
     selection: EditorSelection.single(Math.min(Math.max(caret, 0), text.length)),
     annotations: Remote.of(true),
     scrollIntoView: false,
+  })
+  scrollTo(view, scroll)
+}
+
+/**
+ * Put the scroller back where it was, in the measure phase.
+ *
+ * Assigned directly rather than through `scrollIntoView`, because the two mean
+ * different things: this restores the pixel offset a reader left, and that one
+ * puts a position at the top or the middle of the viewport. Coming back to a
+ * note should look like nothing happened.
+ *
+ * Deferred to `requestMeasure` because the document has just been replaced and
+ * the scroller's height has not been recomputed yet — assigned before that,
+ * the browser clamps the offset to the old height and a long note lands short.
+ */
+export function scrollTo(view: EditorView, top: number): void {
+  if (top <= 0) return
+  view.requestMeasure({
+    read: () => top,
+    write: (offset) => {
+      view.scrollDOM.scrollTop = offset
+    },
   })
 }

@@ -3,7 +3,7 @@ import { EditorView } from '@codemirror/view'
 import { followLink } from './decorations'
 import { type WikiLinkHost, wikiLinkHost } from './decorations/wikilinks'
 import { editorExtensions } from './setup'
-import { isUserEdit, loadDoc, syncDoc } from './sync'
+import { isUserEdit, loadDoc, scrollTo, syncDoc } from './sync'
 
 export type { WikiLinkHost }
 
@@ -13,6 +13,8 @@ export interface EditorOptions {
   /** Where to leave the caret — past the frontmatter, never at byte zero. */
   caret?: number
   host: WikiLinkHost
+  /** How far the note was scrolled when it was last on screen. */
+  scroll?: number
   /** A real keystroke, never a programmatic sync. */
   onEdit: (doc: string) => void
   /** Cost of the update CodeMirror just performed, in milliseconds. */
@@ -23,7 +25,16 @@ export interface EditorHandle {
   /** Adopt an external change, preserving the cursor. */
   sync: (doc: string) => void
   /** Switch to a different note, leaving the caret at `caret`. */
-  load: (doc: string, caret?: number) => void
+  load: (doc: string, caret?: number, scroll?: number) => void
+  /**
+   * Where the reader is: the caret, and how far the note is scrolled.
+   *
+   * Read before this view is torn down or handed a different note, so coming
+   * back to one costs nothing. The scroll is the pixel offset rather than a
+   * document position — it is what the reader was looking at, and a position
+   * would have to be re-resolved against a note an agent may have changed.
+   */
+  place: () => { caret: number; scroll: number }
   /** Put the caret at an offset and scroll it to the top — the OUTLINE pane. */
   reveal: (position: number) => void
   focus: () => void
@@ -74,9 +85,30 @@ export function createEditor(options: EditorOptions): EditorHandle {
     }),
   })
 
+  scrollTo(view, options.scroll ?? 0)
+
+  /**
+   * The scroll offset, tracked rather than read on demand.
+   *
+   * `place()` is called as this editor is being torn down — the views that
+   * replace a note are alternatives in one `{#if}` — and by then Svelte has
+   * detached the scroller, so `scrollDOM.scrollTop` reads 0 however far down
+   * the reader actually was. Measured: the caret came back and the scroll did
+   * not. So the last offset seen while the element was live is what is kept.
+   */
+  let scrolled = options.scroll ?? 0
+  const track = () => {
+    scrolled = view.scrollDOM.scrollTop
+  }
+  view.scrollDOM.addEventListener('scroll', track, { passive: true })
+
   return {
     sync: (doc) => syncDoc(view, doc),
-    load: (doc, caret) => loadDoc(view, doc, caret),
+    load: (doc, caret, scroll) => {
+      scrolled = scroll ?? 0
+      loadDoc(view, doc, caret, scroll)
+    },
+    place: () => ({ caret: view.state.selection.main.head, scroll: scrolled }),
     reveal: (position) => {
       // The pane derives its offsets from the store's buffer, which reaches the
       // editor a tick later; clamping means a click during that tick lands at
@@ -93,7 +125,10 @@ export function createEditor(options: EditorOptions): EditorHandle {
     },
     focus: () => view.focus(),
     follow: () => followLink(view),
-    destroy: () => view.destroy(),
+    destroy: () => {
+      view.scrollDOM.removeEventListener('scroll', track)
+      view.destroy()
+    },
     setHost: (host) => {
       view.dispatch({ effects: hostSlot.reconfigure(wikiLinkHost.of(host)) })
     },

@@ -27,7 +27,13 @@ $effect(() => {
 </script>
 
 <div class="media">
-  <div class="stamp">{isPdf ? 'Document' : 'Image'} · {path}</div>
+  <!-- §01: "every control shows its key". Screen 8 draws no way out and says
+       "leaving puts you back", so the key is new — and a key with nothing on
+       screen naming it is a key only its author knows about. -->
+  <div class="stamp">
+    <span>{isPdf ? 'Document' : 'Image'} · {path}</span>
+    <span class="back">[Esc] back to the note</span>
+  </div>
 
   {#if failed}
     <p class="gone">Not in the vault, or not a format this app will show.</p>
@@ -56,6 +62,10 @@ $effect(() => {
 
 /* The same micro-label the settings pane stamps itself with. */
 .stamp {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s3);
   font-family: var(--font-micro);
   font-size: var(--text-micro);
   line-height: var(--lh-micro);
@@ -64,8 +74,16 @@ $effect(() => {
   color: var(--dim);
   padding-bottom: var(--s3);
   border-bottom: var(--hairline) solid var(--line);
+}
+/* The path gives way when the column is narrow and the key hint does not —
+   losing "which file" is survivable, losing the way out is not. */
+.stamp > span:first-child {
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.back {
+  flex: none;
   white-space: nowrap;
 }
 

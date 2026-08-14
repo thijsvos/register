@@ -33,7 +33,11 @@ function pick(event: Event) {
 </script>
 
 <div class="settings">
-  <div class="stamp">Config · .register/config.json</div>
+  <div class="stamp">
+    <span>Config · .register/config.json</span>
+    <!-- §01: "every control shows its key". Escape leaves any raised view. -->
+    <span class="back">[Esc] back</span>
+  </div>
 
   <div class="row">
     <div class="key">Scheme</div>
@@ -128,6 +132,10 @@ function pick(event: Event) {
 }
 
 .stamp {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s3);
   font-family: var(--font-micro);
   font-size: var(--text-micro);
   line-height: var(--lh-micro);
@@ -136,6 +144,10 @@ function pick(event: Event) {
   color: var(--dim);
   padding-bottom: var(--s4);
   border-bottom: var(--hairline) solid var(--line);
+}
+.back {
+  flex: none;
+  white-space: nowrap;
 }
 
 .row {

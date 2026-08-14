@@ -30,6 +30,12 @@ export interface Pending {
   notes: number
 }
 
+/** Where a note was being read: the caret, and how far it was scrolled. */
+export interface Place {
+  caret: number
+  scroll: number
+}
+
 class ChromeState {
   /** Read back from the pre-paint boot script rather than asked again. */
   dark = $state(inBrowser && document.documentElement.classList.contains('dark'))
@@ -76,6 +82,36 @@ class ChromeState {
    * you last looked at is not knowledge.
    */
   media = $state<string | null>(null)
+
+  /** Whether a main view is showing instead of the note (§02b Screens 5, 6, 8). */
+  get raised(): boolean {
+    return this.settings || this.today || this.media !== null
+  }
+
+  /**
+   * Where the reader was in each note, so leaving one and coming back does not
+   * cost their place.
+   *
+   * The editor is destroyed when any of the raised views above replaces it —
+   * they are alternatives in one `{#if}`, not layers — so clicking an image and
+   * returning used to rebuild the note with the caret past the frontmatter and
+   * the scroll at zero. On a long note that is not "back", it is the top.
+   *
+   * In memory, like every other property of this window: hard rule 4 forbids
+   * state the vault cannot express, and how far down a note somebody had read
+   * ten seconds ago is not knowledge about their notes. Deliberately not
+   * `$state` — it is read when the editor mounts and never during a render, so
+   * making it reactive would only invalidate things that do not depend on it.
+   */
+  #reading = new Map<string, Place>()
+
+  rememberPlace(path: string, place: Place): void {
+    this.#reading.set(path, place)
+  }
+
+  placeIn(path: string): Place | undefined {
+    return this.#reading.get(path)
+  }
 
   /** Resolved on first use: constructing it eagerly would touch the DOM at
    *  module scope, which is what made this module unimportable in a test. */

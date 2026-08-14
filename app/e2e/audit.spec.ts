@@ -201,6 +201,33 @@ test('FOCUS · INDEX in the palette survives the palette restoring focus', async
   await expect(rows.first()).toBeFocused()
 })
 
+test('Escape is the way out of every raised view', async ({ page }) => {
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Alpha/ }).click()
+  await expect(page.locator('.cm-content')).toContainText('Body.')
+
+  // §02b raises TODAY and SETTINGS over the note exactly as it raises a media
+  // surface, and none of the three drew a way back — so a reader who pressed
+  // ⌘D had to know that opening a note from the index was the route home.
+  for (const raise of ['ControlOrMeta+d', 'settings'] as const) {
+    if (raise === 'settings') {
+      await page.keyboard.press('ControlOrMeta+k')
+      await page.getByRole('combobox').fill('SETTINGS')
+      await page.keyboard.press('Enter')
+      await expect(page.locator('.settings')).toBeVisible()
+      await expect(page.locator('.settings .back')).toContainText('Esc')
+    } else {
+      await page.keyboard.press(raise)
+      await expect(page.locator('.today')).toBeVisible()
+      await expect(page.locator('.today .back')).toContainText('Esc')
+    }
+
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.cm-content')).toBeVisible()
+    await expect(page.locator('.cm-content')).toContainText('Body.')
+  }
+})
+
 test('nothing animates under prefers-reduced-motion but nothing breaks either', async ({
   browser,
 }) => {
