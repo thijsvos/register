@@ -113,6 +113,15 @@ function toggle(task: Task) {
 .back {
   flex: none;
   white-space: nowrap;
+  /* Not duplication of the stamp's own casing and tracking, however much it
+     reads like it. A browser's UA stylesheet resets `text-transform` and
+     `letter-spacing` on form controls, so a <button> inherits neither from the
+     row it sits in — `base.css`'s `font: inherit` covers the family, the size
+     and the weight, and stops there. Both lines were deleted once as redundant
+     and the label came back sentence-case and untracked, which is how the
+     status bar's own text-control learned to declare them too. */
+  text-transform: uppercase;
+  letter-spacing: var(--track-micro);
 }
 .back:hover {
   background: var(--sel-bg);

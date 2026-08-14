@@ -269,6 +269,21 @@ test('and the label that names the key is the control too', async ({ page }) => 
   // found the only thing on the surface that did not respond.
   const back = page.getByRole('button', { name: /back to the note/i })
   await expect(back).toBeVisible()
+
+  // And it still reads as part of the stamp it sits in. A <button> does not
+  // inherit `text-transform` or `letter-spacing` — browsers reset both on form
+  // controls — so making the label a control silently turned it sentence-case
+  // and untracked, next to a sibling that was neither.
+  const micro = (selector: string) =>
+    page
+      .locator(selector)
+      .first()
+      .evaluate((el) => {
+        const style = getComputedStyle(el)
+        return `${style.textTransform} ${style.letterSpacing} ${style.fontSize}`
+      })
+  expect(await micro('.media .back')).toBe(await micro('.media .stamp > span'))
+
   await back.click()
 
   await expect(page.locator('.media')).toHaveCount(0)
