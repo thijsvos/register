@@ -228,15 +228,38 @@ fn runs_filters(args: &[&str]) -> bool {
     matches!(args.first(), Some(&"status" | &"add" | &"commit" | &"diff"))
 }
 
-fn git(root: &Path, args: &[&str]) -> Option<String> {
+/// `git`, keeping what it said when it fails.
+///
+/// Every caller below asks a *question* and is content with "no answer" — but a
+/// checkpoint that cannot commit has to be able to say why, and the reason is
+/// on stderr. Kept whole rather than summarised: git's own refusal carries the
+/// fix with it ("Please tell me who you are" is followed by the two
+/// `git config` lines that solve it), and an operator reading a log wants those.
+fn try_git(root: &Path, args: &[&str]) -> Result<String, String> {
     let out = hardened_for(root, runs_filters(args))
         .args(args)
         .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
+        .map_err(|why| format!("could not run git: {why}"))?;
+    if out.status.success() {
+        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
     }
-    Some(String::from_utf8_lossy(&out.stdout).into_owned())
+
+    let said = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+    Err(if said.is_empty() {
+        // A failure with nothing on stderr still has to name itself, or the
+        // message is "checkpoint refused:" and a blank line.
+        format!(
+            "git {} exited {}",
+            args.first().copied().unwrap_or("?"),
+            out.status
+        )
+    } else {
+        said
+    })
+}
+
+fn git(root: &Path, args: &[&str]) -> Option<String> {
+    try_git(root, args).ok()
 }
 
 /// Whether the vault is a git repository *in its own right*.
@@ -286,27 +309,47 @@ pub fn status(root: &Path) -> Option<Status> {
     })
 }
 
-/// Commit everything in the vault as `checkpoint: HH:MMZ`.
+/// What a checkpoint attempt did.
 ///
-/// Returns whether a commit was actually made — nothing to commit is a success
-/// that wrote no history, not a failure.
-pub fn checkpoint(root: &Path, stamp: &str) -> bool {
+/// Three answers, not two, and the third is the whole reason this type exists.
+/// This used to be a `bool` and the caller consumed it with an `if` and no
+/// `else`, so "there was nothing to commit" and "git refused to commit" were
+/// the same silence. In a container the second is not an edge case but the
+/// guaranteed outcome: the image sets no `user.name` or `user.email`, so every
+/// commit fails — and a vault with `"checkpoints": true` accrued no history at
+/// all while the setting sat there looking enabled.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Checkpoint {
+    /// History was written.
+    Committed,
+    /// Nothing to write: not a repository of its own, or a clean tree.
+    Nothing,
+    /// Git would not, and this is what it said.
+    Refused(String),
+}
+
+/// Commit everything in the vault as `checkpoint: HH:MMZ`.
+pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
     if !is_repo(root) {
-        return false;
+        return Checkpoint::Nothing;
     }
     // Cheaper than staging and finding out: `add -A` on a large vault is real
     // work, and the common case at idle is that nothing changed.
     match git(root, &["status", "--porcelain"]) {
         Some(dirty) if !dirty.trim().is_empty() => {}
-        _ => return false,
+        _ => return Checkpoint::Nothing,
     }
 
-    if git(root, &["add", "-A"]).is_none() {
-        return false;
+    if let Err(why) = try_git(root, &["add", "-A"]) {
+        return Checkpoint::Refused(why);
     }
     // `--no-verify`: a checkpoint is the app's bookkeeping, and someone else's
     // pre-commit hook should not get a vote on whether your notes are saved.
-    git(
+    //
+    // A refusal here leaves the tree staged. That is the existing behaviour of
+    // `add -A` and not made worse by reporting it — and the roadmap already
+    // carries the entry about checkpoints sweeping the staging area.
+    match try_git(
         root,
         &[
             "commit",
@@ -314,8 +357,10 @@ pub fn checkpoint(root: &Path, stamp: &str) -> bool {
             "-m",
             &format!("checkpoint: {stamp}"),
         ],
-    )
-    .is_some()
+    ) {
+        Ok(_) => Checkpoint::Committed,
+        Err(why) => Checkpoint::Refused(why),
+    }
 }
 
 /// Whether the vault has asked for checkpoints.
@@ -399,8 +444,20 @@ impl Checkpointer {
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0);
-                    if checkpoint(vault.root(), &stamp(now)) {
-                        println!("register · checkpoint: {}", stamp(now));
+                    match checkpoint(vault.root(), &stamp(now)) {
+                        Checkpoint::Committed => {
+                            println!("register · checkpoint: {}", stamp(now));
+                        }
+                        // The ordinary idle tick. History accrues silently and
+                        // usefully, and saying "nothing to do" every ninety
+                        // seconds would be neither.
+                        Checkpoint::Nothing => {}
+                        // stderr, because this is the one outcome the operator
+                        // has to act on, and `docker logs` is where they will
+                        // be looking when they wonder where their history went.
+                        Checkpoint::Refused(why) => {
+                            eprintln!("register · checkpoint refused:\n{why}");
+                        }
                     }
                 })
                 .await;

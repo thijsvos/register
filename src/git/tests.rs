@@ -89,7 +89,7 @@ fn a_folder_that_is_not_a_repository_is_left_alone() {
 
     assert!(!is_repo(tmp.path()));
     assert_eq!(status(tmp.path()), None);
-    assert!(!checkpoint(tmp.path(), "14:07Z"));
+    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Nothing);
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn a_vault_inside_someone_elses_repository_is_not_its_own() {
     fs::create_dir_all(inner.join("notes")).expect("create nested vault");
 
     assert!(!is_repo(&inner), "a nested folder claimed the outer repo");
-    assert!(!checkpoint(&inner, "14:07Z"));
+    assert_eq!(checkpoint(&inner, "14:07Z"), Checkpoint::Nothing);
 }
 
 #[test]
@@ -112,7 +112,7 @@ fn a_checkpoint_commits_everything_and_says_when() {
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nWritten since.\n");
 
     assert!(!status(tmp.path()).expect("status").clean);
-    assert!(checkpoint(tmp.path(), "14:07Z"));
+    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
 
     assert!(log(&tmp).contains("checkpoint: 14:07Z"), "{}", log(&tmp));
     assert!(status(tmp.path()).expect("status").clean);
@@ -126,8 +126,48 @@ fn an_idle_vault_with_nothing_to_say_writes_no_history() {
     repo(&tmp);
     let before = log(&tmp);
 
-    assert!(!checkpoint(tmp.path(), "14:07Z"));
+    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Nothing);
     assert_eq!(log(&tmp), before);
+}
+
+#[test]
+fn a_vault_that_cannot_commit_says_why_rather_than_nothing() {
+    // The container case, and it is not an edge case there — `deploy/Dockerfile`
+    // sets no `user.name` or `user.email`, so every commit fails. Before this,
+    // `checkpoint` answered `false` for that exactly as it does for "nothing to
+    // do", the caller printed on `true` only, and a vault with checkpoints
+    // switched on accrued no history while the setting sat there looking
+    // enabled.
+    //
+    // The refusal is provoked with a stale `index.lock` rather than by removing
+    // the identity, and that is not the obvious choice — it is the only stable
+    // one. `scaffold/tests.rs` sets `GIT_AUTHOR_*` and `GIT_COMMITTER_*` for the
+    // whole test process, those outrank every config file, and Rust runs tests
+    // in threads that share one environment. So an identity emptied here is
+    // ignored the moment a scaffold test has run: this test passed alone,
+    // passed under `cargo test git::`, and committed under the full suite.
+    //
+    // A left-behind lock is what a crashed git actually leaves, it fails
+    // `add -A` on every platform, and no environment variable can override it.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    fs::write(tmp.path().join(".git/index.lock"), "").expect("stale lock");
+
+    let before = log(&tmp);
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nWritten since.\n");
+
+    match checkpoint(tmp.path(), "14:07Z") {
+        Checkpoint::Refused(why) => {
+            // Not asserted against git's exact wording, which moves between
+            // versions — asserted as "there is something to read", because the
+            // failure this replaces was a message that did not exist at all.
+            assert!(!why.trim().is_empty(), "refused with nothing to say");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+
+    // And it really did not commit, so the refusal is not a lie either way.
+    assert_eq!(log(&tmp), before, "history moved despite the refusal");
 }
 
 #[test]
@@ -138,7 +178,7 @@ fn a_checkpoint_never_pushes() {
     repo(&tmp);
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
 
-    assert!(checkpoint(tmp.path(), "14:07Z"));
+    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
     // No upstream, so nothing to be ahead of, and the status still reads.
     let state = status(tmp.path()).expect("status");
     assert!(state.clean);
@@ -172,7 +212,7 @@ fn ahead_counts_commits_the_upstream_has_not_seen() {
     assert_eq!(status(tmp.path()).expect("status").ahead, Some(0));
 
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
-    assert!(checkpoint(tmp.path(), "14:07Z"));
+    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
 
     let state = status(tmp.path()).expect("status");
     assert!(state.clean, "the checkpoint left the tree dirty");
