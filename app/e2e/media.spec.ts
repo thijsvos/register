@@ -283,9 +283,24 @@ test('and back to where the note was being read, not the top of it', async ({ pa
   // The editor is destroyed and rebuilt by that round trip — the views are
   // alternatives in one `{#if}`, not layers — so coming back used to mean the
   // caret past the frontmatter and the scroll at zero.
+  //
+  // Asserted against what the note can actually offer rather than a tolerance:
+  // an image lays out at a slightly different height on a warm load, so a
+  // rebuilt note can be a little shorter than the one that was left. Landing at
+  // the furthest it now goes IS where the reader was.
+  // Read in one evaluate rather than comparing against a maximum measured
+  // beforehand: the note is still growing while this polls, so a max captured
+  // early is a max that no longer applies.
   await expect
-    .poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 3000 })
-    .toBeGreaterThan(left - 40)
+    .poll(
+      () =>
+        scroller.evaluate((el, wanted) => {
+          const max = el.scrollHeight - el.clientHeight
+          return Math.abs(el.scrollTop - Math.min(wanted, max)) <= 1
+        }, left),
+      { timeout: 3000 },
+    )
+    .toBe(true)
 })
 
 test('a note keeps its place when another one is read in between', async ({ page }) => {
@@ -304,9 +319,19 @@ test('a note keeps its place when another one is read in between', async ({ page
   await page.getByRole('button', { name: /Note/ }).first().click()
   await expect(page.locator('.cm-content')).toContainText('A diagram')
 
+  // Read in one evaluate rather than comparing against a maximum measured
+  // beforehand: the note is still growing while this polls, so a max captured
+  // early is a max that no longer applies.
   await expect
-    .poll(() => scroller.evaluate((el) => el.scrollTop), { timeout: 3000 })
-    .toBeGreaterThan(left - 40)
+    .poll(
+      () =>
+        scroller.evaluate((el, wanted) => {
+          const max = el.scrollHeight - el.clientHeight
+          return Math.abs(el.scrollTop - Math.min(wanted, max)) <= 1
+        }, left),
+      { timeout: 3000 },
+    )
+    .toBe(true)
 })
 
 test('the app itself still refuses to be framed', async ({ page }) => {

@@ -114,23 +114,61 @@ export function loadDoc(view: EditorView, text: string, caret = 0, scroll = 0): 
 }
 
 /**
- * Put the scroller back where it was, in the measure phase.
+ * How long to keep putting the scroller back while the note settles.
+ *
+ * An image decodes after the document is laid out, so the note grows for a few
+ * frames after it opens. One second is far longer than a local decode and short
+ * enough that a note which can never reach the offset — because it is shorter
+ * than it was — stops trying rather than holding a listener for the session.
+ */
+const SETTLE_MS = 1000
+
+/**
+ * Put the scroller back where it was.
  *
  * Assigned directly rather than through `scrollIntoView`, because the two mean
  * different things: this restores the pixel offset a reader left, and that one
  * puts a position at the top or the middle of the viewport. Coming back to a
  * note should look like nothing happened.
  *
- * Deferred to `requestMeasure` because the document has just been replaced and
- * the scroller's height has not been recomputed yet — assigned before that,
- * the browser clamps the offset to the old height and a long note lands short.
+ * Re-applied while the content is still growing, which is the part that had to
+ * be measured rather than assumed. A single write in the measure phase is not
+ * enough: the images have not decoded, the scroller is shorter than it will be,
+ * and the browser clamps the offset to the height it has right now. Measured on
+ * a real note — left at 1132, restored to 939, and it stayed there while the
+ * document grew back to its full height around it.
+ *
+ * Stops as soon as the offset is reached, or the moment the reader scrolls
+ * themselves: correcting somebody's own scroll would be worse than the bug.
  */
 export function scrollTo(view: EditorView, top: number): void {
   if (top <= 0) return
-  view.requestMeasure({
-    read: () => top,
-    write: (offset) => {
-      view.scrollDOM.scrollTop = offset
-    },
-  })
+  const scroller = view.scrollDOM
+  const wanted = Math.round(top)
+  /** The last offset this function wrote, to tell our scrolling from theirs. */
+  let written = -1
+
+  const stop = () => {
+    growth.disconnect()
+    scroller.removeEventListener('scroll', theirs)
+    clearTimeout(timer)
+  }
+
+  const apply = () => {
+    scroller.scrollTop = top
+    written = Math.round(scroller.scrollTop)
+    // Reached it, or the note is as far down as it goes.
+    if (written === wanted) stop()
+  }
+
+  const theirs = () => {
+    if (Math.round(scroller.scrollTop) !== written) stop()
+  }
+
+  const growth = new ResizeObserver(() => apply())
+  const timer = setTimeout(stop, SETTLE_MS)
+
+  scroller.addEventListener('scroll', theirs, { passive: true })
+  growth.observe(view.contentDOM)
+  view.requestMeasure({ read: () => undefined, write: apply })
 }
