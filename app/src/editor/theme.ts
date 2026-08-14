@@ -105,6 +105,47 @@ const theme = EditorView.theme({
     cursor: 'pointer',
   },
 
+  // The row §04's frontmatter folds to. Drawn in the micro layer rather than in
+  // the body face: it is chrome standing in for text, and reading as prose is
+  // the one thing it must not do. Hairlines above and below, because what it
+  // replaces is a fenced block and the fences are where the block's edges were.
+  '.cm-frontmatter-fold': {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    padding: 'var(--s2) 0',
+    borderTop: 'var(--hairline) solid var(--line)',
+    borderBottom: 'var(--hairline) solid var(--line)',
+    fontFamily: 'var(--font-micro)',
+    fontSize: 'var(--text-micro)',
+    lineHeight: 'var(--lh-micro)',
+    letterSpacing: 'var(--track-micro)',
+    textTransform: 'uppercase',
+    color: 'var(--dim)',
+    cursor: 'pointer',
+    userSelect: 'none',
+  },
+  // §02b Button, hover: "inverse video". The padding goes with it, or the wash
+  // stops at the glyphs and reads as a highlighter rather than a control.
+  '.cm-frontmatter-fold:hover': {
+    background: 'var(--sel-bg)',
+    color: 'var(--sel-fg)',
+    padding: 'var(--s2) var(--s2)',
+    margin: '0 calc(-1 * var(--s2))',
+  },
+  '.cm-frontmatter-fold:focus-visible': {
+    outline: 'var(--hairline) dashed var(--fg)',
+    outlineOffset: 'var(--focus-offset)',
+  },
+  // §02b Button, default: "1px box". The key hint is the control's own label.
+  '.cm-frontmatter-key': {
+    border: 'var(--hairline) solid var(--line)',
+    padding: '0 var(--s1)',
+  },
+  '.cm-frontmatter-fold:hover .cm-frontmatter-key': {
+    borderColor: 'var(--sel-fg)',
+  },
+
   // §02b state matrix, Wikilink and File reference, hover: "inverse". Inverse
   // video is the product's only hover idiom and every other component in the
   // matrix already carried it — so the defining interaction was the one element

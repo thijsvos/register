@@ -6,6 +6,7 @@ import {
   hasFrontmatter,
   join,
   list,
+  readsAsFields,
   split,
   touchModified,
   wordCount,
@@ -122,6 +123,58 @@ describe('fields', () => {
 
   it('is empty for a note without frontmatter', () => {
     expect(fields('Body only\n').size).toBe(0)
+  })
+})
+
+/**
+ * The predicate the editor folds on. `fields` omits what it cannot parse, which
+ * is right for a reader and wrong for anything deciding whether to hide the
+ * block — a line the map dropped is exactly the line somebody needs to see.
+ */
+describe('readsAsFields', () => {
+  it('is true for a §04 note', () => {
+    expect(readsAsFields(NOTE)).toBe(true)
+  })
+
+  it('is false for a line with no colon', () => {
+    expect(readsAsFields('---\nref: 003\ntitle here\n---\nBody\n')).toBe(false)
+  })
+
+  it('is false for a key with a space in it, which YAML would not take either', () => {
+    expect(readsAsFields('---\nmy ref: 003\n---\nBody\n')).toBe(false)
+  })
+
+  it('ignores blank lines between fields', () => {
+    expect(readsAsFields('---\nref: 003\n\ntitle: A\n---\nBody\n')).toBe(true)
+  })
+
+  it('takes an empty value, which is a field somebody has not filled in', () => {
+    expect(readsAsFields('---\ntitle:\n---\nBody\n')).toBe(true)
+  })
+
+  it('takes a block with nothing between the fences', () => {
+    expect(readsAsFields('---\n---\nBody\n')).toBe(true)
+  })
+
+  it('is false when there is no frontmatter to read', () => {
+    // A different answer from "the block is fine", and the editor needs both:
+    // one draws no fold row, the other draws one.
+    expect(readsAsFields('Just a body.\n')).toBe(false)
+  })
+
+  it('is false for a fence that never closes, which is not frontmatter', () => {
+    expect(readsAsFields('---\nref: 003\nnever closed\n')).toBe(false)
+  })
+
+  it('reads through CRLF and a byte-order mark', () => {
+    expect(readsAsFields('---\r\nref: 003\r\n---\r\nBody\r\n')).toBe(true)
+    expect(readsAsFields(`\u{feff}${NOTE}`)).toBe(true)
+  })
+
+  it('is false for a nested mapping, which §04 does not define', () => {
+    // Not a judgement about YAML — it is that this app cannot show or round-trip
+    // one, so hiding it would hide something nothing else in the app explains.
+    expect(readsAsFields('---\nmeta:\n  deep: 1\n---\nBody\n')).toBe(false)
   })
 })
 

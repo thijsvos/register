@@ -114,7 +114,11 @@ test('a note is created into the folder that was typed', async ({ page }) => {
   await expect(stencil).toContainText('notes/projects/')
   await stencil.click()
 
-  await expect(page.locator('.cm-content')).toContainText('Launch the thing')
+  // Read off the note's own header rather than out of the raw `title:` line:
+  // §04's frontmatter folds to one row now, so the YAML is in the document and
+  // not on the screen — and the header is where a reader actually looks for
+  // what the note is called.
+  await expect(page.locator('header.note h2')).toHaveText('Launch the thing')
   await expectPath(page, 'notes/projects/013-launch-the-thing.md')
   // The register is the vault's, not the folder's: 012 was the highest.
   await expect(page.locator('header .crumb')).toContainText('013')

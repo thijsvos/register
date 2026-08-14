@@ -131,13 +131,37 @@ function literal(text: string): string {
  * library into the shell would spend the §06 budget on re-deriving what
  * `/api/tree` already sends. Anything it cannot read it simply omits.
  */
+const FIELD = /^([A-Za-z0-9_-]+)[ \t]*:[ \t]*(.*?)[ \t]*\r?\n?$/
+
 export function fields(source: string): Map<string, string> {
   const out = new Map<string, string>()
   for (const line of lines(split(source).yaml)) {
-    const match = /^([A-Za-z0-9_-]+)[ \t]*:[ \t]*(.*?)[ \t]*\r?\n?$/.exec(line)
+    const match = FIELD.exec(line)
     if (match?.[1] !== undefined) out.set(match[1], unquote(match[2] ?? ''))
   }
   return out
+}
+
+/**
+ * Whether every line between the fences reads as a field.
+ *
+ * `fields` omits what it cannot parse, which is right for a reader and wrong for
+ * anything deciding whether to *hide* the block: a line the map silently dropped
+ * is exactly the line somebody needs to see. The editor folds only when this is
+ * true, so a note whose frontmatter has a typo in it opens showing the typo.
+ *
+ * False for a note with no frontmatter at all — there is nothing to fold, which
+ * is a different answer from "the block is fine" and the caller needs both.
+ */
+export function readsAsFields(source: string): boolean {
+  const parts = split(source)
+  if (parts.open === '') return false
+
+  for (const line of lines(parts.yaml)) {
+    if (line.trim() === '') continue
+    if (!FIELD.test(line)) return false
+  }
+  return true
 }
 
 /** `[design, research]` or `design, research` → `['design', 'research']`. */
