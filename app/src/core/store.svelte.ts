@@ -15,11 +15,21 @@ import {
   type VaultEvent,
 } from './api'
 import { type Conflict, conflicts, originalOf } from './conflict'
-import { charCount, touchModified, wordCount } from './frontmatter'
+import { charCount, setField, touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
+
+/**
+ * The two §04 fields nothing in the UI may rewrite.
+ *
+ * "id: ULID, never changes" and "ref: zero-padded, immutable" — and the ref is
+ * load-bearing beyond the note itself: `[[NNN]]` resolves by it, and §04's
+ * invariant is that a ref is issued at most once so a link can never be
+ * re-pointed by a delete-then-create.
+ */
+const IMMUTABLE = new Set(['id', 'ref'])
 
 /** §08 P3: "save pipeline debounced 500 ms with etag". */
 const SAVE_DEBOUNCE_MS = 500
@@ -355,6 +365,25 @@ class VaultStore {
     const waited = Date.now() - this.#dirtySince
     const delay = Math.max(0, Math.min(SAVE_DEBOUNCE_MS, SAVE_MAX_WAIT_MS - waited))
     this.#saveTimer = setTimeout(() => void this.save(), delay)
+  }
+
+  /**
+   * Write one frontmatter field of the open note (§02b Screen 1, PROPERTIES).
+   *
+   * The editor hides §04's frontmatter, so this pane is where those lines are
+   * edited — and it goes through the same buffer and the same debounced save a
+   * keystroke does, rather than writing a file of its own. `setField` splices
+   * one line, so key order, quoting, comments and every other byte survive.
+   *
+   * `id` and `ref` are refused rather than merely undrawn: §04 calls both
+   * immutable, a `[[NNN]]` link resolves by ref, and a pane that edited them
+   * would let one keystroke unpick the register. The UI does not offer them; a
+   * caller that asks anyway is a bug, and this is where it stops.
+   */
+  setNoteField(key: string, value: string): void {
+    if (this.openPath === null || IMMUTABLE.has(key)) return
+    const next = setField(this.buffer, key, value)
+    if (next !== this.buffer) this.edit(next)
   }
 
   /**

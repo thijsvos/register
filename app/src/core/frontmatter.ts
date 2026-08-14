@@ -133,33 +133,59 @@ function literal(text: string): string {
  */
 const FIELD = /^([A-Za-z0-9_-]+)[ \t]*:[ \t]*(.*?)[ \t]*\r?\n?$/
 
-export function fields(source: string): Map<string, string> {
+/**
+ * The fields exactly as they are written, quotes and all.
+ *
+ * What the PROPERTIES pane edits. A pane that showed the *unquoted* value and
+ * wrote back what you typed would silently strip the quotes off
+ * `title: "Costs: a study"` and leave a line whose colon reads as a second
+ * mapping — so the editable view is the literal one, which is the same rule the
+ * body follows.
+ */
+export function rawFields(source: string): Map<string, string> {
   const out = new Map<string, string>()
   for (const line of lines(split(source).yaml)) {
     const match = FIELD.exec(line)
-    if (match?.[1] !== undefined) out.set(match[1], unquote(match[2] ?? ''))
+    if (match?.[1] !== undefined) out.set(match[1], match[2] ?? '')
   }
   return out
 }
 
+export function fields(source: string): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const [key, value] of rawFields(source)) out.set(key, unquote(value))
+  return out
+}
+
 /**
- * Whether every line between the fences reads as a field.
+ * Whether the block can be taken off the screen without losing anything.
  *
- * `fields` omits what it cannot parse, which is right for a reader and wrong for
- * anything deciding whether to *hide* the block: a line the map silently dropped
- * is exactly the line somebody needs to see. The editor folds only when this is
- * true, so a note whose frontmatter has a typo in it opens showing the typo.
+ * The editor hides §04's frontmatter and the inspector edits it instead, so the
+ * question is not "does this parse" but "can that pane show and rewrite every
+ * byte of it". Two ways the answer is no, and each would hide something the
+ * reader could then neither see nor repair:
  *
- * False for a note with no frontmatter at all — there is nothing to fold, which
- * is a different answer from "the block is fine" and the caller needs both.
+ *   - a line no parser reads. `fields` omits what it cannot parse, which is
+ *     right for a reader and wrong here: the dropped line is precisely the one
+ *     somebody needs to look at.
+ *   - the same key twice. The pane is a map and would draw one row; `setField`
+ *     rewrites the first match. So the row shown and the line written could be
+ *     different lines, which is a way to lose an agent's work silently.
+ *
+ * False for a note with no frontmatter at all — nothing to hide, which is a
+ * different answer from "the block is fine" and the caller needs both.
  */
-export function readsAsFields(source: string): boolean {
+export function canHideFrontmatter(source: string): boolean {
   const parts = split(source)
   if (parts.open === '') return false
 
+  const seen = new Set<string>()
   for (const line of lines(parts.yaml)) {
     if (line.trim() === '') continue
-    if (!FIELD.test(line)) return false
+    const match = FIELD.exec(line)
+    if (match?.[1] === undefined) return false
+    if (seen.has(match[1])) return false
+    seen.add(match[1])
   }
   return true
 }

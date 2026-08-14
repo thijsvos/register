@@ -8,7 +8,7 @@ import {
   ViewPlugin,
   type ViewUpdate,
 } from '@codemirror/view'
-import { frontmatterFold } from './frontmatter'
+import { frontmatterHidden } from './frontmatter'
 import { IMAGE, imageEmbeds } from './media'
 import { TaskToggle } from './tasks'
 import { WIKILINK, wikiLinkHost } from './wikilinks'
@@ -353,12 +353,12 @@ const atomicTasks = EditorView.atomicRanges.of((view) => {
  * CodeMirror refuses block decorations from a ViewPlugin outright — "Block
  * decorations may not be specified via plugins" — because a plugin is rebuilt
  * from the viewport and block widgets change the height of lines the viewport
- * has not measured. So the image embeds and the frontmatter fold live in
+ * has not measured. So the image embeds and the hidden frontmatter live in
  * StateFields, computed from the document rather than from what is on screen.
  */
 export const markdownDecorations: Extension = [
   plugin,
   atomicTasks,
   imageEmbeds,
-  frontmatterFold,
+  frontmatterHidden,
 ]

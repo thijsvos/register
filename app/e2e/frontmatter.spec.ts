@@ -2,13 +2,14 @@ import { expect, test } from '@playwright/test'
 import { note, type Server, serve, vaultWith } from './harness'
 
 /**
- * §04's frontmatter, folded to one row (§02b Screen 1).
+ * §04's frontmatter: off the editing surface, edited in the inspector.
  *
  * §12: "markdown stays the literal source. Anything that hides the source must
- * still pass §02." So this is permitted on a condition, and the conditions are
- * what most of this file asserts: the row is a control that shows its key, it
- * is reachable without a mouse, and — the one that matters most — the bytes on
- * disk are untouched by any of it.
+ * still pass §02." So hiding is permitted on a condition, and the condition is
+ * that the fields do not stop being editable. Most of this file is that
+ * condition — the pane shows every line, writes back through the same buffer a
+ * keystroke uses, and splices rather than re-serialises, so every other byte of
+ * the note survives.
  */
 let server: Server
 
@@ -29,6 +30,17 @@ const BROKEN = [
   'The typo is the point.\n',
 ].join('\n')
 
+/** The compat fixture's shape: one key, written twice. */
+const DOUBLED = [
+  '---',
+  'id: 01J2ZK7Q8W3E5R9T000000008',
+  'ref: 008',
+  'title: First',
+  'title: Second',
+  '---',
+  'Which one would the pane draw?\n',
+].join('\n')
+
 test.beforeAll(async () => {
   server = await serve(
     vaultWith({
@@ -36,148 +48,163 @@ test.beforeAll(async () => {
       'notes/004-second.md': note({ ref: '004', title: 'Second', body: 'Elsewhere.\n' }),
       'notes/005-broken.md': BROKEN,
       'notes/006-bare.md': 'No frontmatter at all, just prose.\n',
-      'notes/007-one.md': '---\ntitle: Alone\n---\nOne field only.\n',
+      'notes/008-doubled.md': DOUBLED,
+      'notes/009-quoted.md': [
+        '---',
+        'id: 01J2ZK7Q8W3E5R9T000000009',
+        'ref: 009',
+        'title: "Costs: a study"',
+        '---',
+        'A colon that needs its quotes.\n',
+      ].join('\n'),
     }),
   )
 })
 
 test.afterAll(() => server?.stop())
 
-const row = (page: import('@playwright/test').Page) =>
-  page.locator('.cm-frontmatter-fold')
+/** The PROPERTIES row for one key, as the pane draws it. */
+const value = (page: import('@playwright/test').Page, key: string) =>
+  page.getByRole('textbox', { name: key })
 
 async function open(page: import('@playwright/test').Page, name: string | RegExp) {
   await page.getByRole('button', { name }).click()
 }
 
-test('a note opens with its frontmatter folded to one row', async ({ page }) => {
+async function onDisk(page: import('@playwright/test').Page, path: string) {
+  return await (await page.request.get(`${server.url}/api/note/${path}`)).text()
+}
+
+test('a note opens on its prose, with no YAML above it', async ({ page }) => {
   await page.goto(server.url)
   await open(page, /Terminal aesthetics/)
   await expect(page.locator('.cm-content')).toContainText('Two weights')
 
-  // Six §04 fields, counted rather than guessed. Sentence case in the DOM and
-  // uppercase on screen, which is how all chrome in this app is written (§02).
-  await expect(row(page)).toHaveText(/6 fields/)
-  await expect(row(page)).toHaveCSS('text-transform', 'uppercase')
-  await expect(row(page)).toContainText('↵')
-
-  // And the six lines are genuinely not on screen.
   const shown = await page.locator('.cm-content').innerText()
   expect(shown).not.toContain('01J2ZK7Q8W3E5R9T')
   expect(shown).not.toContain('tags:')
-  expect(shown).toContain('One typeface.')
+  expect(shown).not.toContain('---')
+  expect(shown.trimStart().startsWith('One typeface.')).toBe(true)
+
+  // Nothing is drawn in its place either. The first attempt put a collapsible
+  // row there, which is a control on the one surface meant to have none.
+  await expect(page.locator('.cm-frontmatter-fold')).toHaveCount(0)
 })
 
-test('the row opens the block, and the caret lands in it', async ({ page }) => {
-  await page.goto(server.url)
-  await open(page, /Terminal aesthetics/)
-  await expect(row(page)).toBeVisible()
-
-  await row(page).click()
-
-  await expect(row(page)).toHaveCount(0)
-  await expect(page.locator('.cm-content')).toContainText('01J2ZK7Q8W3E5R9T')
-  // Opening it is something you do to edit it, so the caret is already there:
-  // typing goes into the frontmatter rather than into the note above it.
-  const line = await page.evaluate(() => {
-    const selection = document.getSelection()
-    return selection?.anchorNode?.parentElement?.closest('.cm-line')?.textContent ?? ''
-  })
-  expect(line).toContain('id:')
-})
-
-test('it folds again when the caret leaves', async ({ page }) => {
-  await page.goto(server.url)
-  await open(page, /Terminal aesthetics/)
-  await row(page).click()
-  await expect(row(page)).toHaveCount(0)
-
-  // Back to the prose. Nothing to press and nothing to remember: leaving is
-  // done, which is what makes the fold worth having.
-  await page.locator('.cm-line', { hasText: 'One typeface.' }).click()
-  await expect(row(page)).toBeVisible()
-})
-
-test('folding rewrites nothing — the note on disk is byte for byte what it was', async ({
+test('every field is in the pane, and the pane is where they are edited', async ({
   page,
 }) => {
   await page.goto(server.url)
   await open(page, /Terminal aesthetics/)
-  await expect(row(page)).toBeVisible()
+  await expect(page.locator('.cm-content')).toContainText('Two weights')
 
-  await row(page).click()
-  await expect(row(page)).toHaveCount(0)
-  await page.locator('.cm-line', { hasText: 'One typeface.' }).click()
-  await expect(row(page)).toBeVisible()
+  await expect(value(page, 'title')).toHaveValue('Terminal aesthetics')
+  await expect(value(page, 'tags')).toHaveValue('[design, doctrine]')
 
-  // The whole promise of §12's "literal source": what an agent reads is what
-  // was there before anyone looked at it in a browser.
-  const onDisk = await (
-    await page.request.get(`${server.url}/api/note/notes/003-terminal-aesthetics.md`)
-  ).text()
-  expect(onDisk).toBe(PLAIN)
+  await value(page, 'title').fill('Terminal aesthetics, revised')
+  await page.keyboard.press('Enter')
+
+  // Through the same buffer and the same debounced save a keystroke takes.
+  await expect
+    .poll(() => onDisk(page, 'notes/003-terminal-aesthetics.md'), { timeout: 5000 })
+    .toContain('title: Terminal aesthetics, revised')
+
+  // And the note's own header follows it, because both read the buffer.
+  await expect(page.locator('header.note h2')).toHaveText('Terminal aesthetics, revised')
 })
 
-test('every note opens folded, however the last one was left', async ({ page }) => {
+test('one field changes and every other byte survives', async ({ page }) => {
   await page.goto(server.url)
-  await open(page, /Terminal aesthetics/)
-  await row(page).click()
-  await expect(row(page)).toHaveCount(0)
-
   await open(page, /Second/)
   await expect(page.locator('.cm-content')).toContainText('Elsewhere.')
-  await expect(row(page)).toBeVisible()
+
+  await value(page, 'tags').fill('[one, two]')
+  await page.keyboard.press('Enter')
+
+  await expect
+    .poll(() => onDisk(page, 'notes/004-second.md'), { timeout: 5000 })
+    .toContain('tags: [one, two]')
+
+  // `setField` splices one line. Key order, the body and the fences are all
+  // exactly as they were — the §04 round-trip contract, through a form.
+  const after = await onDisk(page, 'notes/004-second.md')
+  const before = note({ ref: '004', title: 'Second', body: 'Elsewhere.\n' })
+  const lineOf = (text: string, key: string) =>
+    text.split('\n').findIndex((line) => line.startsWith(`${key}:`))
+  for (const key of ['id', 'ref', 'title', 'created', 'tags']) {
+    expect(lineOf(after, key), key).toBe(lineOf(before, key))
+  }
+  expect(after.endsWith('Elsewhere.\n')).toBe(true)
 })
 
-test('it counts in the singular when there is one field', async ({ page }) => {
+test('the value shown is the line as written, quotes and all', async ({ page }) => {
   await page.goto(server.url)
-  await open(page, /Alone/)
-  await expect(page.locator('.cm-content')).toContainText('One field only.')
+  await open(page, /Costs/)
+  await expect(page.locator('.cm-content')).toContainText('needs its quotes')
 
-  // "1 fields" is the kind of thing that makes a reader distrust the number
-  // beside it, and the number is all this row has to say.
-  await expect(row(page)).toHaveText(/\b1 field\b/)
+  // Shown unquoted, this would be written back without them, and the colon
+  // would read as a second mapping the next time anything parsed the file.
+  await expect(value(page, 'title')).toHaveValue('"Costs: a study"')
 })
 
-test('a note with no frontmatter draws no row', async ({ page }) => {
+test('id and ref are shown and cannot be edited', async ({ page }) => {
   await page.goto(server.url)
-  await open(page, /006-bare|bare/)
+  await open(page, /Terminal aesthetics/)
+  await expect(page.locator('.cm-content')).toContainText('Two weights')
+
+  // §04 calls both immutable, and a `[[NNN]]` link resolves by ref — so editing
+  // one would re-point every link to the note.
+  await expect(value(page, 'id')).toHaveCount(0)
+  await expect(value(page, 'ref')).toHaveCount(0)
+  await expect(page.locator('.props')).toContainText('003')
+})
+
+test('Escape puts back what the file says', async ({ page }) => {
+  await page.goto(server.url)
+  await open(page, /Terminal aesthetics/)
+  const before = await onDisk(page, 'notes/003-terminal-aesthetics.md')
+
+  await value(page, 'tags').fill('[abandoned]')
+  await page.keyboard.press('Escape')
+
+  await expect(value(page, 'tags')).toHaveValue('[design, doctrine]')
+  expect(await onDisk(page, 'notes/003-terminal-aesthetics.md')).toBe(before)
+})
+
+test('a note with no frontmatter is left alone', async ({ page }) => {
+  await page.goto(server.url)
+  await open(page, /bare|006/)
   await expect(page.locator('.cm-content')).toContainText('just prose')
-
-  // Nothing to fold is not the same as a folded nothing.
-  await expect(row(page)).toHaveCount(0)
+  await expect(page.locator('aside[aria-label="Inspector"]')).toContainText(
+    'No frontmatter.',
+  )
 })
 
-test('a block that does not parse stays open', async ({ page }) => {
+test('a block the pane could not stand in for stays on screen', async ({ page }) => {
   await page.goto(server.url)
-  await open(page, /005-broken|broken/)
+  await open(page, /broken|005/)
   await expect(page.locator('.cm-content')).toContainText('The typo is the point.')
 
-  // Folding would hide the only thing worth looking at.
-  await expect(row(page)).toHaveCount(0)
+  // Hiding it would hide the only thing worth looking at, and the pane cannot
+  // show a line it cannot parse.
   await expect(page.locator('.cm-content')).toContainText('title here — no colon')
 })
 
-test('the row is a control the keyboard can reach and open', async ({ page }) => {
+test('a key written twice stays on screen', async ({ page }) => {
   await page.goto(server.url)
-  await open(page, /Terminal aesthetics/)
-  await expect(row(page)).toBeVisible()
+  await open(page, /doubled|008/)
+  await expect(page.locator('.cm-content')).toContainText('Which one would the pane')
 
-  // §01: "every action reachable without a mouse". Tab from the editor reaches
-  // it the way it reaches a wikilink, and it announces what it is.
-  await expect(row(page)).toHaveAttribute('role', 'button')
-  await row(page).focus()
-  await expect(row(page)).toBeFocused()
-  await page.keyboard.press('Enter')
-
-  await expect(row(page)).toHaveCount(0)
-  await expect(page.locator('.cm-content')).toContainText('01J2ZK7Q8W3E5R9T')
+  // The pane is a map and would draw one row; `setField` rewrites the first
+  // match. So the row shown and the line written could be different lines.
+  await expect(page.locator('.cm-content')).toContainText('title: First')
+  await expect(page.locator('.cm-content')).toContainText('title: Second')
 })
 
 test('the caret cannot be walked into text it cannot see', async ({ page }) => {
   await page.goto(server.url)
   await open(page, /Terminal aesthetics/)
-  await expect(row(page)).toBeVisible()
+  await expect(page.locator('.cm-content')).toContainText('Two weights')
 
   // The hazard `bodyOffset` exists for, made worse by hiding the block: at
   // offset 0 the caret sits ABOVE the opening fence, and the first character
@@ -188,9 +215,7 @@ test('the caret cannot be walked into text it cannot see', async ({ page }) => {
   await page.keyboard.press('Home')
   await page.keyboard.type('XX')
 
-  const onDisk = await (
-    await page.request.get(`${server.url}/api/note/notes/003-terminal-aesthetics.md`)
-  ).text()
-  expect(onDisk.startsWith('---\n')).toBe(true)
-  expect(onDisk).toContain('ref: 003')
+  const after = await onDisk(page, 'notes/003-terminal-aesthetics.md')
+  expect(after.startsWith('---\n')).toBe(true)
+  expect(after).toContain('ref: 003')
 })

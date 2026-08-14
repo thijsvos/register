@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   bodyOffset,
+  canHideFrontmatter,
   charCount,
   fields,
   hasFrontmatter,
   join,
   list,
-  readsAsFields,
+  rawFields,
   split,
   touchModified,
   wordCount,
@@ -127,54 +128,84 @@ describe('fields', () => {
 })
 
 /**
- * The predicate the editor folds on. `fields` omits what it cannot parse, which
- * is right for a reader and wrong for anything deciding whether to hide the
- * block — a line the map dropped is exactly the line somebody needs to see.
+ * The predicate the editor hides on.
+ *
+ * Not "does this parse" but "can the PROPERTIES pane stand in for it": the
+ * frontmatter comes off the editing surface entirely, so anything that pane
+ * could not show and rewrite has to stay visible.
  */
-describe('readsAsFields', () => {
+describe('canHideFrontmatter', () => {
   it('is true for a §04 note', () => {
-    expect(readsAsFields(NOTE)).toBe(true)
+    expect(canHideFrontmatter(NOTE)).toBe(true)
   })
 
   it('is false for a line with no colon', () => {
-    expect(readsAsFields('---\nref: 003\ntitle here\n---\nBody\n')).toBe(false)
+    expect(canHideFrontmatter('---\nref: 003\ntitle here\n---\nBody\n')).toBe(false)
   })
 
   it('is false for a key with a space in it, which YAML would not take either', () => {
-    expect(readsAsFields('---\nmy ref: 003\n---\nBody\n')).toBe(false)
+    expect(canHideFrontmatter('---\nmy ref: 003\n---\nBody\n')).toBe(false)
+  })
+
+  it('is false for the same key twice', () => {
+    // The pane is a map and would draw one row; `setField` rewrites the first
+    // match. So the line shown and the line written could be different lines,
+    // which is how an agent's work disappears without a message. The compat
+    // fixture carries `008-duplicate-key.md` for exactly this shape of file.
+    expect(canHideFrontmatter('---\nref: 003\nref: 004\n---\nBody\n')).toBe(false)
   })
 
   it('ignores blank lines between fields', () => {
-    expect(readsAsFields('---\nref: 003\n\ntitle: A\n---\nBody\n')).toBe(true)
+    expect(canHideFrontmatter('---\nref: 003\n\ntitle: A\n---\nBody\n')).toBe(true)
   })
 
   it('takes an empty value, which is a field somebody has not filled in', () => {
-    expect(readsAsFields('---\ntitle:\n---\nBody\n')).toBe(true)
+    expect(canHideFrontmatter('---\ntitle:\n---\nBody\n')).toBe(true)
   })
 
   it('takes a block with nothing between the fences', () => {
-    expect(readsAsFields('---\n---\nBody\n')).toBe(true)
+    expect(canHideFrontmatter('---\n---\nBody\n')).toBe(true)
   })
 
-  it('is false when there is no frontmatter to read', () => {
+  it('is false when there is no frontmatter to hide', () => {
     // A different answer from "the block is fine", and the editor needs both:
-    // one draws no fold row, the other draws one.
-    expect(readsAsFields('Just a body.\n')).toBe(false)
+    // one leaves the note alone, the other takes six lines off the screen.
+    expect(canHideFrontmatter('Just a body.\n')).toBe(false)
   })
 
   it('is false for a fence that never closes, which is not frontmatter', () => {
-    expect(readsAsFields('---\nref: 003\nnever closed\n')).toBe(false)
+    expect(canHideFrontmatter('---\nref: 003\nnever closed\n')).toBe(false)
   })
 
   it('reads through CRLF and a byte-order mark', () => {
-    expect(readsAsFields('---\r\nref: 003\r\n---\r\nBody\r\n')).toBe(true)
-    expect(readsAsFields(`\u{feff}${NOTE}`)).toBe(true)
+    expect(canHideFrontmatter('---\r\nref: 003\r\n---\r\nBody\r\n')).toBe(true)
+    expect(canHideFrontmatter(`\u{feff}${NOTE}`)).toBe(true)
   })
 
   it('is false for a nested mapping, which §04 does not define', () => {
     // Not a judgement about YAML — it is that this app cannot show or round-trip
     // one, so hiding it would hide something nothing else in the app explains.
-    expect(readsAsFields('---\nmeta:\n  deep: 1\n---\nBody\n')).toBe(false)
+    expect(canHideFrontmatter('---\nmeta:\n  deep: 1\n---\nBody\n')).toBe(false)
+  })
+})
+
+/**
+ * What the PROPERTIES pane edits: the line as it is written, not as it is read.
+ */
+describe('rawFields', () => {
+  it('keeps the quotes a value was written with', () => {
+    const note = '---\ntitle: "Costs: a study"\n---\nBody\n'
+    expect(rawFields(note).get('title')).toBe('"Costs: a study"')
+    // `fields` is the reader's view and still unquotes.
+    expect(fields(note).get('title')).toBe('Costs: a study')
+  })
+
+  it('agrees with fields on a value that needed none', () => {
+    expect(rawFields(NOTE).get('title')).toBe(fields(NOTE).get('title'))
+  })
+
+  it('keeps a list as the list it is, rather than as its members', () => {
+    expect(rawFields(NOTE).get('tags')).toBe('[design, research]')
   })
 })
 

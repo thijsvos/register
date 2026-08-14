@@ -1,7 +1,6 @@
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { followLink } from './decorations'
-import { setFrontmatterFold } from './decorations/frontmatter'
 import { type WikiLinkHost, wikiLinkHost } from './decorations/wikilinks'
 import { editorExtensions } from './setup'
 import { isUserEdit, loadDoc, syncDoc } from './sync'
@@ -77,14 +76,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
 
   return {
     sync: (doc) => syncDoc(view, doc),
-    load: (doc, caret) => {
-      loadDoc(view, doc, caret)
-      // Every note opens folded, whatever the last one was left as. Said here
-      // rather than inferred from the change, because "a different note" is
-      // something only the caller knows: `sync` replaces text too, and an agent
-      // editing the note you have open must not shut the block you opened.
-      view.dispatch({ effects: setFrontmatterFold.of(true) })
-    },
+    load: (doc, caret) => loadDoc(view, doc, caret),
     reveal: (position) => {
       // The pane derives its offsets from the store's buffer, which reaches the
       // editor a tick later; clamping means a click during that tick lands at

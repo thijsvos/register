@@ -1,5 +1,5 @@
 <script lang="ts">
-import { fields } from '../../core/frontmatter'
+import { rawFields } from '../../core/frontmatter'
 import { links } from '../../core/links'
 import { outline } from '../../core/outline'
 import { tagsOf } from '../../core/refs'
@@ -19,7 +19,46 @@ let open = $derived(vault.openPath !== null)
 
 // From the buffer, not the corpus: a heading appears in the outline as it is
 // typed, and a property changes as it is edited. The corpus is a save behind.
-let properties = $derived(open ? [...fields(vault.buffer)] : [])
+//
+// Raw rather than unquoted, because this pane is now where §04's frontmatter is
+// edited — the editor hides it. A field shown as `Costs: a study` and written
+// back as typed would drop the quotes it needs and leave a line whose colon
+// reads as a second mapping. What you see is the line.
+let properties = $derived(open ? [...rawFields(vault.buffer)] : [])
+
+/**
+ * The two §04 fields this pane shows and will not change.
+ *
+ * "id: ULID, never changes" and "ref: zero-padded, immutable" — and a `[[NNN]]`
+ * link resolves by ref, so editing one would re-point every link to the note.
+ * `vault.setNoteField` refuses them too; this is only what draws them locked.
+ */
+const IMMUTABLE = new Set(['id', 'ref'])
+
+/**
+ * Commit on Enter, abandon on Escape.
+ *
+ * Blur commits as well — a field left edited and clicked away from has been
+ * edited, and the alternative is a pane that silently discards what you typed.
+ */
+function commit(key: string, input: HTMLInputElement): void {
+  vault.setNoteField(key, input.value)
+}
+
+function keys(event: KeyboardEvent, key: string): void {
+  const input = event.currentTarget as HTMLInputElement
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    commit(key, input)
+    input.blur()
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    // Back to what the buffer holds, which is the file. Nothing to undo.
+    input.value = rawFields(vault.buffer).get(key) ?? ''
+    input.blur()
+  }
+}
 let headings = $derived(open ? outline(vault.buffer) : [])
 let tags = $derived(open ? countsFor(vault.tree, tagsOf(vault.buffer)) : [])
 
@@ -46,7 +85,25 @@ function meta(count: number): string {
     <dl class="props">
       {#each properties as [key, value] (key)}
         <dt>{key}</dt>
-        <dd title={value}>{value || dash}</dd>
+        {#if IMMUTABLE.has(key)}
+          <dd class="fixed" title={value}>{value || dash}</dd>
+        {:else}
+          <dd>
+            <!-- §02b Input: "signal caret ›, no box — caret only; the label is
+                 the frame". The key in the column beside it is that label, so
+                 the control needs no border and gets none. -->
+            <input
+              class="edit"
+              type="text"
+              value={value}
+              aria-label={key}
+              spellcheck="false"
+              autocomplete="off"
+              onkeydown={(event) => keys(event, key)}
+              onblur={(event) => commit(key, event.currentTarget)}
+            />
+          </dd>
+        {/if}
       {/each}
     </dl>
   {/if}
@@ -129,6 +186,35 @@ dd {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The editable value. §02b Input is "signal caret, no box" — so the box is the
+   one thing this must not grow, and the field reads as text until the caret is
+   in it. Sized from the row rather than from the browser's default input
+   metrics, which are a different face at a different size. */
+.edit {
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  caret-color: var(--signal);
+}
+.edit:focus {
+  outline: none;
+}
+/* The dashed ring §02's a11y floor asks for, on the row rather than on the box,
+   so the affordance appears where the value is without drawing an input. */
+.edit:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
+}
+/* §04 calls id and ref immutable, so they are shown and never offered. Demoted
+   to say so — the same ink the keys take, since neither is yours to change. */
+.fixed {
+  color: var(--dim);
 }
 
 nav {
