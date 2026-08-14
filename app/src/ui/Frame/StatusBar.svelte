@@ -14,6 +14,8 @@ let {
   watcherLive = false,
   vault = null,
   files = null,
+  words = null,
+  chars = null,
   git = null,
   notice = null,
   dirty = false,
@@ -30,6 +32,17 @@ let {
   watcherLive?: boolean
   vault?: string | null
   files?: number | null
+  /**
+   * The open note's counts, live (§08 P4: "Words/chars + RENDER ms live").
+   *
+   * Here rather than in a strip above the note, where they were for a day: they
+   * are instrument readouts about what is being written, and this is the rail
+   * the other one lives in. §02b's own status line does not draw them, which
+   * puts them where the `N unresolved` button already is — an addition the
+   * frame does not draw, taken deliberately and written down.
+   */
+  words?: number | null
+  chars?: number | null
   git?: string | null
   notice?: string | null
   dirty?: boolean
@@ -86,6 +99,12 @@ let renderValue = $derived.by(() => {
       <span class="lab">Saving</span>
     {/if}
   </div>
+  {#if words !== null}
+    <div class="cell"><b>{words}</b> <span class="lab">words</span></div>
+  {/if}
+  {#if chars !== null}
+    <div class="cell"><b>{chars}</b> <span class="lab">chars</span></div>
+  {/if}
   <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
   {#if unresolved > 0}
     <!-- Vault-wide and latched, so it sits with FILES and GIT rather than in the
