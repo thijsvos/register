@@ -74,7 +74,20 @@ test('a whole session without touching the mouse', async ({ page }) => {
   await expect(page.locator('.cm-content')).toBeFocused()
 })
 
-test('every focusable control shows a focus ring', async ({ page }) => {
+test('every focusable control shows a focus ring', async ({ page, browserName }) => {
+  // WebKit does not put buttons and links in the tab order at all unless the
+  // reader has turned on "Press Tab to highlight each item on a webpage" —
+  // measured, six Tabs leave focus on <body>. So this walk has nothing to walk
+  // there, and skipping is honest where asserting would be theatre.
+  //
+  // §01's promise survives it: the product's own traversal is `j`/`k`, the
+  // arrows and ⌘K, which are key handlers rather than tab stops and work in
+  // every engine. What Safari costs is the Tab route specifically, and that is
+  // recorded in `docs/ROADMAP.md` rather than left in a skip nobody reads.
+  test.skip(
+    browserName === 'webkit',
+    'WebKit keeps controls out of the tab order by default',
+  )
   await page.goto(server.url)
   await expect(page.getByRole('complementary', { name: 'Index' })).toBeVisible()
 

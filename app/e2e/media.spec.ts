@@ -306,7 +306,14 @@ test('and back to where the note was being read, not the top of it', async ({ pa
     0,
   )
 
-  await page.locator('.cm-embed').first().click()
+  // `dispatchEvent`, not `click`. Playwright scrolls a target into view before
+  // clicking it, and the embed is near the top of the note — so a click here
+  // moves the very thing this test is measuring, and the app then correctly
+  // remembers the position Playwright left it at. Chromium happened to hide the
+  // problem because at maximum scroll the embed was still just in view; Firefox
+  // and WebKit put the scroll back to 120 of 506 and looked like an app bug for
+  // as long as it took to print what was actually being remembered.
+  await page.locator('.cm-embed').first().dispatchEvent('mousedown')
   await expect(page.locator('.media')).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page.locator('.cm-content')).toBeVisible()

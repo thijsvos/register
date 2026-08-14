@@ -114,7 +114,10 @@ jobs:
       - run: pnpm build
         working-directory: app
       - run: cargo build --release --locked
-      - run: pnpm exec playwright install --with-deps chromium
+      # Three engines. §02's plate scale is `zoom` on <html> interacting with
+      # `dvh`, which is exactly where engines differ, and the whole of
+      # `scale.spec.ts` was proving it in the one least likely to disagree.
+      - run: pnpm exec playwright install --with-deps chromium firefox webkit
         working-directory: app
       # §06's browser budgets: agent-edit ≤ 100 ms, doc switch < 16 ms, start →
       # editable < 500 ms, idle RSS ≤ 50 MB, plus the keyboard and motion audit.

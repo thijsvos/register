@@ -9,6 +9,12 @@ import { defineConfig, devices } from '@playwright/test'
  * port against its own temporary vault, so nothing shares state and nothing
  * depends on a fixture surviving the previous file.
  */
+/**
+ * §02b Screen 1's frame: wide enough for the sidebar, the measure and the
+ * inspector, so nothing under test is hidden by a breakpoint.
+ */
+const FRAME = { width: 1400, height: 900 }
+
 export default defineConfig({
   testDir: './e2e',
   // Timings are the point of half these tests, and a parallel worker measuring
@@ -19,10 +25,27 @@ export default defineConfig({
   retries: 0,
   reporter: process.env.CI ? [['github'], ['list']] : [['list']],
   use: {
-    ...devices['Desktop Chrome'],
-    // §02b Screen 1's frame: wide enough for the sidebar, the measure and the
-    // inspector, so nothing under test is hidden by a breakpoint.
-    viewport: { width: 1400, height: 900 },
     trace: 'retain-on-failure',
   },
+  /**
+   * Three engines, because the product makes claims only a browser can settle
+   * and was proving them in the one least likely to disagree.
+   *
+   * §02's plate scale is `zoom` on `<html>` interacting with `dvh`, which is
+   * exactly the corner where engines differ — and `scale.spec.ts` asserts the
+   * whole of it, including that the status bar stays inside the viewport at 2×.
+   * That is six tests and a normative §02 revision resting on Chromium alone.
+   * The roadmap has carried the entry since the plate scale landed and calls
+   * the fix what it is: "config, not doctrine".
+   *
+   * The viewport is restated per project rather than shared. Each `devices`
+   * entry brings its own — Desktop Firefox is 1280×720 — and a project's `use`
+   * wins over the top-level one, so a single shared viewport would silently
+   * apply to Chromium and to nothing else.
+   */
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: FRAME } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'], viewport: FRAME } },
+    { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: FRAME } },
+  ],
 })
