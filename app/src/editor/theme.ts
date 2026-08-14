@@ -32,10 +32,16 @@ const theme = EditorView.theme({
   },
 
   // §02: prose is never full-bleed.
+  //
+  // The top inset is half the bottom one, and deliberately: every note now
+  // carries its own header, so this padding is the second half of the gap under
+  // the title rather than the space at the top of a page. The bottom keeps the
+  // full step, which is trailing room at the end of a note and answers to
+  // nothing above it.
   '.cm-content': {
     maxWidth: 'var(--measure)',
     margin: '0 auto',
-    padding: 'var(--s6) var(--s5)',
+    padding: 'var(--s4) var(--s5) var(--s6)',
     caretColor: 'var(--signal)',
   },
   '.cm-line': { padding: '0' },

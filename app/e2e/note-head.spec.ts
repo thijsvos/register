@@ -57,6 +57,20 @@ test('Screen 1 draws the note above its own body', async ({ page }) => {
       .first()
       .evaluate((el) => Math.round(el.getBoundingClientRect().left))
   expect(await edge('header.note')).toBe(await edge('.cm-content'))
+
+  // And the title sits close enough to the note to belong to it. The gap is two
+  // paddings — the heading's and the editor's own top inset — which is why
+  // halving it took a change in each, and why measuring one of them would not
+  // have caught the other growing back.
+  const gap = await page.evaluate(() => {
+    const heading = document.querySelector('header.note h2')
+    const line = document.querySelector('.cm-line')
+    if (heading === null || line === null) return Number.NaN
+    const under = Number.parseFloat(getComputedStyle(heading).paddingBottom)
+    const glyphs = heading.getBoundingClientRect().bottom - under
+    return Math.round(line.getBoundingClientRect().top - glyphs)
+  })
+  expect(gap).toBe(24)
 })
 
 test('and draws nothing that is already somewhere else', async ({ page }) => {

@@ -75,6 +75,11 @@ h2 {
   font-size: var(--text-title);
   font-weight: 700;
   color: var(--hi);
-  padding: var(--s1) 0 var(--s4);
+  /* Half of what it was. The gap to the first line is made of two paddings —
+     this one and `.cm-content`'s top inset — which together measured 48px, and
+     the title read as belonging to the frame rather than to the note under it.
+     Both halved rather than one zeroed, so the title keeps a little room of its
+     own and the body keeps its inset from the rule above. */
+  padding: var(--s1) 0 var(--s2);
 }
 </style>
