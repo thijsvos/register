@@ -3,6 +3,7 @@ import { vault } from '../core/store.svelte'
 import { count, type Task, taskGroups } from '../core/tasks'
 import { utcStamp } from '../lib/time'
 import { go, traverse } from './nav'
+import { chrome } from './view.svelte'
 
 // §02b Screen 5: "AGGREGATE · DERIVED FROM VAULT ... (stores nothing)". Every
 // row here is a line in a file; nothing is written down anywhere else, which is
@@ -33,7 +34,7 @@ function toggle(task: Task) {
     <div class="stamp">
       <span>Aggregate · {today} · derived from vault</span>
       <!-- §01: "every control shows its key". Escape leaves any raised view. -->
-      <span class="back">[Esc] back</span>
+      <button class="back" onclick={() => chrome.showNotes()}>[Esc] back</button>
     </div>
     <div class="title">
       <h2>Today</h2>
@@ -105,9 +106,21 @@ function toggle(task: Task) {
   text-transform: uppercase;
   color: var(--dim);
 }
+/* Text that is a control, the way the status bar's `N unresolved` already is:
+   no box on a micro-type stamp line, but §02b's hover-inverse and dashed focus
+   ring both hold. It says the key and answers the click, so the two ways out
+   are one control rather than a hint beside an invisible one. */
 .back {
   flex: none;
   white-space: nowrap;
+}
+.back:hover {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.back:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 .title {
   display: flex;

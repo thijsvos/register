@@ -222,10 +222,20 @@ test('Escape is the way out of every raised view', async ({ page }) => {
       await expect(page.locator('.today .back')).toContainText('Esc')
     }
 
+    // The label is the control on every one of them, so the key and the click
+    // are the same affordance rather than a hint beside an invisible button.
+    await expect(page.getByRole('button', { name: /^\[Esc\] back/i })).toBeVisible()
+
     await page.keyboard.press('Escape')
     await expect(page.locator('.cm-content')).toBeVisible()
     await expect(page.locator('.cm-content')).toContainText('Body.')
   }
+
+  // And clicking it does what the key does.
+  await page.keyboard.press('ControlOrMeta+d')
+  await expect(page.locator('.today')).toBeVisible()
+  await page.getByRole('button', { name: /^\[Esc\] back/i }).click()
+  await expect(page.locator('.cm-content')).toContainText('Body.')
 })
 
 test('nothing animates under prefers-reduced-motion but nothing breaks either', async ({

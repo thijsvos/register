@@ -259,6 +259,22 @@ test('Escape comes back from the viewer', async ({ page }) => {
   await expect(page.locator('.cm-content')).toBeVisible()
 })
 
+test('and the label that names the key is the control too', async ({ page }) => {
+  await openTheNote(page)
+  await page.locator('.cm-embed').first().click()
+  await expect(page.locator('.media img')).toBeVisible()
+
+  // It read as a control and was not one — micro type on a stamp line, saying
+  // the key and answering nothing. A reader who reached for it with the mouse
+  // found the only thing on the surface that did not respond.
+  const back = page.getByRole('button', { name: /back to the note/i })
+  await expect(back).toBeVisible()
+  await back.click()
+
+  await expect(page.locator('.media')).toHaveCount(0)
+  await expect(page.locator('.cm-content')).toBeVisible()
+})
+
 test('and back to where the note was being read, not the top of it', async ({ page }) => {
   // Short enough that the note has somewhere to scroll to. Asserted below
   // rather than assumed: a viewport that fits the whole note would make the

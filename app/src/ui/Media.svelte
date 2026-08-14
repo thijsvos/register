@@ -1,6 +1,7 @@
 <script lang="ts">
 import { fileUrl } from '../core/api'
 import { basename } from '../core/paths'
+import { chrome } from './view.svelte'
 
 let { path }: { path: string } = $props()
 
@@ -27,12 +28,13 @@ $effect(() => {
 </script>
 
 <div class="media">
-  <!-- §01: "every control shows its key". Screen 8 draws no way out and says
-       "leaving puts you back", so the key is new — and a key with nothing on
-       screen naming it is a key only its author knows about. -->
+  <!-- Screen 8 draws no way out and says "leaving puts you back", so both the
+       key and the control are new. §01 asks every control to show its key; this
+       one *is* its key, which is the cheapest way to satisfy that on a surface
+       whose frame has no room drawn for a button. -->
   <div class="stamp">
     <span>{isPdf ? 'Document' : 'Image'} · {path}</span>
-    <span class="back">[Esc] back to the note</span>
+    <button class="back" onclick={() => chrome.showNotes()}>[Esc] back to the note</button>
   </div>
 
   {#if failed}
@@ -82,9 +84,21 @@ $effect(() => {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Text that is a control, the way the status bar's `N unresolved` already is:
+   no box on a micro-type stamp line, but §02b's hover-inverse and dashed focus
+   ring both hold. It says the key and answers the click, so the two ways out
+   are one control rather than a hint beside an invisible one. */
 .back {
   flex: none;
   white-space: nowrap;
+}
+.back:hover {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.back:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 
 /* A document gets the room; §02's measure caps prose, and this is not prose. */

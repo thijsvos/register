@@ -2,6 +2,7 @@
 import type { BodyFace, Scale, Scheme } from '../core/settings.svelte'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
+import { chrome } from './view.svelte'
 
 let picker: HTMLInputElement | null = $state(null)
 
@@ -36,7 +37,7 @@ function pick(event: Event) {
   <div class="stamp">
     <span>Config · .register/config.json</span>
     <!-- §01: "every control shows its key". Escape leaves any raised view. -->
-    <span class="back">[Esc] back</span>
+    <button class="back" onclick={() => chrome.showNotes()}>[Esc] back</button>
   </div>
 
   <div class="row">
@@ -145,9 +146,21 @@ function pick(event: Event) {
   padding-bottom: var(--s4);
   border-bottom: var(--hairline) solid var(--line);
 }
+/* Text that is a control, the way the status bar's `N unresolved` already is:
+   no box on a micro-type stamp line, but §02b's hover-inverse and dashed focus
+   ring both hold. It says the key and answers the click, so the two ways out
+   are one control rather than a hint beside an invisible one. */
 .back {
   flex: none;
   white-space: nowrap;
+}
+.back:hover {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.back:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 
 .row {
