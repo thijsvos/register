@@ -9,16 +9,17 @@ seven items in "ready" that their own entries rule out, and the one entry I did
 open — the "flaky" watch test — turned out to be described wrongly, which is why
 it had sat unfixed for weeks.
 
-Three items are done and struck from the roadmap: setext headings, `register new
---vault`, and that watch test.
+**"I can do these now" is empty.** All ten are done and struck from the roadmap,
+along with the three that preceded them: setext headings, `register new --vault`,
+and that watch test. What is below needs you, not time — so this file is now a
+list of questions rather than a backlog, and the next thing to happen to it is
+answers.
 
-## I can do these now
-
-No ruling needed. Ordered by what a failure would cost.
-
-| # | Item | Why it is free of a decision |
-|---|---|---|
-| 10 | **Two `register` processes can race**<br>The in-process write lock is enough for one server and nothing else. Two instances over one vault race on both writes and `create`'s free-name check. | An OS-level lock is an implementation choice, not a doctrine change. |
+Two of the ten changed shape while being built, and both are recorded in full on
+the roadmap rather than here: the idle-RAM item ended in a measurement and two
+options for §06 instead of an edit, because §06 is normative; and the cross-engine
+item ended with webkit run locally rather than in CI, because three of its
+failures reproduce only on Linux.
 
 ## Your call
 

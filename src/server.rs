@@ -384,7 +384,49 @@ pub async fn serve(listener: TcpListener, state: AppState) -> std::io::Result<()
         listener,
         router(state).into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown())
     .await
+}
+
+/// Resolves when the operator asks the process to stop.
+///
+/// `docker stop` sends SIGTERM and waits ten seconds before SIGKILL, and until
+/// now nothing here listened for either — the process was simply killed. That
+/// was survivable while there was nothing to release: writes are tmp-file plus
+/// rename, so a death mid-write leaves the old note or the new one and never
+/// half of either. It stopped being survivable the moment the vault started
+/// carrying a claim, which a killed process leaves behind for the next one to
+/// trip over.
+///
+/// `tokio`'s `signal` feature has been in `Cargo.toml` since P0 and called
+/// nowhere; this is what it was for.
+async fn shutdown() {
+    let interrupt = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+
+    // SIGTERM is Unix-only. On Windows ctrl-c is the whole story, and the
+    // pending future below simply never wins the select.
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            // Nothing to be done and nothing worth saying: the process still
+            // stops on ctrl-c, and a failure to register a handler is not a
+            // reason to refuse to serve.
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = interrupt => {}
+        _ = terminate => {}
+    }
+    println!("register · stopping");
 }
 
 // ------------------------------------------------------------------- handlers
@@ -1051,6 +1093,15 @@ fn error_response(error: vault::Error) -> Response {
         )
             .into_response(),
         vault::Error::NoSuchFolder => (StatusCode::NOT_FOUND, "no such folder\n").into_response(),
+        // Startup-only: `claim` is taken before the listener binds, so no
+        // request can ever produce this. Mapped rather than left to a catch-all
+        // so that adding a variant keeps failing this match until somebody has
+        // decided what it means over HTTP.
+        vault::Error::AlreadyServed { .. } => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "this vault is served by another process\n",
+        )
+            .into_response(),
         vault::Error::UnsupportedFont => (
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "not a woff2, woff, otf or ttf font\n",

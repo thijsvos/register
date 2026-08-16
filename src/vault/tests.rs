@@ -1299,3 +1299,107 @@ fn the_shared_path_table_agrees_with_this_side() {
         );
     }
 }
+
+#[test]
+fn a_vault_is_claimed_by_one_process_at_a_time() {
+    // `vault.rs` serialises writes with an in-process `Mutex`, which is exactly
+    // enough for one server and nothing at all for two: both would read an etag,
+    // compare it, and rename over each other, and `create`'s "is this name free"
+    // check has the same shape — so two servers could hand out one ref.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    let claim = vault.claim().expect("first claim");
+
+    // A second `Vault` over the same directory is what a second `register serve`
+    // has, and it must be refused rather than allowed to race.
+    let second = tmp.open();
+    match second.claim() {
+        Err(Error::AlreadyServed { lock, held }) => {
+            // The message has to be actionable: which file, and who says they
+            // hold it. This process is the holder and is plainly alive, so this
+            // is also the liveness gate proving it does not take over its own
+            // claim — the failure mode a takeover rule invites.
+            assert!(lock.ends_with(".lock"), "lock path: {lock}");
+            assert!(
+                held.contains("pid"),
+                "the claim does not name a pid: {held}"
+            );
+            // And which vault: the filename is a hash, so a human reading it
+            // should never have to guess what it is holding.
+            assert!(
+                held.contains(&tmp.path().display().to_string()),
+                "the claim does not name its vault: {held}"
+            );
+        }
+        Err(other) => panic!("expected AlreadyServed, got {other}"),
+        Ok(_) => panic!("two processes both claimed one vault"),
+    }
+
+    // Releasing is what makes a restart work, and it is tied to the guard's
+    // lifetime rather than to anyone remembering to call something.
+    drop(claim);
+    let third = tmp.open().claim().expect("claim after release");
+    drop(third);
+}
+
+#[test]
+fn a_claim_left_by_a_killed_process_does_not_lock_the_vault_out() {
+    // A process killed outright never reaches `Drop`, so its claim outlives it.
+    // Obeying that file would mean one `docker kill` makes a vault unstartable
+    // until a human deletes something — a worse failure than the race the claim
+    // exists to prevent, and a new one this feature would have introduced.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    // A pid that is certainly not running: one this test started and reaped, so
+    // the kernel has genuinely retired it rather than this guessing a number.
+    let mut dead = std::process::Command::new("true")
+        .spawn()
+        .expect("spawn a process to kill");
+    let gone = dead.id();
+    dead.wait().expect("reap it");
+
+    let path = vault.claim_path_for_test();
+    fs::write(&path, format!("pid {gone} · {}\n", tmp.path().display())).expect("write a claim");
+
+    let taken = vault.claim().expect("a dead holder does not hold");
+    // Taken over rather than shared: the file is this process's claim now, and a
+    // third server still gets refused.
+    let held = fs::read_to_string(taken.path()).expect("read the claim");
+    assert!(
+        held.contains(&format!("pid {}", std::process::id())),
+        "the claim still names the dead process: {held}"
+    );
+    assert!(
+        tmp.open().claim().is_err(),
+        "taking over a stale claim left the vault unclaimed"
+    );
+
+    drop(taken);
+    assert!(!path.exists(), "the taken-over claim outlived the guard");
+}
+
+#[test]
+fn a_claim_is_released_even_when_the_server_never_asked() {
+    // The guard's `Drop`, which is what a graceful shutdown relies on: `serve`
+    // holds the claim for the life of the process, so SIGTERM unwinding is what
+    // removes the file.
+    let tmp = TempVault::new();
+
+    {
+        let claim = tmp.open().claim().expect("claim");
+        assert!(claim.path().is_file(), "no claim file was written");
+        // And nowhere near the vault: one untracked file in `.register/` makes a
+        // vault under git dirty for as long as the app runs.
+        assert!(
+            !claim.path().starts_with(tmp.path()),
+            "the claim is inside the vault: {}",
+            claim.path().display()
+        );
+    }
+    assert!(
+        !tmp.open().claim_path_for_test().exists(),
+        "the claim outlived the guard"
+    );
+}

@@ -188,6 +188,13 @@ pub enum Error {
     /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
     /// 50 MB for the whole process.
     TooLarge,
+    /// Another `register` already holds this vault. Carries the lock's path and
+    /// whatever it says, so the message can name both rather than tell somebody
+    /// there is a problem and leave them to find it.
+    AlreadyServed {
+        lock: String,
+        held: String,
+    },
     Io(io::Error),
 }
 
@@ -201,6 +208,13 @@ impl fmt::Display for Error {
             Self::UnsupportedMedia => write!(f, "not an image or pdf this app will serve"),
             Self::NoSuchFolder => write!(f, "no such folder"),
             Self::TooLarge => write!(f, "file is larger than this app will serve"),
+            Self::AlreadyServed { lock, held } => write!(
+                f,
+                "another register is already serving this vault ({held}).\n\
+                 Two servers over one vault race on every write, so this one is \
+                 stopping.\n\
+                 If that process is gone, the claim is stale: delete {lock}"
+            ),
             Self::Io(e) => write!(f, "{e}"),
         }
     }
@@ -308,6 +322,91 @@ pub struct Vault {
     /// cache would be shared by every test in a parallel binary — an answer one
     /// test cached is not one another test should be able to read.
     git: Mutex<Option<(Instant, Option<git::Status>)>>,
+}
+
+/// Where a vault's claim lives: the temp directory, named for the vault.
+///
+/// Hashed rather than derived from the path text, which can contain separators
+/// and is not bounded by any filename limit. `DefaultHasher` is not stable
+/// across releases and does not need to be — every process that matters here is
+/// the same binary running at the same moment, and the file records the real
+/// path so a human reading it is never left guessing which vault it means.
+fn claim_path(root: &Path) -> PathBuf {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    root.hash(&mut hasher);
+    std::env::temp_dir().join(format!("register-vault-{:016x}.lock", hasher.finish()))
+}
+
+/// A vault claimed by this process. Dropping it releases the claim.
+///
+/// Held for the life of `register serve`, so the release is tied to the process
+/// living rather than to anyone remembering to call something.
+pub struct Claim {
+    path: PathBuf,
+}
+
+impl Claim {
+    /// Where the claim is. Tests only — production learns the path from the
+    /// refusal it prints, which is the one place a human needs it.
+    #[cfg(test)]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// Has the process named by a claim gone away?
+///
+/// `true` is the only answer that lets a claim be taken over, so every way of
+/// not knowing — an unparsable file, no `kill` on PATH, a platform without
+/// signals — answers `false` and the claim stands. Erring towards a stranded
+/// lock is deliberate: that is an inconvenience with a printed fix, where a
+/// stolen one is two servers writing one vault, which is the thing this whole
+/// mechanism exists to prevent.
+fn holder_is_gone(held: &str) -> bool {
+    let Some(pid) = held
+        .split_whitespace()
+        .skip_while(|word| *word != "pid")
+        .nth(1)
+        .and_then(|word| word.parse::<u32>().ok())
+    else {
+        return false;
+    };
+
+    // `kill -0` sends no signal; it only reports whether the process could be
+    // signalled. std exposes no `kill` and a crate for one costs an ADR under
+    // hard rule 6 — where `kill` is POSIX, and busybox carries it, so the alpine
+    // image in `deploy/` has it as well.
+    //
+    // A failure is "no such process" *or* "not permitted", told apart only by
+    // locale-dependent stderr, so both read as gone here. The second is not a
+    // hole: taking the claim over means deleting the file, and a claim written
+    // by another user is one this process cannot delete either — the sticky bit
+    // on a shared `/tmp` sees to that — so the takeover fails and the refusal
+    // stands anyway.
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|probed| !probed.success())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        false
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        // Best effort by necessity: a process being killed outright never
+        // reaches this at all, which is why the claim names its pid and
+        // `holder_is_gone` exists to read it.
+        let _ = fs::remove_file(&self.path);
+    }
 }
 
 impl Vault {
@@ -512,10 +611,95 @@ impl Vault {
         answer
     }
 
+    /// Where this vault's claim would go. Tests only — production learns it
+    /// from the `Claim` it holds or from the refusal it prints.
+    #[cfg(test)]
+    pub fn claim_path_for_test(&self) -> PathBuf {
+        claim_path(&self.root)
+    }
+
     /// Drop the cached git state, because the vault has changed.
     pub fn forget_git(&self) {
         if let Ok(mut slot) = self.git.lock() {
             *slot = None;
+        }
+    }
+
+    /// Claim this vault for this process, or say who already has it.
+    ///
+    /// `vault.rs` serialises writes with an in-process `Mutex`, which is exactly
+    /// enough for one server and nothing at all for two: hard rule 5 routes
+    /// every write through this type, and two processes have two of it. Both
+    /// would then read an etag, compare it, and rename over each other — and
+    /// `create`'s "is this name free" check has the same shape, so two servers
+    /// could hand out one ref.
+    ///
+    /// **Outside the vault**, and that is not where it started. A claim inside
+    /// `.register/` is one untracked file, which is enough to make a vault under
+    /// git permanently dirty for as long as the app is running — `?1` in the
+    /// status bar, and `a_licensed_font_never_reaches_the_repository` failing,
+    /// which is the test that exists to say the app does not touch your
+    /// repository. `.gitignore` cannot fix it either: the scaffold names two
+    /// directories under §08 P8, adding a third is a §04 surface change under
+    /// hard rule 1, and no edit to it reaches a vault somebody already
+    /// initialised. A lock is process coordination rather than anything the
+    /// vault has to express, so it lives where process state belongs.
+    ///
+    /// The cost, stated because it is real: two processes that do not share a
+    /// temp directory cannot see each other's claim. A container and its host
+    /// mounting one vault is exactly that case, and this does not cover it.
+    ///
+    /// No crate for it: `fs4` or `fd-lock` would give real advisory locking and
+    /// cost an ADR under hard rule 6, where what is wanted is a refusal at
+    /// startup rather than a lock held across every write.
+    ///
+    /// A killed process never reaches `Drop` and leaves its claim behind, so the
+    /// file names its pid and a claim whose pid is gone is taken over rather
+    /// than obeyed. Without that, one `docker kill` makes a vault unstartable
+    /// until a human deletes a file — a worse failure than the race this
+    /// prevents, and a new one.
+    pub fn claim(&self) -> Result<Claim> {
+        let path = claim_path(&self.root);
+
+        match self.take(&path) {
+            Err(Error::AlreadyServed { held, .. }) if holder_is_gone(&held) => {
+                // Best effort, and the permission check in the same stroke: a
+                // claim this process cannot delete is one it has no business
+                // taking, and the retry below then refuses on its own — with
+                // whatever the file says now, which is the live holder's pid if
+                // another server cleared the same stale claim first.
+                let _ = fs::remove_file(&path);
+                self.take(&path)
+            }
+            other => other,
+        }
+    }
+
+    /// One attempt at the claim file. `create_new` is the mechanism — a single
+    /// filesystem operation that both creates and refuses, so there is no window
+    /// between asking and taking.
+    fn take(&self, path: &Path) -> Result<Claim> {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(mut file) => {
+                // Best effort: the claim is the file existing, not its contents.
+                // A reader who cannot parse this still knows to look at the pid.
+                let _ = writeln!(file, "pid {} · {}", std::process::id(), self.root.display());
+                Ok(Claim {
+                    path: path.to_path_buf(),
+                })
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                let held = fs::read_to_string(path).unwrap_or_default();
+                Err(Error::AlreadyServed {
+                    lock: path.display().to_string(),
+                    held: held.trim().to_owned(),
+                })
+            }
+            Err(error) => Err(Error::Io(error)),
         }
     }
 

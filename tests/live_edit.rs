@@ -197,6 +197,55 @@ fn next_frame(stream: &mut TcpStream) -> String {
 // ------------------------------------------------------------------------ tests
 
 #[test]
+fn a_second_server_refuses_the_vault_the_first_one_holds() {
+    // The real shape of it: two `register serve` processes, one vault. Both hold
+    // an in-process write lock and neither can see the other's, so both would
+    // read an etag, compare it, and rename over each other.
+    let root = scratch("two-servers");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let first = Server::start(&vault);
+
+    let refused = Command::new(BINARY)
+        .args(["serve", vault.to_str().expect("utf-8"), "--port", "0"])
+        .output()
+        .expect("second register");
+
+    assert!(
+        !refused.status.success(),
+        "the second server started anyway"
+    );
+    let said = format!(
+        "{}{}",
+        String::from_utf8_lossy(&refused.stdout),
+        String::from_utf8_lossy(&refused.stderr)
+    );
+    // Actionable or it is not worth printing: which vault, and where the claim
+    // is, since a stale one can only be cleared by a human.
+    assert!(
+        said.contains("already serving"),
+        "unhelpful refusal: {said}"
+    );
+    assert!(said.contains(".lock"), "no path to clear: {said}");
+    // The claim lives outside the vault under a hashed name, so the refusal has
+    // to say which vault it is about as well as which file to delete.
+    assert!(
+        said.contains(vault.to_str().expect("utf-8")),
+        "the refusal does not name the vault: {said}"
+    );
+
+    // And the vault is free again once the first one goes, which is the half
+    // that makes a restart work rather than needing a manual delete.
+    drop(first);
+    let again = Server::start(&vault);
+    assert!(
+        again.get("/api/tree").contains("\"notes\""),
+        "the vault did not reopen"
+    );
+}
+
+#[test]
 fn a_fresh_vault_is_one_command_and_the_cli_fills_it() {
     let root = scratch("init");
     let vault = root.join("vault");

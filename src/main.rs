@@ -300,6 +300,11 @@ async fn serve(
         vault::Vault::open(&root).map_err(|error| format!("serve {}: {error}", root.display()))?;
     let vault = Arc::new(vault);
 
+    // Before anything else starts: the watcher, the checkpointer and the
+    // listener all belong to whichever process holds the vault, and starting
+    // them first would mean tearing them down again to refuse.
+    let claim = vault.claim().map_err(|error| error.to_string())?;
+
     let (events, _first) = broadcast::channel(EVENT_BACKLOG);
 
     // Bound to the lifetime of this function on purpose. Dropping a notify
@@ -374,7 +379,11 @@ published to loopback, a firewall — then say so explicitly:
     }
     server::serve(listener, state)
         .await
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    // Explicit, so the claim's release is a statement rather than a side effect
+    // of where a binding happened to be declared.
+    drop(claim);
+    Ok(())
 }
 
 #[cfg(test)]
