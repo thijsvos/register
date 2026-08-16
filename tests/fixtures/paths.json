@@ -1,0 +1,144 @@
+{
+  "what": "One table of folder paths, and what each side of the mirror says about one.",
+  "why": [
+    "`cleanFolder` in app/src/core/paths.ts mirrors `resolve_within` in src/vault.rs",
+    "segment by segment, and a mirror is a thing that can drift. It exists because",
+    "the check has to happen before `fetch` rewrites the URL and before a",
+    "case-folding filesystem rewrites the path — neither of which the server can",
+    "see — so the duplication is deliberate. This file is what stops the two copies",
+    "drifting without anyone noticing: each side reads its own column and must",
+    "still answer what is written here.",
+    "",
+    "Containment only. The client additionally refuses a folder the INDEX would not",
+    "draw (`templates/`, `daily/`), which is a rule about what counts as a note and",
+    "not about where the vault ends — so every accepted case here is also a folder",
+    "the INDEX lists, and listedness is tested on its own in paths.test.ts.",
+    "",
+    "The server is asked about `<path>/x.md`, because `resolve_within` judges a path",
+    "to a file and a folder is only ever reached through one.",
+    "",
+    "`server` and `client` are separate columns because on two rows they disagree,",
+    "and a single verdict would have had to hide that. Rust's `Path::components`",
+    "normalises an empty component away, so the server reads `notes//x.md` as",
+    "`notes/x.md` and accepts it; `cleanFolder` splits on `/` and refuses the empty",
+    "segment. Both land inside the vault and on the same file, so this is a",
+    "difference in strictness rather than a hole — recorded here so it is a",
+    "decision rather than a surprise."
+  ],
+  "cases": [
+    {
+      "path": "notes",
+      "server": true,
+      "client": true,
+      "why": "the ordinary case"
+    },
+    {
+      "path": "notes/projects",
+      "server": true,
+      "client": true,
+      "why": "nested"
+    },
+    {
+      "path": "areas/health/2026",
+      "server": true,
+      "client": true,
+      "why": "three deep"
+    },
+    {
+      "path": "notes/with space",
+      "server": true,
+      "client": true,
+      "why": "a space is not a path problem"
+    },
+    {
+      "path": "notes/Café",
+      "server": true,
+      "client": true,
+      "why": "non-ASCII is a name, not an escape"
+    },
+    {
+      "path": "",
+      "server": false,
+      "client": false,
+      "why": "empty is not a path"
+    },
+    {
+      "path": "/notes",
+      "server": false,
+      "client": false,
+      "why": "absolute — refused rather than reinterpreted as relative"
+    },
+    {
+      "path": "notes/",
+      "server": true,
+      "client": false,
+      "why": "the server normalises the empty component away; the client refuses it"
+    },
+    {
+      "path": "notes//projects",
+      "server": true,
+      "client": false,
+      "why": "same difference, mid-path"
+    },
+    {
+      "path": "..",
+      "server": false,
+      "client": false,
+      "why": "the escape itself"
+    },
+    {
+      "path": ".",
+      "server": false,
+      "client": false,
+      "why": "a dot segment is not a folder"
+    },
+    {
+      "path": "notes/../templates",
+      "server": false,
+      "client": false,
+      "why": "passed a prefix test once; the URL parser collapses it after the check"
+    },
+    {
+      "path": "../outside",
+      "server": false,
+      "client": false,
+      "why": "climbs out of the vault"
+    },
+    {
+      "path": ".register",
+      "server": false,
+      "client": false,
+      "why": "app-owned; §04 keeps agents and the API out"
+    },
+    {
+      "path": ".register/trash",
+      "server": false,
+      "client": false,
+      "why": "and everything under it"
+    },
+    {
+      "path": "notes/.hidden",
+      "server": false,
+      "client": false,
+      "why": "a dot-prefixed segment anywhere, not just the first"
+    },
+    {
+      "path": "notes\\projects",
+      "server": false,
+      "client": false,
+      "why": "backslash — a separator on one platform, a filename character on another"
+    },
+    {
+      "path": "notes\u0000",
+      "server": false,
+      "client": false,
+      "why": "NUL truncates the path in any C API underneath"
+    },
+    {
+      "path": "notes\u0000/projects",
+      "server": false,
+      "client": false,
+      "why": "and mid-path"
+    }
+  ]
+}

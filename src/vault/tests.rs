@@ -1250,3 +1250,52 @@ mod media {
         ));
     }
 }
+
+/// The shared path table, read by this side and by `app/src/core/paths.test.ts`.
+///
+/// `cleanFolder` mirrors `resolve_within` segment by segment, and a mirror is a
+/// thing that can drift. The duplication is deliberate — the client has to judge
+/// a path before `fetch` rewrites the URL and before a case-folding filesystem
+/// rewrites it, neither of which the server can see — so what was missing was
+/// not a de-duplication but a table both copies are held to.
+///
+/// The table gives each side its own column, because on two rows they disagree
+/// and one verdict would have had to hide it: `Path::components` normalises an
+/// empty component away, so this side reads `notes//x.md` as `notes/x.md` while
+/// the client refuses the empty segment outright. Same file either way, so it is
+/// a difference in strictness rather than a hole — but it is written down now.
+#[test]
+fn the_shared_path_table_agrees_with_this_side() {
+    let raw = fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/paths.json"),
+    )
+    .expect("read tests/fixtures/paths.json");
+    let table: serde_json::Value = serde_json::from_str(&raw).expect("parse paths.json");
+    let cases = table["cases"].as_array().expect("cases");
+
+    // Anti-vacuity: an emptied or renamed table must fail rather than pass by
+    // having nothing left to disagree with.
+    assert!(
+        cases.len() >= 15,
+        "the table lost its cases: {}",
+        cases.len()
+    );
+
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    for case in cases {
+        let path = case["path"].as_str().expect("path");
+        let expected = case["server"].as_bool().expect("server");
+        let why = case["why"].as_str().unwrap_or("");
+
+        // A folder is only ever reached through a file inside it, which is what
+        // `resolve_within` judges — and what `cleanFolder` is asked too.
+        let asked = format!("{path}/x.md");
+        assert_eq!(
+            vault.resolve_within(&asked).is_ok(),
+            expected,
+            "{path:?} — {why}"
+        );
+    }
+}

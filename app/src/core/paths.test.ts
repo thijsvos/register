@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import table from '../../../tests/fixtures/paths.json'
 import {
   cleanFolder,
   dailyDate,
@@ -290,5 +291,48 @@ describe('isIndexed', () => {
     // The two govern different questions: what is drawn, and what counts as a
     // note you filed. A daily log is drawn and is not one of those.
     expect(isListed('daily/2026-08-12.md')).toBe(false)
+  })
+})
+
+/**
+ * The shared path table, read by this side and by `src/vault/tests.rs`.
+ *
+ * `cleanFolder` mirrors `resolve_within` segment by segment, and a mirror is a
+ * thing that can drift. The duplication is deliberate — this side has to judge a
+ * path *before* `fetch` rewrites the URL and before a case-folding filesystem
+ * rewrites it, neither of which the server can see — so what was missing was not
+ * a de-duplication but one table both copies are held to.
+ *
+ * Imported rather than read with `node:fs`: this is browser code and its
+ * tsconfig has no node types, which is correct and worth keeping. Vitest
+ * resolves the path through Vite, so the fixture stays a single file at the
+ * repository root with no copy inside `app/` to fall out of step.
+ */
+describe('the shared path table', () => {
+  const cases = table.cases as {
+    path: string
+    server: boolean
+    client: boolean
+    why: string
+  }[]
+
+  it('still has cases in it', () => {
+    // Anti-vacuity: an emptied or moved table must fail here rather than pass by
+    // leaving nothing to disagree with.
+    expect(cases.length).toBeGreaterThanOrEqual(15)
+  })
+
+  it.each(cases)('$path — $why', ({ path, client }) => {
+    expect(cleanFolder(path) !== null).toBe(client)
+  })
+
+  it('is the containment rule only — listedness is this side alone', () => {
+    // `templates/` is inside the vault and the server will hold a note there;
+    // the INDEX will not draw one, so this side refuses it. That is a rule about
+    // what counts as a note rather than about where the vault ends, which is why
+    // it is asserted here and not in the shared table.
+    expect(cleanFolder('templates')).toBeNull()
+    expect(cleanFolder('daily')).toBeNull()
+    expect(cleanFolder('notes')).toBe('notes')
   })
 })
