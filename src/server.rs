@@ -7,6 +7,7 @@
 use std::net::SocketAddr;
 use std::path::{Component, Path as FsPath, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::Router;
@@ -19,6 +20,7 @@ use axum::routing::{any, delete, get, post};
 use rust_embed::Embed;
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
+use tokio::time::timeout;
 
 use crate::vault::{self, Vault};
 use crate::watch::Event;
@@ -55,6 +57,10 @@ pub struct AppState {
     /// every CSS change needs a full `cargo install --path . --force` before it
     /// can be seen, and a stale binary looks exactly like a broken fix.
     assets: Option<PathBuf>,
+    /// How often an idle WebSocket is pinged. Named rather than constant for
+    /// `Checkpointer::with_idle`'s reason: a test should not have to wait half a
+    /// minute to find out whether this works.
+    ping: Duration,
 }
 
 impl AppState {
@@ -65,7 +71,19 @@ impl AppState {
             local: true,
             token: None,
             assets: None,
+            ping: PING_EVERY,
         }
+    }
+
+    /// Ping an idle socket this often instead of every [`PING_EVERY`].
+    ///
+    /// Tests only, and marked so rather than left looking like an option an
+    /// operator has: the cadence is not a knob anyone should turn, it is a
+    /// number a test cannot afford to wait out.
+    #[cfg(test)]
+    pub fn with_ping(mut self, every: Duration) -> Self {
+        self.ping = every;
+        self
     }
 
     /// Read the UI from `dir` rather than from the embedded bundle.
@@ -614,13 +632,48 @@ async fn delete_font(State(state): State<AppState>) -> Response {
 
 async fn events(upgrade: WebSocketUpgrade, State(state): State<AppState>) -> Response {
     let events = state.events.subscribe();
-    upgrade.on_upgrade(move |socket| pump(socket, events))
+    let every = state.ping;
+    upgrade.on_upgrade(move |socket| pump(socket, events, every))
 }
 
+/// How often to ping a client that has heard nothing.
+///
+/// A vault can be quiet for hours, and a TCP connection that has died — a
+/// laptop closed on a tailnet, a sleeping phone, a NAT table that dropped the
+/// entry — looks exactly like a quiet one from this end. Without traffic
+/// nothing discovers it: the socket sits open, the client believes it is live,
+/// and the next agent edit is delivered to nobody. §07's remote mode (P12) is
+/// what made this reachable; on loopback it never mattered.
+const PING_EVERY: Duration = Duration::from_secs(30);
+
+/// How long a single frame may take to leave.
+///
+/// A half-open connection accepts writes into the kernel buffer until it fills,
+/// and then blocks forever. Without this the pump would park on that `send` and
+/// hold its broadcast slot for the life of the process.
+const SEND_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Forward coalesced vault events to one client until either side hangs up.
-async fn pump(mut socket: WebSocket, mut events: broadcast::Receiver<Event>) {
+async fn pump(mut socket: WebSocket, mut events: broadcast::Receiver<Event>, every: Duration) {
+    let mut ping = tokio::time::interval(every);
+    // The first tick is immediate; a ping the moment the socket opens says
+    // nothing useful and races the client's own setup.
+    ping.tick().await;
+
     loop {
         tokio::select! {
+            _ = ping.tick() => {
+                // The payload is empty: this asks "are you there", and the
+                // answer is the pong axum handles for us. A `Pong` arriving
+                // unsolicited is fine too and falls through the arm below.
+                if timeout(SEND_TIMEOUT, socket.send(Message::Ping(Vec::new().into())))
+                    .await
+                    .map(|sent| sent.is_err())
+                    .unwrap_or(true)
+                {
+                    return;
+                }
+            },
             incoming = socket.recv() => match incoming {
                 Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
                 _ => {}
@@ -628,7 +681,14 @@ async fn pump(mut socket: WebSocket, mut events: broadcast::Receiver<Event>) {
             event = events.recv() => match event {
                 Ok(event) => {
                     let Ok(frame) = serde_json::to_string(&event) else { continue };
-                    if socket.send(Message::Text(frame.into())).await.is_err() {
+                    // Timed for the same reason the ping is: a half-open socket
+                    // takes writes until the kernel buffer fills and then blocks
+                    // for good, holding this task and its broadcast slot.
+                    if timeout(SEND_TIMEOUT, socket.send(Message::Text(frame.into())))
+                        .await
+                        .map(|sent| sent.is_err())
+                        .unwrap_or(true)
+                    {
                         return;
                     }
                 }

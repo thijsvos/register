@@ -117,6 +117,77 @@ async fn upgrade(addr: SocketAddr, path: &str, extra: &[(&str, &str)]) -> u16 {
         .unwrap_or(0)
 }
 
+/// A WebSocket that stays open, so the frames after the handshake can be read.
+///
+/// `upgrade` above returns the status code and drops the stream, which is all
+/// the refusal tests need and none of what a keepalive test does.
+async fn upgraded(addr: SocketAddr) -> TcpStream {
+    let mut stream = TcpStream::connect(addr).await.expect("connect");
+    stream
+        .write_all(
+            b"GET /api/events HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\n\
+              Upgrade: websocket\r\nSec-WebSocket-Version: 13\r\n\
+              Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n",
+        )
+        .await
+        .expect("write upgrade");
+
+    // Exactly the headers: reading further would swallow the first frame, which
+    // is the one under test.
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    while !head.ends_with(b"\r\n\r\n") {
+        stream.read_exact(&mut byte).await.expect("read handshake");
+        head.push(byte[0]);
+    }
+    let head = String::from_utf8_lossy(&head).into_owned();
+    assert!(head.starts_with("HTTP/1.1 101"), "upgrade refused: {head}");
+    stream
+}
+
+#[tokio::test]
+async fn an_idle_socket_is_pinged() {
+    // A vault can be quiet for hours, and a connection that has died — a laptop
+    // closed on a tailnet, a NAT entry dropped — looks exactly like a quiet one
+    // from this end. Without traffic nothing discovers it: the socket stays
+    // open, the client believes it is live, and the next agent edit is
+    // delivered to nobody. §07's remote mode is what made that reachable.
+    let tmp = TempVault::new();
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state = AppState::new(vault, events).with_ping(Duration::from_millis(60));
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router(state)).await;
+    });
+
+    let mut socket = upgraded(addr).await;
+
+    // Nothing is written to the vault, so a frame arriving at all is the ping.
+    let mut header = [0u8; 2];
+    let read = tokio::time::timeout(Duration::from_secs(2), socket.read_exact(&mut header)).await;
+    assert!(
+        read.is_ok(),
+        "no frame inside two seconds — an idle socket was never pinged"
+    );
+    read.expect("timeout").expect("read frame");
+
+    // Opcode 9 is Ping (RFC 6455). Text would mean an event nobody caused.
+    assert_eq!(
+        header[0] & 0x0f,
+        0x9,
+        "expected a ping, got opcode {:x}",
+        header[0] & 0x0f
+    );
+
+    // And it does not fire the instant the socket opens, which would say nothing
+    // about liveness and would race the client's own setup.
+    let payload = usize::from(header[1] & 0x7f);
+    assert_eq!(payload, 0, "the ping carries no payload");
+}
+
 /// A server in remote mode: bound to loopback, but demanding a token from
 /// anything that is not loopback. The tests reach it over 127.0.0.1, which is
 /// exactly the exemption §08 P12 requires — so the refusals below are driven by

@@ -131,8 +131,16 @@ fn an_idle_vault_with_nothing_to_say_writes_no_history() {
 }
 
 /// A `Vault` over the same directory, for the cache that lives on it.
+///
+/// The window is opened wide because these tests are about *whether* an answer
+/// is reused, not about when it expires. At the shipped quarter second a loaded
+/// machine can spend the whole window between two calls — a `cargo clippy`
+/// beside the suite was enough — and the assertion then fails on the scheduler
+/// rather than on the cache.
 fn opened(tmp: &TempVault) -> crate::vault::Vault {
-    crate::vault::Vault::open(tmp.path()).expect("open vault")
+    crate::vault::Vault::open(tmp.path())
+        .expect("open vault")
+        .with_git_ttl(std::time::Duration::from_secs(3600))
 }
 
 #[test]

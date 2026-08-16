@@ -16,6 +16,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::git;
 
+/// How long a cached `git status` may be reused.
+///
+/// A quarter of a second collapses a burst of tree fetches and is far below
+/// anything a reader could perceive in a status field. It is a backstop rather
+/// than the main guard: [`Vault::forget_git`] clears the answer the moment the
+/// vault changes, so the staleness a TTL alone would allow — fetch, save, fetch
+/// again inside the window, and read the pre-save state — cannot happen. What
+/// the window covers is the change the watcher cannot see, because it watches
+/// `.md` files: a `git add` or `git commit` run by hand touches `.git` and
+/// nothing else.
+const GIT_TTL: Duration = Duration::from_millis(250);
+
 /// App-owned directory. §04: "app-owned; agents keep out."
 pub const APP_DIR: &str = ".register";
 const TRASH_DIR: &str = "trash";
@@ -285,6 +297,8 @@ pub struct Vault {
     /// "compare the etag, then rename" atomic. Two `register` processes over one
     /// vault would still race; that is a documented limit, not a covered case.
     writes: Mutex<()>,
+    /// How long [`Vault::git_status`] may reuse an answer.
+    git_ttl: Duration,
     /// The last `git status`, and when it was taken (§08 P12's GIT field).
     ///
     /// `GET /api/tree` runs three git subprocesses and the client fetches the
@@ -306,6 +320,7 @@ impl Vault {
         Ok(Self {
             root: root.canonicalize()?,
             writes: Mutex::new(()),
+            git_ttl: GIT_TTL,
             git: Mutex::new(None),
         })
     }
@@ -465,23 +480,24 @@ impl Vault {
         })
     }
 
-    /// How long a cached `git status` may be reused.
+    /// Hold a cached git status for this long instead of [`GIT_TTL`].
     ///
-    /// A quarter of a second collapses a burst of tree fetches and is far below
-    /// anything a reader could perceive in a status field. It is a backstop
-    /// rather than the main guard: [`Vault::forget_git`] clears the answer the
-    /// moment the vault changes, so the staleness a TTL alone would allow —
-    /// fetch, save, fetch again inside the window, and read the pre-save state —
-    /// cannot happen. What the window covers is the change the watcher cannot
-    /// see, because it watches `.md` files: a `git add` or `git commit` run by
-    /// hand touches `.git` and nothing else.
-    const GIT_TTL: Duration = Duration::from_millis(250);
+    /// Tests only. A test that asserts "the second call was served from cache"
+    /// otherwise races the window: under a loaded machine — a `cargo clippy`
+    /// running beside it was enough — the quarter second expires between the
+    /// two calls, the answer is recomputed correctly, and the assertion fails
+    /// for a reason that has nothing to do with the cache.
+    #[cfg(test)]
+    pub fn with_git_ttl(mut self, ttl: Duration) -> Self {
+        self.git_ttl = ttl;
+        self
+    }
 
     /// The vault's git state, from cache when it is still current.
     pub fn git_status(&self) -> Option<git::Status> {
         if let Ok(slot) = self.git.lock()
             && let Some((at, answer)) = slot.as_ref()
-            && at.elapsed() < Self::GIT_TTL
+            && at.elapsed() < self.git_ttl
         {
             return answer.clone();
         }
