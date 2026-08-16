@@ -344,6 +344,58 @@ fn the_same_title_twice_makes_two_notes_and_clobbers_neither() {
     }
 }
 
+#[test]
+fn a_title_yaml_cannot_read_plainly_is_quoted_rather_than_lost() {
+    // `register new "Rust: a survey"` used to exit 0, print a path, and write a
+    // note whose frontmatter no parser could read: a bare `: ` inside a plain
+    // scalar is a syntax error, so the block failed whole and the note lost its
+    // title *and* its tags everywhere they are drawn. Nothing said so.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    for title in [
+        "Rust: a survey",
+        "trailing colon:",
+        "a # hash",
+        "[bracketed]",
+        "- dashed",
+        "quote \" inside",
+        "back\\slash",
+    ] {
+        let rel = create(&vault, title).expect("create");
+        let raw = fs::read_to_string(tmp.path().join(&rel)).expect("read");
+
+        // The whole point: it survives the round trip the INDEX actually makes.
+        let entry = vault
+            .tree()
+            .expect("tree")
+            .notes
+            .into_iter()
+            .find(|note| note.path == rel)
+            .expect("the note is in the tree");
+        assert_eq!(
+            entry.title.as_deref(),
+            Some(title),
+            "title did not survive the frontmatter it was written into:\n{raw}"
+        );
+    }
+}
+
+#[test]
+fn an_ordinary_title_is_still_written_plainly() {
+    // Quoting only where YAML needs it. §04's examples are unquoted and a vault
+    // is meant to read like something a person wrote by hand.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    let rel = create(&vault, "Terminal aesthetics").expect("create");
+    let raw = fs::read_to_string(tmp.path().join(&rel)).expect("read");
+    assert!(
+        raw.contains("title: Terminal aesthetics\n"),
+        "an unremarkable title was quoted anyway:\n{raw}"
+    );
+}
+
 // ---------------------------------------------------------------------- slugs
 
 #[test]

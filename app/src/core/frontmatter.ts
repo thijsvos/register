@@ -96,6 +96,19 @@ export function setField(source: string, key: string, value: string): string {
   // and leave the real field stale. Both are §04 byte-losslessness breaches, and
   // both destroy data an agent wrote.
   const pattern = new RegExp(`^(${literal(key)}[ \\t]*:[ \\t]*)(.*)$`, 'm')
+
+  // A key written twice is refused outright rather than half-rewritten. The
+  // replace is first-match-wins while every reader here is last-wins — `fields`
+  // builds a Map and the later entry overwrites — so PROPERTIES showed the
+  // *second* `title:` and edited the *first*. The edit destroyed a line the user
+  // was never shown and then appeared to do nothing, because the second line
+  // still decided what the note was called. ADR-001 already takes this position
+  // for duplicate keys: refuse, rather than silently discard half. `touchModified`
+  // inherits it, which is the right answer there too.
+  if ((parts.yaml.match(new RegExp(pattern.source, 'gm')) ?? []).length > 1) {
+    return source
+  }
+
   if (pattern.test(parts.yaml)) {
     // A function replacement, not a `$1${value}` string: in a replacement string
     // `$` is syntax, so a title like "Cost in $1 terms" would splice the matched

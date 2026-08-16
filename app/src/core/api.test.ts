@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { getNote, openEvents, putNote } from './api'
+import { forgetLineEndings, getNote, openEvents, putNote } from './api'
 
 /**
  * `openEvents`' reconnect loop, which is the only state machine in the client
@@ -235,13 +235,19 @@ function serveOnce(response: Response) {
   // `undefined` rather than optional keys: `exactOptionalPropertyTypes` is on,
   // and "the header was absent" is a value this test asserts on rather than a
   // property that happens to be missing.
-  const seen: { url: string | undefined; headers: HeadersInit | undefined } = {
+  const seen: {
+    url: string | undefined
+    headers: HeadersInit | undefined
+    body: string | undefined
+  } = {
     url: undefined,
     headers: undefined,
+    body: undefined,
   }
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     seen.url = String(input)
     seen.headers = init?.headers
+    seen.body = typeof init?.body === 'string' ? init.body : undefined
     return Promise.resolve(response)
   }) as typeof fetch
   return seen
@@ -339,5 +345,64 @@ describe('putNote conditional writes', () => {
   it('refuses a write that came back with no etag', async () => {
     serveOnce(new Response('', { status: 200 }))
     await expect(putNote('notes/003-a.md', 'body')).rejects.toThrow(/no etag/)
+  })
+})
+
+describe('line endings survive a round trip', () => {
+  // `tests/compat.rs` asserts the server never normalises `notes/005-crlf.md`,
+  // and `a_crlf_note_keeps_its_title_and_tags` asserts it can still read it. The
+  // client was the half that broke it: CodeMirror joins its document with `\n`
+  // whatever `lineSeparator` says, so a CRLF note came back out as LF and one
+  // keystroke rewrote every line in the file.
+  const CRLF = '---\r\nid: X\r\nref: 005\r\n---\r\nEvery line ends CRLF.\r\n'
+  const LF = CRLF.replaceAll('\r\n', '\n')
+
+  afterEach(forgetLineEndings)
+
+  it('hands the app LF and gives the file back its CRLF', async () => {
+    serveOnce(new Response(CRLF, { status: 200, headers: { etag: 'e' } }))
+    const loaded = await getNote('notes/005-crlf.md')
+    // One coordinate system inside the app: every offset the editor, the
+    // OUTLINE pane and `bodyOffset` deal in is an offset into this string.
+    expect(loaded.body).toBe(LF)
+
+    const sent = serveOnce(new Response('', { status: 200, headers: { etag: 'f' } }))
+    await putNote('notes/005-crlf.md', LF, 'e')
+    expect(sent.body).toBe(CRLF)
+  })
+
+  it('leaves an LF note alone in both directions', async () => {
+    serveOnce(new Response(LF, { status: 200, headers: { etag: 'e' } }))
+    expect((await getNote('notes/003-a.md')).body).toBe(LF)
+
+    const sent = serveOnce(new Response('', { status: 200, headers: { etag: 'f' } }))
+    await putNote('notes/003-a.md', LF, 'e')
+    expect(sent.body).toBe(LF)
+  })
+
+  it('stops converting a note that stopped being CRLF', async () => {
+    // An agent rewrote it with LF endings while it sat in the corpus. The next
+    // read is the truth, and the one after it must not re-apply a convention the
+    // file has given up.
+    serveOnce(new Response(CRLF, { status: 200, headers: { etag: 'e' } }))
+    await getNote('notes/005-crlf.md')
+    serveOnce(new Response(LF, { status: 200, headers: { etag: 'f' } }))
+    await getNote('notes/005-crlf.md')
+
+    const sent = serveOnce(new Response('', { status: 200, headers: { etag: 'g' } }))
+    await putNote('notes/005-crlf.md', LF, 'f')
+    expect(sent.body).toBe(LF)
+  })
+
+  it('leaves a mixed-ending file exactly as it found it', async () => {
+    // No convention to preserve, so guessing one would be the app editing prose
+    // nobody asked it to edit.
+    const mixed = 'one\r\ntwo\nthree\r\n'
+    serveOnce(new Response(mixed, { status: 200, headers: { etag: 'e' } }))
+    expect((await getNote('notes/mixed.md')).body).toBe(mixed)
+
+    const sent = serveOnce(new Response('', { status: 200, headers: { etag: 'f' } }))
+    await putNote('notes/mixed.md', mixed, 'e')
+    expect(sent.body).toBe(mixed)
   })
 })

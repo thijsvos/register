@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Instant;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -163,6 +164,7 @@ async fn an_idle_socket_is_pinged() {
         let _ = axum::serve(listener, router(state)).await;
     });
 
+    let opened = Instant::now();
     let mut socket = upgraded(addr).await;
 
     // Nothing is written to the vault, so a frame arriving at all is the ping.
@@ -182,8 +184,19 @@ async fn an_idle_socket_is_pinged() {
         header[0] & 0x0f
     );
 
-    // And it does not fire the instant the socket opens, which would say nothing
-    // about liveness and would race the client's own setup.
+    // And it waited a full interval first, which is the half `pump`'s priming
+    // `ping.tick()` exists for: `tokio::time::interval` yields its first tick
+    // immediately, so without that line the server pings the instant the socket
+    // opens — which says nothing about liveness and races the client's own
+    // setup. This has to be a clock reading. The obvious assertion, that the
+    // frame carries no payload, is true whenever the ping fires and so passes
+    // just as happily with the priming tick deleted.
+    let waited = opened.elapsed();
+    assert!(
+        waited >= Duration::from_millis(60),
+        "the ping fired {waited:?} after the socket opened, inside its own 60 ms interval"
+    );
+
     let payload = usize::from(header[1] & 0x7f);
     assert_eq!(payload, 0, "the ping carries no payload");
 }

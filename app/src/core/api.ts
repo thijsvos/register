@@ -127,19 +127,70 @@ export async function getTree(): Promise<Tree> {
   return asTree(await response.json())
 }
 
+/**
+ * Notes whose bytes on disk use CRLF.
+ *
+ * CodeMirror has one line ending. `EditorState.lineSeparator` sets what the
+ * *editor* inserts and splits on, but `doc.toString()` joins with `\n`
+ * unconditionally — measured, because the obvious fix is to set that facet and
+ * it does not work. So a CRLF note opened in the editor comes back out as LF,
+ * and one keystroke rewrote every line ending in the file: a two-character edit
+ * arriving as a whole-file diff in the vault's git history, on a vault the user
+ * never asked to convert.
+ *
+ * Normalising here rather than fixing it at each write is what keeps the app to
+ * **one coordinate system**. Offsets cross this boundary in both directions —
+ * `bodyOffset` for the caret, the OUTLINE pane's `reveal`, `place()` coming back
+ * — and if the buffer were CRLF while the editor's document were LF, every one
+ * of them would need translating, each a place to be off by the number of CRs
+ * above it. Converting the text once on the way in and once on the way out
+ * leaves CRLF existing nowhere but the wire.
+ *
+ * Keyed by path and held here because this is the layer that owns how the file
+ * is encoded, and because the alternative — threading a flag through `Loaded`,
+ * the corpus, and every caller of `putNote` — puts the same fact in six places
+ * and lets five of them go stale. Bounded by the vault: one boolean per note
+ * ever opened.
+ */
+const crlfNotes = new Set<string>()
+
+/** Uniformly CRLF: every `\n` is preceded by `\r`, and there is at least one. */
+function usesCrlf(text: string): boolean {
+  return text.includes('\r\n') && !/(?<!\r)\n/.test(text)
+}
+
+/** For tests, which must be able to start from nothing. */
+export function forgetLineEndings(): void {
+  crlfNotes.clear()
+}
+
 export async function getNote(path: string): Promise<Loaded> {
   const response = await fetch(noteUrl(path))
   if (!response.ok) await refuse(response)
   const etag = etagOf(response)
   if (etag === null) throw new ApiError(response.status, 'note came back with no etag')
-  return { body: await response.text(), etag }
+
+  const raw = await response.text()
+  // A mixed-ending file is left exactly as it is: there is no convention there
+  // to preserve, and guessing one would be the app editing prose nobody asked
+  // it to edit.
+  if (usesCrlf(raw)) {
+    crlfNotes.add(path)
+    return { body: raw.replaceAll('\r\n', '\n'), etag }
+  }
+  crlfNotes.delete(path)
+  return { body: raw, etag }
 }
 
 export async function putNote(path: string, body: string, etag?: string): Promise<Saved> {
   const response = await fetch(noteUrl(path), {
     method: 'PUT',
     headers: etag === undefined ? {} : { 'If-Match': etag },
-    body,
+    // Back into the file's own convention. A conflict copy of a CRLF note is
+    // written by `#park` under a *different* path, which has never been read and
+    // so is not in the set — it lands as LF, which is correct: it is a new file,
+    // and a new file has no convention to keep.
+    body: crlfNotes.has(path) ? body.replaceAll('\n', '\r\n') : body,
   })
   if (response.status === 409) {
     return { ok: false, conflict: true, etag: etagOf(response) }

@@ -54,6 +54,33 @@ describe('newNote', () => {
   })
 })
 
+describe('a title YAML cannot read plainly', () => {
+  // The server's `yaml_scalar` in src/scaffold.rs is the same rule, because a
+  // note created here and one created by `register new` have to be one file.
+  // Splicing the title in raw is not a cosmetic slip: a bare `: ` makes the
+  // whole frontmatter block a syntax error, so the note loses its title *and*
+  // its tags in the INDEX and the tag index, silently.
+  it.each([
+    'Rust: a survey',
+    'trailing colon:',
+    'a # hash',
+    '[bracketed]',
+    '- dashed',
+    'quote " inside',
+    'back\\slash',
+  ])('survives being written and read back: %s', (title) => {
+    const note = newNote({ ref: '003', title, now: new Date('2026-08-05T09:16:40Z') })
+    expect(fields(note).get('title')).toBe(title)
+  })
+
+  it('leaves an unremarkable title unquoted', () => {
+    // §04's examples are unquoted, and a vault should read like something a
+    // person wrote by hand.
+    const note = newNote({ ref: '003', title: 'Terminal aesthetics', now: new Date() })
+    expect(note).toContain('title: Terminal aesthetics\n')
+  })
+})
+
 describe('isTemplate', () => {
   it.each([
     ['templates/daily.md', true],

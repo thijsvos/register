@@ -184,6 +184,32 @@ fn the_cache_is_dropped_the_moment_the_vault_changes() {
 }
 
 #[test]
+fn a_write_clears_the_cache_without_waiting_to_be_told_it_happened() {
+    // The watcher is not fast enough to be the only thing that clears this, and
+    // for a while it was the only thing. It answers after a 50 ms coalescing
+    // window and a blocking flush; the client refetches the tree the instant a
+    // save returns, milliseconds later. So every note created from the palette
+    // read a GIT field describing the vault as it was before the note existed.
+    // A write knows it wrote.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    assert!(vault.git_status().expect("status").clean);
+
+    vault
+        .write("notes/004-b.md", "---\nref: 004\n---\nx\n", None)
+        .expect("write");
+
+    // No `forget_git` here, and no watcher running: the write is what cleared
+    // it. The TTL cannot be what makes this pass — `opened` pins it at an hour.
+    assert!(
+        !vault.git_status().expect("status").clean,
+        "a note this vault wrote itself was answered from the cache that predates it"
+    );
+}
+
+#[test]
 fn two_vaults_do_not_answer_for_each_other() {
     let clean = TempVault::new();
     repo(&clean);

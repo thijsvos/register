@@ -23,7 +23,20 @@ export interface WikiLinkHost {
   /** Open a referenced file on its own surface (§02b Screen 8). */
   openFile: (src: string) => void
   /**
-   * Has this reference already failed to load in this session?
+   * Report that this reference just failed to load.
+   *
+   * Routed through the host rather than written straight to the miss store,
+   * for the same reason `fileUrl` and `openFile` are: `src` is relative to the
+   * note holding it, and only the host knows which note that is. Marked by the
+   * raw string, a missing `shot.png` under `notes/` also declared the perfectly
+   * good `archive/shot.png` missing — the reference in the second note went
+   * dotted, dim and unclickable directly above the block widget rendering the
+   * image it claimed was not there.
+   */
+  fileGone: (src: string) => void
+  /**
+   * Has the file this reference resolves to already failed to load in this
+   * session?
    *
    * Only ever true after a browser has tried, because nothing else can know —
    * media is not in the tree. So a reference starts out dressed as a link and
@@ -37,6 +50,7 @@ const inert: WikiLinkHost = {
   open: () => {},
   fileUrl: () => null,
   openFile: () => {},
+  fileGone: () => {},
   fileMissing: () => false,
 }
 

@@ -91,9 +91,12 @@ tags: [daily]\n\
 /// §04: "000-inbox.md — capture queue — append, don't reorganize".
 const INBOX_BODY: &str = "Capture queue. Append, don't reorganize.\n";
 
-/// Nothing reads this yet. §02b Screen 6 is the only chrome that writes config,
-/// and it decides the keys — inventing a schema here would be guessing at a
-/// screen that has not been built.
+/// Empty on purpose, and it stays empty: §02b Screen 6 owns the keys and writes
+/// them as they are chosen, so a vault that has made no choices says so rather
+/// than carrying a scaffolded guess at what the defaults were on the day it was
+/// initialised. Both sides read it now — the server through
+/// [`crate::vault::Vault::read_config`], which is what decides whether the
+/// checkpointer commits at all, and the client through `GET /api/config`.
 const CONFIG_JSON: &str = "{}\n";
 
 /// `--git`: the two directories that must never be committed (§08 P8).
@@ -349,12 +352,52 @@ fn note(
 ) -> String {
     let stamp = unix_seconds(now);
     format!(
-        "---\nid: {}\nref: {reference}\ntitle: {title}\ncreated: {}\nmodified: {}\ntags: [{}]\n---\n{body}",
+        "---\nid: {}\nref: {reference}\ntitle: {}\ncreated: {}\nmodified: {}\ntags: [{}]\n---\n{body}",
         id.map_or_else(|| ulid(now), str::to_owned),
+        yaml_scalar(title),
         iso_date(stamp),
         iso_seconds(stamp),
         tags.join(", "),
     )
+}
+
+/// A title as a YAML scalar: plain where that is unambiguous, quoted where it
+/// is not.
+///
+/// Splicing the title in raw loses it outright, which is worse than it sounds.
+/// `register new "Rust: a survey"` wrote `title: Rust: a survey`, and a bare
+/// `: ` inside a plain scalar is a YAML syntax error — so the whole frontmatter
+/// block failed to parse, `entry_for` fell back to `Frontmatter::default()`, and
+/// the note lost **its title and every tag** in the INDEX and the tag index.
+/// Exit code 0, path printed, nothing on screen to say why. ` #` was quieter and
+/// no better: it opens a comment, so the title silently truncated there.
+///
+/// Quoting is not a §04 change — a double-quoted scalar is the same value, the
+/// frozen v1 fixture already carries one, and both readers (`serde-saphyr` on
+/// this side, `frontmatter.ts` on the other) have always handled it.
+fn yaml_scalar(title: &str) -> String {
+    // The plain-scalar rules, kept deliberately conservative: anything on this
+    // list gets quotes even where some parser might have coped, because the
+    // failure is silent and the cost of a quote is nothing.
+    let indicator = title
+        .chars()
+        .next()
+        .is_some_and(|ch| "-?:,[]{}#&*!|>'\"%@`".contains(ch));
+    let unsafe_scalar = title.is_empty()
+        || title.trim() != title
+        || indicator
+        || title.contains(": ")
+        || title.ends_with(':')
+        || title.contains(" #")
+        || title.chars().any(char::is_control);
+
+    if !unsafe_scalar {
+        return title.to_owned();
+    }
+    // Double quotes rather than single: they are the only YAML form with an
+    // escape, so a title containing a quote of either kind still round-trips.
+    let escaped = title.replace('\\', r"\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
 }
 
 // ------------------------------------------------------------------- slugging

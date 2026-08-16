@@ -6,6 +6,34 @@ import { fields, list, setField, split } from './frontmatter'
 // out — and §04 now requires that a ref, once allocated, is never reissued.
 // `/api/tree` reports it as `nextRef`.
 
+/**
+ * A title as a YAML scalar: plain where that is unambiguous, quoted where it is
+ * not.
+ *
+ * Mirrors `yaml_scalar` in `src/scaffold.rs`, because a note created in the UI
+ * and one created by `register new` have to be the same file. Splicing a title
+ * in raw loses it outright: a bare `: ` inside a plain scalar is a YAML syntax
+ * error, so the whole frontmatter block fails to parse and the note loses its
+ * title *and* its tags everywhere they are drawn — with nothing on screen to
+ * say why. ` #` is quieter and no better; it opens a comment.
+ */
+export function yamlScalar(title: string): string {
+  const unsafe =
+    title === '' ||
+    title.trim() !== title ||
+    '-?:,[]{}#&*!|>\'"%@`'.includes(title[0] ?? '') ||
+    title.includes(': ') ||
+    title.endsWith(':') ||
+    title.includes(' #') ||
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: the point is to catch them
+    /[\u0000-\u001f\u007f]/.test(title)
+
+  if (!unsafe) return title
+  // Double quotes rather than single: the only YAML form with an escape, so a
+  // title containing a quote of either kind still round-trips.
+  return `"${title.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
 /** `Terminal aesthetics!` → `terminal-aesthetics`. */
 export function slug(title: string): string {
   const kebab = title
@@ -50,7 +78,7 @@ export function newNote(options: {
     '---',
     `id: ${options.id ?? ulid(now.getTime())}`,
     `ref: ${ref}`,
-    `title: ${title}`,
+    `title: ${yamlScalar(title)}`,
     `created: ${day(now)}`,
     `modified: ${isoSeconds(now)}`,
     'tags: []',
@@ -119,7 +147,7 @@ export function noteFrom(
   const stamped = stamp(template, [
     ['id', settled.id],
     ['ref', settled.ref],
-    ['title', settled.title],
+    ['title', yamlScalar(settled.title)],
     ['created', day(settled.now)],
     ['modified', isoSeconds(settled.now)],
   ])

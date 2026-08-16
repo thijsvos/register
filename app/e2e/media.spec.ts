@@ -59,6 +59,15 @@ test.beforeAll(async () => {
         title: 'Pair',
         body: 'Both on one line: ![d](diagram.png) and [s](spec.pdf)\n',
       }),
+      // The same *filename* as the one that is missing under `notes/`, but here
+      // it exists. A miss recorded by name rather than by resolved path made
+      // this note's reference inert too.
+      'archive/003-elsewhere.md': note({
+        ref: '003',
+        title: 'Elsewhere',
+        body: 'Mine is here: ![A plan](nowhere.png)\n',
+      }),
+      'archive/nowhere.png': PNG,
       'notes/diagram.png': PNG,
       'notes/spec.pdf': pdf(),
     }),
@@ -411,4 +420,32 @@ test('a note is not served as a file, and a traversal is refused', async ({ page
   expect(answers.note).toBe(415)
   expect(answers.app).toBe(400)
   expect(answers.missing).toBe(404)
+})
+
+test('a filename missing in one folder is not missing in every folder', async ({
+  page,
+}) => {
+  // `notes/nowhere.png` does not exist and `archive/nowhere.png` does. The miss
+  // was recorded under the raw `src`, so discovering the first one declared the
+  // second missing as well: `archive/003-elsewhere.md` drew its reference
+  // dotted, dim and unclickable directly above the block widget that was
+  // rendering the image it claimed was not there.
+  await openTheNote(page)
+  // Wait for the miss to be discovered — this is what used to poison the other
+  // note, so the test is worthless without it.
+  await expect(page.locator('.cm-embed-missing')).toHaveCount(1)
+
+  await page
+    .getByRole('button', { name: /Elsewhere/i })
+    .first()
+    .click()
+  await expect(page.locator('.cm-content')).toContainText('Mine is here')
+
+  // Its image renders, and — the half that was broken — its reference is still
+  // a link rather than a tombstone.
+  await expect(page.locator('.cm-embed-missing')).toHaveCount(0)
+  await expect(page.locator('.cm-fileref-missing')).toHaveCount(0)
+  const live = page.locator('.cm-filelink')
+  await expect(live).toHaveCount(1)
+  await expect(live).toHaveAttribute('role', 'link')
 })

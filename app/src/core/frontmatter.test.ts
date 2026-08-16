@@ -8,6 +8,7 @@ import {
   join,
   list,
   rawFields,
+  setField,
   split,
   touchModified,
   wordCount,
@@ -282,5 +283,28 @@ describe('bodyOffset', () => {
     const typed = note.slice(0, bodyOffset(note)) + 'x' + note.slice(bodyOffset(note))
     expect(hasFrontmatter(typed)).toBe(true)
     expect(hasFrontmatter(`x${note}`)).toBe(false)
+  })
+})
+
+describe('a key written twice', () => {
+  // `notes/008-duplicate-key.md` in the frozen v1 fixture. Every reader here is
+  // last-wins — `fields` builds a Map, so the later entry decides — while the
+  // write was first-match-wins. PROPERTIES therefore showed one line and edited
+  // a different one: the user's edit destroyed a line they were never shown, and
+  // then appeared to do nothing, because the line below still named the note.
+  const doubled = '---\ntitle: First title\ntitle: Second title\n---\nBody\n'
+
+  it('is refused rather than half-rewritten', () => {
+    expect(setField(doubled, 'title', 'Third title')).toBe(doubled)
+  })
+
+  it('takes touchModified with it, for the same reason', () => {
+    const twice = '---\nmodified: a\nmodified: b\n---\nBody\n'
+    expect(touchModified(twice, '2026-08-16T00:00:00Z')).toBe(twice)
+  })
+
+  it('still writes a key that appears once', () => {
+    const once = '---\ntitle: Only\nref: 003\n---\nBody\n'
+    expect(setField(once, 'title', 'Changed')).toContain('title: Changed\n')
   })
 })

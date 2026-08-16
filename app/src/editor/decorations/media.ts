@@ -1,7 +1,6 @@
 import { syntaxTree } from '@codemirror/language'
 import { type EditorState, type Range, StateField } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view'
-import { misses } from '../../core/media.svelte'
 import { wikiLinkHost } from './wikilinks'
 
 /**
@@ -106,7 +105,10 @@ export class ImageEmbed extends WidgetType {
       gone = true
       // The only place this is knowable. Recorded so the reference *text* can go
       // inert too, rather than staying dressed as a link to this same message.
-      misses.mark(this.src)
+      // Through the host, which resolves `src` against the note holding it —
+      // marking the raw string made one missing filename shadow every other
+      // note that referenced the same name.
+      view.state.facet(wikiLinkHost).fileGone(this.src)
       // §02b's wikilink matrix already has a word for "the target is not
       // there" — dotted and dim. Reused rather than invented, and it says what
       // is wrong instead of showing a broken-image glyph.

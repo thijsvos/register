@@ -145,7 +145,16 @@ function wikiHost() {
       const path = resolveSrc(from, src)
       if (path !== null) go.file(path)
     },
-    fileMissing: (src: string) => misses.missing(src),
+    fileGone: (src: string) => {
+      if (from === null) return
+      const path = resolveSrc(from, src)
+      if (path !== null) misses.mark(path)
+    },
+    fileMissing: (src: string) => {
+      if (from === null) return false
+      const path = resolveSrc(from, src)
+      return path !== null && misses.missing(path)
+    },
   }
 }
 </script>
