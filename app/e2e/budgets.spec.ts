@@ -173,7 +173,7 @@ test('an agent edit is on screen within 100 ms', async ({ page, browserName }) =
   expect(took, `${label}; took ${took.toFixed(0)} ms`).toBeLessThanOrEqual(limit)
 })
 
-test('idle RSS stays under 50 MB on a 1k-note vault', async ({ page }) => {
+test('idle RSS stays under 50 MB on a 1k-note vault', async ({ page, browserName }) => {
   await page.goto(server.url)
   // Everything the UI asks for at boot: the tree, then every body behind it.
   await expect(page.getByRole('button', { name: /Note 0999/ })).toBeVisible()
@@ -183,9 +183,37 @@ test('idle RSS stays under 50 MB on a 1k-note vault', async ({ page }) => {
   // Idle means idle: let the corpus fill finish and the allocator settle.
   await page.waitForTimeout(3000)
 
+  // The other half, reported and not asserted. §06 says "Idle RAM (1k-note
+  // vault) ≤ 50 MB" and names no process, while this test has always weighed
+  // the Rust server — which reads a file per request and forgets it — and never
+  // the tab, which holds every body twice: verbatim in `corpus` and tokenised
+  // in the search index. Measured on this vault: server 8.5 MB, page JS heap
+  // 17.7 MB used of 26.6 MB committed. Both readings pass, so what is left is a
+  // sentence in §06 rather than an engineering problem, and that sentence is
+  // the maintainer's to write. Asserting a number nobody has agreed to would be
+  // inventing a budget.
+  //
+  // JS heap rather than renderer RSS, which is not the same claim: this counts
+  // objects, not the DOM, the compositor or the process around them.
+  if (browserName === 'chromium') {
+    const cdp = await page.context().newCDPSession(page)
+    await cdp.send('HeapProfiler.enable')
+    await cdp.send('HeapProfiler.collectGarbage')
+    const heap = (await cdp.send('Runtime.getHeapUsage')) as {
+      usedSize: number
+      totalSize: number
+    }
+    test.info().annotations.push({
+      type: 'page heap',
+      description: `${(heap.usedSize / 1048576).toFixed(1)} MB used of ${(
+        heap.totalSize / 1048576
+      ).toFixed(1)} MB committed`,
+    })
+  }
+
   const bytes = rss(server.pid)
   const mb = bytes / 1024 / 1024
-  expect(mb, `idle RSS was ${mb.toFixed(1)} MB`).toBeLessThanOrEqual(50)
+  expect(mb, `idle server RSS was ${mb.toFixed(1)} MB`).toBeLessThanOrEqual(50)
 })
 
 test('the palette opens on a 1k-note vault without a pause', async ({ page }) => {
