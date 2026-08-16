@@ -200,6 +200,26 @@ describe('motion doctrine (§02: zero animations except the status LED)', () => 
   })
 })
 
+describe('block widgets (CodeMirror measures a border box)', () => {
+  it('never puts a margin on the wrapper an image is drawn in', () => {
+    // A margin on a block widget is measured by nobody. CodeMirror sizes one by
+    // its *border* box, and a margin sits outside that — so the height map ends
+    // up short by exactly the margin and every document position below the
+    // image resolves to the wrong coordinate. Measured when it happened:
+    // `var(--s3) 0` is 24px against a 21px line, so a click below one image
+    // landed a line out, and below two images two lines out. The gap is padding
+    // on the wrapper instead, and the rule that draws the box moved inside it.
+    //
+    // `embed-caret.spec.ts` catches the regression in a browser. This says why,
+    // at the point where somebody would be adding the margin back.
+    const theme = code(sources['./editor/theme.ts'] ?? '')
+    const block = /'\.cm-embed':\s*\{([^}]*)\}/.exec(theme)?.[1]
+
+    expect(block, 'no .cm-embed rule to check — this ban would be vacuous').toBeDefined()
+    expect(block ?? '').not.toMatch(/margin/i)
+  })
+})
+
 describe('frame geometry (§02 component doctrine)', () => {
   const tokens = sources[TOKENS] ?? ''
 
