@@ -9,7 +9,7 @@ use std::fs::{self, File, Metadata};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -22,10 +22,19 @@ use crate::git;
 /// anything a reader could perceive in a status field. It is a backstop rather
 /// than the main guard: [`Vault::forget_git`] clears the answer the moment the
 /// vault changes, so the staleness a TTL alone would allow — fetch, save, fetch
-/// again inside the window, and read the pre-save state — cannot happen. What
-/// the window covers is the change the watcher cannot see, because it watches
-/// `.md` files: a `git add` or `git commit` run by hand touches `.git` and
-/// nothing else.
+/// again inside the window, and read the pre-save state — cannot happen.
+///
+/// That holds only because **every write clears it directly**, and for a while
+/// it did not: the watcher was the only caller, and the watcher answers on its
+/// own schedule — a 50 ms coalescing window and a blocking flush after it. The
+/// client does not wait for any of that. `create` refetches the tree the
+/// instant the PUT returns, a few milliseconds later, and was served the
+/// pre-save status out of this cache every single time. A write knows it wrote;
+/// it should not need to be told by a filesystem event that it did.
+///
+/// What the window still covers is the change nothing here makes: the watcher
+/// sees `.md` files, so a `git add` or `git commit` run by hand in another
+/// terminal touches `.git` and nothing this process would notice.
 const GIT_TTL: Duration = Duration::from_millis(250);
 
 /// App-owned directory. §04: "app-owned; agents keep out."
@@ -231,7 +240,15 @@ impl std::error::Error for Error {
 
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
-        if e.kind() == io::ErrorKind::NotFound {
+        // `NotADirectory` beside `NotFound`, because they are the same answer to
+        // the caller: `notes/CLAUDE.md/x.md` raises ENOTDIR rather than ENOENT,
+        // and reporting a malformed path as a 500 blamed the server for a
+        // request it understood perfectly well — and logged it to stderr as a
+        // fault on every occurrence.
+        if matches!(
+            e.kind(),
+            io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+        ) {
             Self::NotFound
         } else {
             Self::Io(e)
@@ -308,8 +325,9 @@ pub struct Vault {
     root: PathBuf,
     /// Serialises check-then-act sequences. Hard rule 5 routes every write in
     /// the product through this type, so one in-process lock is enough to make
-    /// "compare the etag, then rename" atomic. Two `register` processes over one
-    /// vault would still race; that is a documented limit, not a covered case.
+    /// "compare the etag, then rename" atomic — and one lock is enough *because*
+    /// [`Vault::claim`] refuses a second server, which is what makes "every
+    /// write in the product" mean "every write in one process".
     writes: Mutex<()>,
     /// How long [`Vault::git_status`] may reuse an answer.
     git_ttl: Duration,
@@ -326,17 +344,54 @@ pub struct Vault {
 
 /// Where a vault's claim lives: the temp directory, named for the vault.
 ///
-/// Hashed rather than derived from the path text, which can contain separators
-/// and is not bounded by any filename limit. `DefaultHasher` is not stable
-/// across releases and does not need to be — every process that matters here is
-/// the same binary running at the same moment, and the file records the real
-/// path so a human reading it is never left guessing which vault it means.
+/// Keyed on the directory's **device and inode**, not on its path text. Two
+/// servers must agree on the name or neither sees the other, and a path is a
+/// spelling rather than an identity: `canonicalize` resolves symlinks and `..`
+/// but does not case-fold, so `~/Vault` and `~/vault` name one directory on
+/// macOS and hash to two different files. A `mount --bind` alias on Linux does
+/// the same with two genuinely different canonical paths. Device and inode are
+/// what the filesystem itself calls the directory, so every spelling of it
+/// arrives at one claim.
+///
+/// Falls back to the path on platforms without inodes, which is where this
+/// started and is still better than nothing.
+///
+/// `DefaultHasher` is not stable across releases and does not need to be —
+/// every process that matters here is the same binary running at the same
+/// moment — and the file records the real path, so a human reading it is never
+/// left guessing which vault it means.
 fn claim_path(root: &Path) -> PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        match fs::metadata(root) {
+            Ok(meta) => (meta.dev(), meta.ino()).hash(&mut hasher),
+            // Unreadable is not this function's problem to report: every caller
+            // is about to fail on the directory itself with a better message.
+            Err(_) => root.hash(&mut hasher),
+        }
+    }
+    #[cfg(not(unix))]
     root.hash(&mut hasher);
+
     std::env::temp_dir().join(format!("register-vault-{:016x}.lock", hasher.finish()))
 }
+
+/// The claims this process is holding, by path.
+///
+/// [`holder_is_gone`] has to special-case a claim naming our own pid: `kill -0`
+/// on yourself always succeeds, and in a container the server is pid 1, so a
+/// claim stranded by a killed predecessor reads `pid 1`, its replacement is also
+/// pid 1, and the probe would say "still running" forever. But *names my pid*
+/// and *is mine* are different questions, and only the second one is the answer.
+/// Two `Vault`s over one directory inside one process are two servers as far as
+/// every other part of this file is concerned, and the second still has to be
+/// refused. This is how the two are told apart, and it is a set of paths rather
+/// than a flag because one process can legitimately hold several vaults.
+static HELD: LazyLock<Mutex<HashSet<PathBuf>>> = LazyLock::new(Mutex::default);
 
 /// A vault claimed by this process. Dropping it releases the claim.
 ///
@@ -344,6 +399,9 @@ fn claim_path(root: &Path) -> PathBuf {
 /// living rather than to anyone remembering to call something.
 pub struct Claim {
     path: PathBuf,
+    /// Exactly what this process wrote into the file, so `Drop` can tell its own
+    /// claim from a stranger's.
+    wrote: String,
 }
 
 impl Claim {
@@ -363,7 +421,7 @@ impl Claim {
 /// lock is deliberate: that is an inconvenience with a printed fix, where a
 /// stolen one is two servers writing one vault, which is the thing this whole
 /// mechanism exists to prevent.
-fn holder_is_gone(held: &str) -> bool {
+fn holder_is_gone(path: &Path, held: &str) -> bool {
     let Some(pid) = held
         .split_whitespace()
         .skip_while(|word| *word != "pid")
@@ -372,6 +430,35 @@ fn holder_is_gone(held: &str) -> bool {
     else {
         return false;
     };
+
+    // A claim naming *this* process, which this process is not holding, is a
+    // claim left by a dead predecessor that happened to have the same pid — and
+    // in a container that is the normal case rather than an exotic one. The
+    // server is pid 1 under an exec-form entrypoint, so a claim stranded by a
+    // `docker kill` reads `pid 1`, its replacement is also pid 1, and the probe
+    // below would say "still running" forever: the vault never starts again.
+    // Asked of `HELD` rather than assumed, because inside one process a second
+    // `Vault` over the same directory is a second server and must be refused.
+    if pid == std::process::id() {
+        return !HELD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .contains(path);
+    }
+
+    // Before troubling the kernel about a pid: if the vault the claim names is
+    // gone, the claim is. A running server holds a directory it opened and
+    // canonicalised, so a claim whose root no longer exists cannot be one
+    // anybody is serving. This is also the ordinary case rather than an exotic
+    // one — the claim is keyed on the directory's inode, and a filesystem
+    // reissues an inode once the directory using it is deleted, so every
+    // throwaway vault that ever existed can leave a file that a later, unrelated
+    // vault has to disprove. One `stat` rather than a `fork`+`exec` to do it.
+    if let Some((_, root)) = held.split_once(" · ")
+        && !Path::new(root.trim()).exists()
+    {
+        return true;
+    }
 
     // `kill -0` sends no signal; it only reports whether the process could be
     // signalled. std exposes no `kill` and a crate for one costs an ADR under
@@ -402,10 +489,21 @@ fn holder_is_gone(held: &str) -> bool {
 
 impl Drop for Claim {
     fn drop(&mut self) {
-        // Best effort by necessity: a process being killed outright never
-        // reaches this at all, which is why the claim names its pid and
-        // `holder_is_gone` exists to read it.
-        let _ = fs::remove_file(&self.path);
+        // Only if the file is still the one this process wrote. A guard that
+        // deletes by path alone releases whatever happens to be there, and the
+        // one thing that could be there instead is another server's live claim —
+        // which would leave that server running with nothing held and a third
+        // free to start. Cheap insurance against a class of bug rather than a
+        // reachable one today.
+        HELD.lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&self.path);
+        if fs::read_to_string(&self.path).is_ok_and(|found| found == self.wrote) {
+            // Best effort by necessity: a process being killed outright never
+            // reaches this at all, which is why the claim names its pid and
+            // `holder_is_gone` exists to read it.
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
@@ -466,7 +564,16 @@ impl Vault {
                 Ok(_) => {}
                 // Nothing beyond here exists yet, so nothing beyond here can be
                 // a link. `write` re-checks after it creates the parents.
-                Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+                // `NotADirectory` ends the walk for the same reason and more
+                // finally: a path below a regular file cannot exist at all.
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    break;
+                }
                 Err(e) => return Err(Error::Io(e)),
             }
         }
@@ -662,17 +769,46 @@ impl Vault {
         let path = claim_path(&self.root);
 
         match self.take(&path) {
-            Err(Error::AlreadyServed { held, .. }) if holder_is_gone(&held) => {
-                // Best effort, and the permission check in the same stroke: a
-                // claim this process cannot delete is one it has no business
-                // taking, and the retry below then refuses on its own — with
-                // whatever the file says now, which is the live holder's pid if
-                // another server cleared the same stale claim first.
-                let _ = fs::remove_file(&path);
-                self.take(&path)
+            Err(Error::AlreadyServed { held, .. }) if holder_is_gone(&path, &held) => {
+                self.take_over(&path)
             }
             other => other,
         }
+    }
+
+    /// Clear a claim whose holder is gone, then take it.
+    ///
+    /// The delete has to be a `rename` rather than a `remove_file`, and this was
+    /// the second attempt. Deleting unlinks *whatever is at the path now*, which
+    /// is not necessarily the stale file that was inspected a moment ago: two
+    /// servers starting together both read the stale claim, both find its holder
+    /// gone, and the second one's delete removes the first one's brand-new live
+    /// claim — so both `create_new` calls succeed and both serve the vault.
+    /// Worse, each then holds a `Claim` guard pointing at a file the other owns,
+    /// so the first to exit releases the second's claim and a third server can
+    /// walk in. That is precisely the race this whole mechanism exists to
+    /// prevent, reintroduced by the fix for a different one.
+    ///
+    /// `rename` closes it because it is one atomic operation over the name: the
+    /// process that moves the stale file aside is the one that unlinked it, and
+    /// every other process's rename fails with `ENOENT` because the source is
+    /// already gone. That makes clearing a stale claim a thing exactly one
+    /// process can do, without a second lock to reason about — and the losers
+    /// simply ask again, where they meet either the winner's live claim or an
+    /// empty name they may take.
+    ///
+    /// Not permitted looks the same as gone to [`holder_is_gone`], and this is
+    /// where that stops being a hole: a claim written by another user is one
+    /// this process cannot rename either, so the takeover fails and the original
+    /// refusal stands.
+    fn take_over(&self, path: &Path) -> Result<Claim> {
+        // Named for this process so two simultaneous takeovers cannot collide on
+        // the aside file itself, which would put the race back.
+        let aside = path.with_extension(format!("stale-{}", std::process::id()));
+        if fs::rename(path, &aside).is_ok() {
+            let _ = fs::remove_file(&aside);
+        }
+        self.take(path)
     }
 
     /// One attempt at the claim file. `create_new` is the mechanism — a single
@@ -685,11 +821,16 @@ impl Vault {
             .open(path)
         {
             Ok(mut file) => {
+                let wrote = format!("pid {} · {}\n", std::process::id(), self.root.display());
                 // Best effort: the claim is the file existing, not its contents.
                 // A reader who cannot parse this still knows to look at the pid.
-                let _ = writeln!(file, "pid {} · {}", std::process::id(), self.root.display());
+                let _ = file.write_all(wrote.as_bytes());
+                HELD.lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .insert(path.to_path_buf());
                 Ok(Claim {
                     path: path.to_path_buf(),
+                    wrote,
                 })
             }
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
@@ -897,13 +1038,32 @@ impl Vault {
             Ok(meta) if meta.is_file() => Some(etag_of(&meta)),
             Ok(_) => return Err(Error::InvalidPath),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
-            Err(e) => return Err(Error::Io(e)),
+            // Through `From`, so ENOTDIR lands as `NotFound` here too rather
+            // than as the 500 this arm used to raise.
+            Err(e) => return Err(e.into()),
         };
 
         if let Some(expected) = if_match {
-            let actual = current.unwrap_or_default();
-            if actual != expected {
-                return Err(Error::Conflict { current: actual });
+            // Matched against `Option`, never against `unwrap_or_default()`.
+            // Flattening "no file" to `""` made an empty entity-tag *match* a
+            // deleted note, so `If-Match: ""` created it — the one input for
+            // which this promised a conflict. And the empty tag is not
+            // hypothetical: a conflict on a path that had already vanished
+            // reported `current: ""`, `error_response` put that on the wire as
+            // `ETag: ""`, and a client doing exactly what that header is for —
+            // retrying with the etag the 409 handed it — got a create.
+            match &current {
+                None => {
+                    return Err(Error::Conflict {
+                        current: String::new(),
+                    });
+                }
+                Some(actual) if actual != expected => {
+                    return Err(Error::Conflict {
+                        current: actual.clone(),
+                    });
+                }
+                Some(_) => {}
             }
         }
 
@@ -914,6 +1074,12 @@ impl Vault {
         self.verify_parent(parent)?;
 
         write_atomically(&path, body.as_bytes())?;
+
+        // This vault just changed the working tree, so the GIT field's cached
+        // answer is now describing the past. The watcher clears it too, but a
+        // batch later — and the client refetches the tree the instant a save
+        // returns, without waiting to be told.
+        self.forget_git();
 
         Ok(etag_of(&fs::metadata(&path)?))
     }
@@ -962,7 +1128,10 @@ impl Vault {
         // `.register/` at all, and the first setting anyone changes is where
         // that shows up.
         fs::create_dir_all(path.parent().ok_or(Error::InvalidPath)?)?;
-        write_atomically(&path, body.as_bytes())
+        write_atomically(&path, body.as_bytes())?;
+        // `.register/config.json` is tracked, so a theme change is a diff.
+        self.forget_git();
+        Ok(())
     }
 
     /// The stored BYOF face and its media type, if the user has loaded one.
@@ -1060,6 +1229,7 @@ impl Vault {
                     // Reserved. The rename replaces this empty placeholder.
                     fs::rename(&path, &target)?;
                     self.prune_empty_parents(&path);
+                    self.forget_git();
                     return Ok(());
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1140,6 +1310,7 @@ impl Vault {
                     }
                     fs::rename(&path, &target)?;
                     self.prune_empty_parents(&path);
+                    self.forget_git();
                     return Ok(Trashed {
                         notes,
                         files,

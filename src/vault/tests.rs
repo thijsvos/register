@@ -185,6 +185,47 @@ fn etag_on_a_vanished_note_is_a_conflict_not_a_create() {
         Err(Error::Conflict { .. })
     ));
     assert!(!tmp.path().join("notes/404.md").exists());
+
+    // The empty tag especially, which is the one this used to let through: the
+    // comparison flattened "no file" to `""`, so `If-Match: ""` matched a
+    // deleted note and created it. Not a hypothetical value either — a conflict
+    // on an already-vanished path reported `current: ""`, the server put that on
+    // the wire as `ETag: ""`, and a client retrying with the tag the 409 gave it
+    // sent exactly this.
+    assert!(
+        matches!(
+            vault.write("notes/404.md", "body", Some("")),
+            Err(Error::Conflict { .. })
+        ),
+        "an empty If-Match created a note that was not there"
+    );
+    assert!(!tmp.path().join("notes/404.md").exists());
+}
+
+#[test]
+fn a_path_below_a_regular_file_is_not_there_rather_than_a_server_fault() {
+    // `notes/003-a.md/x.md` raises ENOTDIR, not ENOENT, and every one of these
+    // used to answer `Error::Io` — a 500 blaming the server for a request it
+    // understood perfectly well, plus a line on stderr calling it a vault fault.
+    // Reachable from the UI, not only from curl: `cleanFolder` accepts
+    // `CLAUDE.md` as a folder, so typing `CLAUDE.md/My note` into the palette
+    // went straight here.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+
+    let under_a_file = "notes/003-a.md/child.md";
+    assert!(
+        matches!(vault.read(under_a_file), Err(Error::NotFound)),
+        "reading below a file was reported as an I/O fault"
+    );
+    assert!(
+        matches!(
+            vault.write(under_a_file, "body", None),
+            Err(Error::NotFound | Error::InvalidPath)
+        ),
+        "writing below a file was reported as an I/O fault"
+    );
 }
 
 #[test]
@@ -1378,6 +1419,68 @@ fn a_claim_left_by_a_killed_process_does_not_lock_the_vault_out() {
 
     drop(taken);
     assert!(!path.exists(), "the taken-over claim outlived the guard");
+}
+
+#[test]
+fn a_claim_naming_a_vault_that_is_gone_is_stale_without_asking_about_its_pid() {
+    // The claim is keyed on the directory's inode, and a filesystem reissues an
+    // inode once the directory holding it is deleted — so every throwaway vault
+    // that ever existed can leave a file a later, unrelated vault has to
+    // disprove. Measured: a few hundred of those left by the e2e suite were
+    // enough to push `start → editable` past §06's 500 ms, because each one cost
+    // a `fork`+`exec` of `kill`. A running server holds a directory it opened,
+    // so a claim naming one that is not there cannot be one anybody is serving.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    let path = vault.claim_path_for_test();
+
+    // A live pid — this process — so the liveness probe would say "held". The
+    // vault it names is what makes it stale, and nothing else can.
+    fs::write(
+        &path,
+        format!(
+            "pid {} · {}\n",
+            std::process::id(),
+            tmp.path().join("a-vault-that-was-deleted").display()
+        ),
+    )
+    .expect("write a claim");
+
+    let taken = vault
+        .claim()
+        .expect("a claim for a vault that is gone is not held");
+    drop(taken);
+}
+
+#[test]
+fn a_claim_naming_this_very_process_is_still_stale_if_this_process_is_not_holding_it() {
+    // The container shape, and the one that would have shipped broken. Under an
+    // exec-form entrypoint the server is pid 1, so a claim stranded by a
+    // `docker kill` reads `pid 1` — and the replacement container's server is
+    // also pid 1. `kill -0` on yourself always succeeds, so the liveness probe
+    // would answer "still running" every time and the vault would never start
+    // again: exactly the lock-out the takeover exists to prevent, reached
+    // through the one pid the probe cannot speak about.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    let path = vault.claim_path_for_test();
+
+    let mine = std::process::id();
+    fs::write(&path, format!("pid {mine} · {}\n", tmp.path().display())).expect("write a claim");
+
+    let taken = vault
+        .claim()
+        .expect("a claim this process is not holding is not held");
+
+    // And the inverse, which is what stops that rule swallowing the real case:
+    // now that this process *is* holding it, a second `Vault` over the same
+    // directory — a second server, as far as everything else here is concerned —
+    // is refused, even though the claim names the pid asking.
+    assert!(
+        tmp.open().claim().is_err(),
+        "a claim this process holds was taken over by this process"
+    );
+    drop(taken);
 }
 
 #[test]
