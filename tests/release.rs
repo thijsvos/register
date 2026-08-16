@@ -84,7 +84,7 @@ fn the_image_takes_pnpm_from_the_manifest_rather_than_restating_it() {
 }
 
 #[test]
-fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
+fn the_image_is_three_stages_over_a_pinned_alpine_and_serves_the_vault_it_is_given() {
     // Comments stripped, for the reason `compose_mounts_a_vault_and_publishes_
     // one_port_on_loopback` gives 100 lines below — and this test is the proof
     // that writing it down once was not enough. It read the file raw, and
@@ -95,11 +95,11 @@ fn the_image_is_scratch_and_serves_the_vault_it_is_given() {
     // exact failure the next two lines exist to prevent.
     let dockerfile = strip_comments(&read("deploy/Dockerfile"));
 
-    // §07: "3-stage → scratch, image ≈ binary size". Still three stages, and the
-    // *published* image is still the scratch one — that half is asserted in
-    // `only_the_developed_image_carries_git`, which also says why this half is
-    // not: the GIT field is derived by shelling out to git, and `scratch` has no
-    // git, so the field could only ever draw `—` here.
+    // §07: "3-stage → scratch, image ≈ binary size". Still three stages; neither
+    // image is scratch any more, and `both_images_carry_git_and_the_release_can_emulate`
+    // is where that is asserted and argued. The short version: the GIT field is
+    // derived by shelling out to git, and `scratch` has no git, so the field
+    // could only ever draw `—` in a container.
     assert_eq!(dockerfile.matches("FROM ").count(), 3, "§07 wants 3 stages");
     assert!(
         dockerfile.contains("FROM alpine:3."),

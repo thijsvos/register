@@ -11,9 +11,14 @@ it had sat unfixed for weeks.
 
 **"I can do these now" is empty.** All ten are done and struck from the roadmap,
 along with the three that preceded them: setext headings, `register new --vault`,
-and that watch test. What is below needs you, not time — so this file is now a
-list of questions rather than a backlog, and the next thing to happen to it is
-answers.
+and that watch test. Emptying it prompted an audit — five readers over the
+codebase, every candidate handed to an independent reader told to refute it —
+which found sixteen more and closed fifteen; they are recorded under *Found by
+audit after v0.6.3* rather than here, because they were fixed the same day they
+were found. Four of them had shipped in the previous week's work.
+
+What is below needs you, not time — so this file is now a list of questions
+rather than a backlog, and the next thing to happen to it is answers.
 
 Two of the ten changed shape while being built, and both are recorded in full on
 the roadmap rather than here: the idle-RAM item ended in a measurement and two
@@ -28,6 +33,8 @@ call"* — meaning yours — and are one line each.
 
 | Item | The question |
 |---|---|
+| **The container ships GPL software and the release notes do not say so** | `THIRD-PARTY.md` now lists it accurately. Whether a written offer for the Alpine sources belongs in the release notes, or whether Alpine distributing them is the whole answer, is a compliance posture rather than a fact. |
+| **SPEC §07 still calls the container `scratch`** | Both images are Alpine now, for a reason recorded in three places. §07's wording is normative, so it is yours to change. |
 | ⌘D is claimed twice | §08 P7 and §02b Screen 2 disagree about what ⌘D does. The entry says: *"My call on which; a one-line swap either way."* |
 | The vault contract still describes the manual merge route | `scaffold.rs` tells agents to merge by hand. The entry says: *"My call; it is one line and a test update."* It is a §04 edit. |
 | Frontmatter is shown in the editor | Folding it needs a §02 ruling on whether folding counts as hiding the source. |

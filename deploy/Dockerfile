@@ -1,7 +1,7 @@
 # SPEC §07 — three stages to a runtime that is the binary plus git.
 #
-# §07 lists `scratch` here and `deploy/Dockerfile.release` still is one. This
-# stage is not, and the difference is deliberate rather than drift: the status
+# §07 lists `scratch` here and neither image is one any more. The difference is
+# deliberate rather than drift: the status
 # bar's GIT field (§02b Screen 1, carried by GET /api/tree per §04) is derived by
 # shelling out to `git`, and a `scratch` image has no git to shell out to. So the
 # field was pinned to `—` for every containerised vault no matter what state the
@@ -10,11 +10,12 @@
 # moment. A field that can only ever say one thing is not chrome showing
 # derivable truth; it is a dead pixel with a label.
 #
-# The published image keeps `scratch` on purpose. It carries no compiler and
-# `RUN`s nothing, which is what lets buildx assemble both architectures without
-# emulating either — adding `apk add` there would put a foreign-arch package
-# install under QEMU on every release. `tests/release.rs` asserts both halves of
-# this: the runtime stanza is identical, and the bases are meant to differ.
+# `deploy/Dockerfile.release` made the same move for the same reason, and paid
+# for it: its one `apk add` runs under QEMU for the non-native architecture, so
+# release.yml installs binfmt for exactly that line. The alternative was keeping
+# the published image `scratch` and shipping a GIT field that could only ever
+# say `—`. `tests/release.rs` compares the two runtime stanzas line for line, so
+# the copy cannot drift from the one people actually develop against.
 #
 # Two deviations from §07's listing, both required by §06's own version
 # doctrine ("each version lives in exactly one file, everything else references

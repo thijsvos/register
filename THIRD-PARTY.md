@@ -1,15 +1,62 @@
 # Third-party software
 
-REGISTER ships two artefacts and both are self-contained. The release binary
+REGISTER ships two artefacts. The release binary is self-contained: it
 statically links its Rust dependencies and embeds the built UI — JavaScript,
-CSS and the three fonts — with `rust-embed`. The container image is a `scratch`
-image holding that binary and nothing else: no base distribution, no shared
-libraries, no package manager, so it redistributes nothing the binary does not.
+CSS and the three fonts — with `rust-embed`.
+
+**The container image is not, and this file said it was for longer than it
+should have.** It was `scratch` — the binary and nothing else — until the GIT
+field turned out to be underivable there: that state comes from shelling out to
+`git`, and a `scratch` image has no git, so the field read `—` in every
+container however the vault was stored. The image is now `alpine:3.24` plus
+`apk add git`, which redistributes an operating system's worth of software,
+including copyleft components the `scratch` image did not carry. What that means
+is set out under [Container image](#container-image) below.
+
 `node:24-alpine` and `rust:1.97-alpine` appear in `deploy/Dockerfile` as build
 stages only; neither reaches the published image.
 
 Everything redistributed is listed below. REGISTER itself is MIT (`LICENSE`);
 nothing here alters that.
+
+## Container image
+
+`ghcr.io/thijsvos/register` is `alpine:3.24` with `git` installed from Alpine's
+`main` repository, and it carries git's own dependency closure with it. Twenty-
+eight packages, reproducible with:
+
+```sh
+docker run --rm alpine:3.24 sh -c \
+  'apk add --no-cache git >/dev/null && apk info --license $(apk info)'
+```
+
+| Licence | Packages |
+|---|---|
+| GPL-2.0-only | `git`, `git-init-template`, `busybox`, `busybox-binsh`, `ssl_client`, `apk-tools`, `libapk`, `alpine-baselayout`, `alpine-baselayout-data`, `scanelf` |
+| GPL-2.0-or-later | `libidn2`, `libunistring` |
+| MPL-2.0 | `ca-certificates-bundle` |
+| Apache-2.0 | `libcrypto3`, `libssl3` |
+| MIT | `musl`, `musl-utils`, `alpine-keys`, `alpine-release`, `brotli-libs`, `c-ares`, `libexpat`, `libpsl`, `nghttp2-libs` |
+| BSD-3-Clause | `pcre2`, `zstd-libs` |
+| Zlib | `zlib` |
+| curl | `libcurl` |
+
+**This does not affect REGISTER's own licence.** The `register` binary is a
+separate program that talks to `git` by running it as a subprocess — the arm's
+length the GPL's own FAQ describes — and an image is aggregation on a storage
+medium, not a combined work. REGISTER stays MIT and links none of the above.
+
+What it does mean is that pulling this image obtains GPL-2.0 software, and the
+corresponding source for every package above is published by Alpine at
+<https://gitlab.alpinelinux.org/alpine/aports> and mirrored alongside each
+release at `https://dl-cdn.alpinelinux.org/alpine/v3.24/`. Alpine distributes
+both, which is the ordinary way a derived image discharges this; whether to add
+an explicit written offer to the release notes is a call for the maintainer and
+is noted in `docs/ROADMAP.md`.
+
+Neither `deploy/Dockerfile` nor `deploy/Dockerfile.release` installs anything
+else, and `tests/release.rs` compares their runtime stanzas line for line, so
+this list cannot grow in one image without growing in the other.
 
 ## Rust crates
 

@@ -113,11 +113,19 @@ because it drives the shipped artefact rather than a dev server — every §06
 budget is a claim about what ships. It also needs a browser, once per machine:
 
 ```sh
-cd app && pnpm exec playwright install --with-deps chromium
+cd app && pnpm exec playwright install --with-deps chromium firefox webkit
 ```
 
-Chromium only, deliberately — §06's budgets are numbers measured on one engine,
-and three engines would mean three sets of numbers and no answer.
+Three engines, and a bare `pnpm e2e` runs all three — the plate scale is `zoom`
+over `dvh`, and proving that in the one engine least likely to disagree proved
+very little. **The §06 budget specs are still Chromium-only**, scoped with
+`test.skip(({ browserName }) => browserName !== 'chromium')`: a budget is a
+number measured on one engine, and three numbers would be no answer. CI runs
+Chromium and Firefox; WebKit is a local macOS run, because three of its failures
+on Linux are the Linux port rather than the app (see `playwright.config.ts`).
+
+If you only want the fast loop, `pnpm e2e --project=chromium` is what CI's
+budgets are measured against.
 
 **Check the exit codes, not the output.** A vitest run whose import throws prints
 a summary that looks like success; this repository has shipped a commit claiming

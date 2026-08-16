@@ -47,9 +47,10 @@ only rule with teeth is the ref: **one above the highest ever used, counting
 last month silently starts pointing at different prose.
 
 **Or ask the binary.** `register new "CRDT reading"` allocates the ref, mints a
-ULID, writes a conforming note and prints its path. It has to be run inside the
-vault, and it refuses anywhere else rather than scattering notes into whatever
-folder was current.
+ULID, writes a conforming note and prints its path. Run it inside the vault, or
+name one with `--vault ~/vault` from anywhere. Either way it checks the directory
+is a vault first and refuses if it is not, rather than scattering notes into
+whatever folder was current.
 
 ```sh
 $ cd ~/vault && register new "CRDT reading"
