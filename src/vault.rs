@@ -10,9 +10,11 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+use crate::git;
 
 /// App-owned directory. §04: "app-owned; agents keep out."
 pub const APP_DIR: &str = ".register";
@@ -283,6 +285,15 @@ pub struct Vault {
     /// "compare the etag, then rename" atomic. Two `register` processes over one
     /// vault would still race; that is a documented limit, not a covered case.
     writes: Mutex<()>,
+    /// The last `git status`, and when it was taken (§08 P12's GIT field).
+    ///
+    /// `GET /api/tree` runs three git subprocesses and the client fetches the
+    /// tree after every watcher burst, so a burst of writes pays for the same
+    /// answer several times over. Held here rather than in `git.rs` because
+    /// this type is what a request already has, and because a process-global
+    /// cache would be shared by every test in a parallel binary — an answer one
+    /// test cached is not one another test should be able to read.
+    git: Mutex<Option<(Instant, Option<git::Status>)>>,
 }
 
 impl Vault {
@@ -295,6 +306,7 @@ impl Vault {
         Ok(Self {
             root: root.canonicalize()?,
             writes: Mutex::new(()),
+            git: Mutex::new(None),
         })
     }
 
@@ -448,9 +460,47 @@ impl Vault {
             // Cheap when the vault is not a repository — one `rev-parse` — and
             // the tree is already a blocking walk of the whole vault, so a
             // `git status` on top of it is not what makes this call expensive.
-            git: crate::git::status(&self.root),
+            git: self.git_status(),
             notes: self.list()?,
         })
+    }
+
+    /// How long a cached `git status` may be reused.
+    ///
+    /// A quarter of a second collapses a burst of tree fetches and is far below
+    /// anything a reader could perceive in a status field. It is a backstop
+    /// rather than the main guard: [`Vault::forget_git`] clears the answer the
+    /// moment the vault changes, so the staleness a TTL alone would allow —
+    /// fetch, save, fetch again inside the window, and read the pre-save state —
+    /// cannot happen. What the window covers is the change the watcher cannot
+    /// see, because it watches `.md` files: a `git add` or `git commit` run by
+    /// hand touches `.git` and nothing else.
+    const GIT_TTL: Duration = Duration::from_millis(250);
+
+    /// The vault's git state, from cache when it is still current.
+    pub fn git_status(&self) -> Option<git::Status> {
+        if let Ok(slot) = self.git.lock()
+            && let Some((at, answer)) = slot.as_ref()
+            && at.elapsed() < Self::GIT_TTL
+        {
+            return answer.clone();
+        }
+
+        // Deliberately outside the lock: this spawns subprocesses, and holding
+        // the mutex across them would serialise every concurrent tree request
+        // behind the slowest one — which is the cost this exists to remove.
+        let answer = git::status(&self.root);
+        if let Ok(mut slot) = self.git.lock() {
+            *slot = Some((Instant::now(), answer.clone()));
+        }
+        answer
+    }
+
+    /// Drop the cached git state, because the vault has changed.
+    pub fn forget_git(&self) {
+        if let Ok(mut slot) = self.git.lock() {
+            *slot = None;
+        }
     }
 
     /// The ref a new note must take: one above the highest ever allocated.

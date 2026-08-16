@@ -130,6 +130,65 @@ fn an_idle_vault_with_nothing_to_say_writes_no_history() {
     assert_eq!(log(&tmp), before);
 }
 
+/// A `Vault` over the same directory, for the cache that lives on it.
+fn opened(tmp: &TempVault) -> crate::vault::Vault {
+    crate::vault::Vault::open(tmp.path()).expect("open vault")
+}
+
+#[test]
+fn the_status_a_tree_fetch_sees_is_cached_between_bursts() {
+    // `GET /api/tree` runs three git subprocesses and the client fetches the
+    // tree after every watcher burst, so a burst pays for one answer repeatedly.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    let first = vault.git_status().expect("status");
+    assert!(first.clean);
+
+    // Change the worktree without telling the vault. Only the cache can explain
+    // a second answer that still says clean — which is the whole point of it.
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
+    assert_eq!(vault.git_status().as_ref(), Some(&first));
+
+    // Deterministic because the cache belongs to this `Vault` and not to the
+    // process: a parallel test with its own vault cannot evict this one.
+    assert!(!status(tmp.path()).expect("uncached").clean);
+}
+
+#[test]
+fn the_cache_is_dropped_the_moment_the_vault_changes() {
+    // What the watcher calls, and the reason a TTL alone would not do: the
+    // client refetches the tree *because* of the event, and that fetch must not
+    // be served the answer from before the change.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    assert!(vault.git_status().expect("status").clean);
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
+
+    vault.forget_git();
+    assert!(
+        !vault.git_status().expect("status").clean,
+        "a change the watcher saw was still answered from cache"
+    );
+}
+
+#[test]
+fn two_vaults_do_not_answer_for_each_other() {
+    let clean = TempVault::new();
+    repo(&clean);
+    let dirty = TempVault::new();
+    repo(&dirty);
+    dirty.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
+
+    // Populated in this order so a shared cache would hand the second vault the
+    // first one's answer.
+    assert!(opened(&clean).git_status().expect("clean").clean);
+    assert!(!opened(&dirty).git_status().expect("dirty").clean);
+}
+
 #[test]
 fn a_vault_that_cannot_commit_says_why_rather_than_nothing() {
     // The container case, and it is not an edge case there — `deploy/Dockerfile`

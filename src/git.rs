@@ -278,6 +278,9 @@ pub fn is_repo(root: &Path) -> bool {
 }
 
 /// The vault's git state, or `None` when it is not a repository of its own.
+///
+/// Uncached by design: the answer is three subprocesses and `Vault` is what
+/// knows when the vault last changed, so the caching lives there.
 pub fn status(root: &Path) -> Option<Status> {
     if !is_repo(root) {
         return None;
@@ -349,7 +352,7 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
     // A refusal here leaves the tree staged. That is the existing behaviour of
     // `add -A` and not made worse by reporting it — and the roadmap already
     // carries the entry about checkpoints sweeping the staging area.
-    match try_git(
+    let committed = try_git(
         root,
         &[
             "commit",
@@ -357,7 +360,8 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
             "-m",
             &format!("checkpoint: {stamp}"),
         ],
-    ) {
+    );
+    match committed {
         Ok(_) => Checkpoint::Committed,
         Err(why) => Checkpoint::Refused(why),
     }

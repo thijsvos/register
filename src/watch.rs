@@ -109,6 +109,15 @@ async fn coalesce(
         .unwrap_or_default();
         known = next_known;
 
+        if !batch.is_empty() {
+            // The vault moved, so whatever `git status` last answered is stale —
+            // and the client is about to refetch the tree *because* of these
+            // events, which is exactly the request that would otherwise be
+            // served the pre-change answer out of the cache. The watcher is the
+            // only thing that knows a change happened before anyone asks.
+            vault.forget_git();
+        }
+
         for event in batch {
             // An error here only means nobody is listening yet.
             let _ = events.send(event);
