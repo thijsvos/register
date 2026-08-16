@@ -297,14 +297,18 @@ test('and back to where the note was being read, not the top of it', async ({ pa
   await page.setViewportSize({ width: 1400, height: 420 })
   await openTheNote(page)
 
+  // Scrolled with the wheel rather than by assigning `scrollTop`, and that is
+  // load-bearing. A programmatic assignment queues one asynchronous `scroll`
+  // event and this test then tears the editor down immediately, so the app can
+  // be asked where the reader was before anything has told it — measured as a
+  // 2-in-5 flake reporting `scroll: 0` for a note scrolled to its end. No reader
+  // can create that: a wheel, a trackpad or a key fires events throughout the
+  // gesture. So the test now does what a reader does.
   const scroller = page.locator('.cm-scroller')
-  await scroller.evaluate((el) => {
-    el.scrollTop = el.scrollHeight
-  })
+  await scroller.hover()
+  await page.mouse.wheel(0, 4000)
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
   const left = await scroller.evaluate((el) => el.scrollTop)
-  expect(left, 'the note has to be scrollable for this to mean anything').toBeGreaterThan(
-    0,
-  )
 
   // `dispatchEvent`, not `click`. Playwright scrolls a target into view before
   // clicking it, and the embed is near the top of the note — so a click here
