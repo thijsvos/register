@@ -46,6 +46,11 @@ export default defineConfig({
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: FRAME } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'], viewport: FRAME } },
+    // Run on a Mac, where this is the engine Safari ships; CI does not gate on
+    // it. Playwright's Linux build is the WebKitGTK port rather than Safari, and
+    // it failed three specs on the runner that all pass here — a document switch
+    // at 255 ms against a 250 ms allowance, a conflict copy that did not appear
+    // inside five seconds, and a wheel gesture. Those are facts about the port.
     { name: 'webkit', use: { ...devices['Desktop Safari'], viewport: FRAME } },
   ],
 })
