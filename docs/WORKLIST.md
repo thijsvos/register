@@ -18,8 +18,6 @@ No ruling needed. Ordered by what a failure would cost.
 
 | # | Item | Why it is free of a decision |
 |---|---|---|
-| 1 | **A failed checkpoint says nothing at all**<br>`checkpoint()` returns a bool nobody surfaces, so a vault with `"checkpoints": true` and no git identity — every container — silently never commits. The entry says this half is *"worth having regardless"* of the identity question. | Silent failure of a feature you turned on. |
-| 2 | **No guard on the chunk graph**<br>The bundler once hoisted `core/` into the editor chunk and had the shell import it statically — all of CodeMirror at boot, invisible to a budget that only weighs `shell-*.js`. A lint bans the static import; nothing inspects the built output. | The regression already happened once and the budget could not see it. |
 | 10 | **Two `register` processes can race**<br>The in-process write lock is enough for one server and nothing else. Two instances over one vault race on both writes and `create`'s free-name check. | An OS-level lock is an implementation choice, not a doctrine change. |
 
 ## Your call
