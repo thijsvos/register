@@ -102,6 +102,25 @@ describe('design tokens (rule 2)', () => {
     expect(indexHtml).toContain('<html')
   })
 
+  it('says what the one signal colour is for, not just that there is one', () => {
+    // §02 permits exactly one accent, and the token's comment read "status LED
+    // only" from P1 while nine consumers accumulated behind it — so every new
+    // use was argued against the *count* rather than against a rule, and there
+    // was nothing for the tenth to meet. The rule is now written where somebody
+    // reaching for the colour will read it.
+    const tokens = sources[TOKENS] ?? ''
+    const doctrine = tokens.slice(0, tokens.indexOf('--signal:'))
+    expect(doctrine).toMatch(/live edge/i)
+    expect(doctrine).toMatch(/where you are/i)
+    expect(doctrine).toMatch(/what changed/i)
+    // And the declaration itself no longer claims otherwise. Checked on its own
+    // line rather than across the file, because the comment above it quotes the
+    // old wording to say what was wrong with it.
+    const declaration =
+      tokens.split('\n').find((line) => line.includes('--signal:')) ?? ''
+    expect(declaration).not.toMatch(/status LED only/i)
+  })
+
   it('declares every literal color in tokens.css and nowhere else', () => {
     const offenders = entries
       .filter(([path]) => path !== TOKENS)
@@ -227,12 +246,35 @@ describe('frame geometry (§02 component doctrine)', () => {
   //  status bar (30px), separated by 1px hairlines."
   it.each([
     ['--frame-header', '44px'],
-    ['--frame-side', '250px'],
-    ['--frame-insp', '268px'],
     ['--frame-foot', '30px'],
     ['--hairline', '1px'],
   ])('pins %s to %s', (token, value) => {
     expect(tokens).toMatch(new RegExp(`${token}:\\s*${value};`))
+  })
+
+  // The rails keep §02's numbers as a *floor* rather than as a constant. On a
+  // 3440px display the reading column is right and 1343px of the pane sat empty
+  // while these two stayed 250 and 268, truncating titles — a self-inflicted
+  // constraint beside a third of a screen going spare. What is pinned is that
+  // §02's value is still the minimum, so 1x on a laptop is unchanged and only
+  // the ceiling moves.
+  it.each([
+    ['--frame-side', '250px'],
+    ['--frame-insp', '268px'],
+  ])('keeps §02’s %s (%s) as the base', (token, value) => {
+    expect(tokens).toMatch(new RegExp(`${token}:\\s*${value};`))
+  })
+
+  it('widens the rails in steps at stated widths, never by a fluid function', () => {
+    // `clamp(250px, 14cqw, 460px)` was the first attempt and it misaligned the
+    // frame: the header takes its rail width from `min-width` and the panes take
+    // theirs from a grid template, and WebKit resolved `cqw` differently for the
+    // two — the header rule at 500 against a pane edge at 920, measured. Steps
+    // cannot disagree with each other.
+    expect(tokens).not.toMatch(/--frame-(side|insp):\s*clamp/)
+    expect(tokens).not.toMatch(/--frame-(side|insp):[^;]*cqw/)
+    const steps = tokens.match(/@media \(min-width: \d+px\) \{\s*:root \{ --frame-side/g) ?? []
+    expect(steps.length, 'the rails never widen').toBeGreaterThan(0)
   })
 
   it('lays the frame out from those tokens, not from literals', () => {

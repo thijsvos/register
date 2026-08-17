@@ -361,12 +361,15 @@ test('the frame’s vertical rules are continuous through the header', async ({ 
     }
   })
   expect(narrow.inspectorShown).toBe(false)
-  // Read from the token rather than restated as a literal. At 1000px the plate
-  // is 1x, so the two are in the same units. Written as `268` this assertion
-  // would keep passing while meaning nothing the day --frame-insp moved.
+  // Measured with the inspector shown, rather than read off `--frame-insp`.
+  // That token is a `clamp` now — §02's number as a floor, so the rails can grow
+  // on a wide display — and a custom property hands back its own text, so
+  // parsing it as a length yielded NaN and this assertion compared against
+  // nothing. Measuring the rail is what the sentence above was always about.
+  await page.setViewportSize({ width: 1400, height: 900 })
   const reservedWhenShown = await page.evaluate(() =>
-    Number.parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue('--frame-insp'),
+    Math.round(
+      document.querySelector('header .stats')?.getBoundingClientRect().width ?? 0,
     ),
   )
   expect(reservedWhenShown).toBeGreaterThan(0)

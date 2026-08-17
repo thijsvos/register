@@ -1287,3 +1287,31 @@ describe('a deletion the tree has not caught up with', () => {
     expect(vault.tree.map((entry) => entry.path)).toContain('notes/007-loose.md')
   })
 })
+
+describe('an equal etag is not proof that nothing happened', () => {
+  // §04 states the rule the cheap tag depends on: `mtime + len` collides for two
+  // bodies of identical length written inside one filesystem tick —
+  // sub-microsecond on APFS, coarser on the ext4 under a Linux container. A
+  // client that read equality as "unchanged" would drop that write silently,
+  // which is the one way the collision loses writing rather than being untidy.
+  it('reloads the open note on a changed frame carrying the tag it already holds', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    const held = vault.etag
+    expect(held).not.toBeNull()
+
+    // Same length, different bytes — the shape a colliding tag has. Written
+    // straight into the fake's map so the tag does *not* move, which is the
+    // whole condition being reproduced.
+    const collided = `${NOTE.slice(0, -2)}Z\n`
+    expect(collided).toHaveLength(NOTE.length)
+    server.files.set('notes/003-a.md', { body: collided, etag: held as string })
+
+    // The event reports the tag we already hold, exactly as a collision would.
+    vault.apply({ type: 'changed', path: 'notes/003-a.md', etag: held })
+    await settle()
+
+    expect(vault.buffer, 'the collided write was dropped').toBe(collided)
+  })
+})

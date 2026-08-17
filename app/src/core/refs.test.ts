@@ -15,6 +15,11 @@ describe('slug', () => {
     ['Café notes', 'cafe-notes'],
     ['C++ vs Rust', 'c-vs-rust'],
     ['???', 'untitled'],
+    // Any script, not only Latin — the same rows `scaffold/tests.rs` holds, so
+    // one title cannot name two different files.
+    ['Заметки', 'заметки'],
+    ['設計ノート', '設計ノート'],
+    ['Ελληνικά', 'ελληνικά'],
     ['', 'untitled'],
   ])('%s -> %s', (title, expected) => {
     expect(slug(title)).toBe(expected)

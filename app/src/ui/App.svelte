@@ -223,7 +223,7 @@ main {
   min-height: 0;
 }
 .empty {
-  max-width: var(--measure);
+  max-width: var(--measure-box);
   margin: 0 auto;
   padding: var(--s6) var(--s5);
   font-size: var(--text-body);

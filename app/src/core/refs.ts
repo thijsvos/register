@@ -39,9 +39,20 @@ export function slug(title: string): string {
   const kebab = title
     .toLowerCase()
     .normalize('NFKD')
-    // Strip combining marks so "Café" becomes "cafe", not "caf".
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
+    // Strip combining marks so "Café" becomes "cafe", not "caf" — but only
+    // where the base letter is Latin. Applied to every script it took the tonos
+    // off `Ελληνικά` and gave `ελληνικα`, which is not the word, and which the
+    // CLI's Latin-1 `fold` does not do — so the two sides disagreed on Greek the
+    // moment they stopped disagreeing on Cyrillic. Recomposed afterwards, or the
+    // mark left behind on a non-Latin base becomes a dash.
+    .replace(/(\p{Script=Latin})[\u0300-\u036f]+/gu, '$1')
+    .normalize('NFC')
+    // Letters and numbers **in any script**, not `[a-z0-9]`. The old class
+    // folded every non-Latin script into dashes, so `Заметки` slugged to
+    // `untitled` in the CLI while this side produced a real name — the same
+    // title typed in two places naming two different files. Punctuation still
+    // goes, so every ASCII title slugs exactly as it always did.
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
     .replace(/^-+|-+$/g, '')
   return kebab === '' ? 'untitled' : kebab
 }

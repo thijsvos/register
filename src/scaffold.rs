@@ -415,7 +415,14 @@ pub fn slug(title: &str) -> String {
     for raw in title.chars() {
         for ch in raw.to_lowercase() {
             let ch = fold(ch);
-            if ch.is_ascii_alphanumeric() {
+            // Alphanumeric **in any script**, not ASCII-alphanumeric. The old
+            // test folded every non-Latin script to dashes, so
+            // `register new "Заметки"` wrote `notes/015-untitled.md` while the
+            // browser produced a real name from the same title — two filenames
+            // for one title, depending on where it was typed. Punctuation is
+            // still folded, so every ASCII title slugs exactly as before, and
+            // the Latin-1 `fold` above still runs so `Café` stays `cafe`.
+            if ch.is_alphanumeric() {
                 if pending_dash && !out.is_empty() {
                     out.push('-');
                 }

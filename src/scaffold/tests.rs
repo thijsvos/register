@@ -410,6 +410,12 @@ fn slugs_match_the_client() {
         ("C++ vs Rust", "c-vs-rust"),
         ("???", "untitled"),
         ("", "untitled"),
+        // Any script, not only Latin. These used to slug to `untitled` here
+        // while the browser produced a real name from the same title — one
+        // title, two filenames, depending where it was typed.
+        ("Заметки", "заметки"),
+        ("設計ノート", "設計ノート"),
+        ("Ελληνικά", "ελληνικά"),
     ] {
         assert_eq!(slug(title), expected, "slug({title:?})");
     }

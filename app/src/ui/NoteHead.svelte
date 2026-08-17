@@ -101,7 +101,7 @@ let unreadable = $derived(
      and propped it out to the measure by accident; taking the strip away left
      the title centred on itself, sitting 116px right of the prose. Measured. */
   width: 100%;
-  max-width: var(--measure);
+  max-width: var(--measure-box);
   margin: 0 auto;
   padding: var(--s5) var(--s5) 0;
 }

@@ -39,7 +39,9 @@ const theme = EditorView.theme({
   // full step, which is trailing room at the end of a note and answers to
   // nothing above it.
   '.cm-content': {
-    maxWidth: 'var(--measure)',
+    // The box, not the text: this pads by --s5 either side, and `border-box`
+    // would otherwise take that out of the 68 characters §02 specifies.
+    maxWidth: 'var(--measure-box)',
     margin: '0 auto',
     padding: 'var(--s4) var(--s5) var(--s6)',
     caretColor: 'var(--signal)',

@@ -644,7 +644,20 @@ class VaultStore {
       return
     }
 
-    if (ours) {
+    // Deliberately *not* returning here for our own echo when the buffer is
+    // clean. §04 states the rule the cheap etag depends on: a client receiving a
+    // `changed` frame must reload the note even when the tag it holds is equal,
+    // because `mtime + len` collides for two bodies of identical length written
+    // inside one filesystem tick — unreachable on APFS, reachable on the ext4
+    // under a Linux container. Treating an equal tag as "nothing happened" is
+    // the one way that collision loses somebody's writing rather than merely
+    // being untidy, and it is what this branch used to do.
+    //
+    // The cost is one GET of the open note after our own save. Small, bounded by
+    // the debounce, and paid on the file the reader is actually looking at.
+    // `ours` still gates the *timing* readout above, which is a different
+    // question and is safe to answer from the tag.
+    if (ours && this.dirty) {
       this.#scheduleRefresh()
       return
     }

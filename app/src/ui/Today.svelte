@@ -89,7 +89,7 @@ function toggle(task: Task) {
 
 <style>
 .today {
-  max-width: var(--measure);
+  max-width: var(--measure-box);
   margin: 0 auto;
   padding: var(--s5) var(--s5) var(--s6);
 }

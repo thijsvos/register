@@ -5,7 +5,17 @@
   --dim: #454545;                    /* content-safe ≈9.7:1 on white (AAA) */
   --faint: #8a8a8a;                  /* DECORATIVE ONLY — crosses, meters, rules; never content */
   --hover: rgba(0,0,0,.055);
-  --signal: #ff2a00;                 /* status LED only */
+  /* The live edge of the system: where you are, and what changed under you.
+     §02 permits one signal colour and this is it. The rule is written down
+     because the comment said "status LED only" from P1 and had been false since
+     P4, so each new use was argued from the count — nine of them — rather than
+     from a rule, and there was no test for the next one to meet.
+       where you are    caret · active line · palette caret · selected row
+                        · search match
+       what changed     watcher LED · External edit · UNRESOLVED
+     Everything else is monochrome. A tenth consumer is fine if it is one of
+     those two things and wrong if it is decoration, however tasteful. */
+  --signal: #ff2a00;
   --sel-bg: #000000; --sel-fg: #ffffff;
   --hi: var(--fg);                   /* brightest ink; on dark it is lighter than body */
 
@@ -24,6 +34,18 @@
 
   /* space (4px grid) */
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+  /* The measure as a *box*, for the prose surfaces that pad by --s5.
+     --measure is 68 characters of text, and `box-sizing: border-box` put the
+     padding inside it — so every prose surface in the app rendered 61.8ch,
+     measured, and the line length §02 specifies had never been the line length
+     shipped. `ch` is a typographic unit; writing 68 of them and meaning "68
+     minus whatever padding is applied" is not a reading of what that unit is
+     for. Declared after --s5 because it is arithmetic over it, and as a token
+     rather than a calc at each site so the six surfaces cannot drift.
+     The conflict screen is deliberately not a consumer: it pads `var(--s5) 0`,
+     so its text is already the full measure. */
+  --measure-box: calc(var(--measure) + var(--s5) * 2);
 }
 /* §02b Screen 6: "BODY FACE [ Default·Commit ][ Teletype·Server ]". The licensed
    face stays first either way — a theme chooses which OFL face backs it up, not
@@ -81,6 +103,13 @@ html.dark {
 
   /* --- normative: §02 component doctrine, stated in prose --- */
   --frame-header: 44px;
+  /* §02's numbers, and the floor of the steps at the bottom of this file.
+     Measured on a 3440px display at 2x: the reading column is 1061 plate px and
+     correct — 68 characters is 68 characters — while 1343px of the editor pane
+     sat empty and these rails stayed 250 and 268, truncating note titles and
+     making the crumb give way. That is a self-inflicted constraint beside a
+     third of a screen going unused, so the rails widen on a display with the
+     room. Prose does not: it is capped by --measure-box wherever it is drawn. */
   --frame-side: 250px;
   --frame-insp: 268px;
   --frame-foot: 30px;
@@ -145,4 +174,32 @@ html.dark {
   /* The scrim carries more weight on a dark ground: at .28 the frame behind it
      stays legible and the palette stops reading as a layer. */
   --scrim: rgba(0,0,0,.64);
+}
+
+/* ---------------------------------------------------------------------------
+   Elastic rails (§02 Rev V) — discrete steps, not a fluid function.
+
+   `clamp(250px, 14cqw, 460px)` was the first attempt and it produced a real
+   misalignment: the header's rails take their width from `min-width` while the
+   panes take theirs from a grid template, and the two resolved `cqw` to
+   different lengths on WebKit — measured at 3440px, the header rule landed on
+   500 and the pane edge on 920, so §02's "vertical rules continuous through the
+   header" simply stopped being true. A container-query unit read from two
+   different boxes is one value too many for a frame whose whole aesthetic is
+   that its rules line up.
+
+   Steps cannot disagree. They also match how the plate scale already works —
+   whole multiples at stated widths rather than a fluid curve — and the
+   thresholds are the plate scale's own, so a display that comes up at 2x gets
+   the wider rails in the same breath.
+
+   Written as media queries rather than `@container`, because the tokens are
+   declared on `:root` and a container query cannot match the element the
+   container is on.
+   --------------------------------------------------------------------------- */
+@media (min-width: 2200px) {
+  :root { --frame-side: 320px; --frame-insp: 340px; }
+}
+@media (min-width: 3000px) {
+  :root { --frame-side: 400px; --frame-insp: 420px; }
 }
