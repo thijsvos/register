@@ -6,6 +6,7 @@ import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
 import { render } from '../lib/render.svelte'
+import Attachments from './Attachments.svelte'
 import Conflict from './Conflict.svelte'
 import Editor from './Editor.svelte'
 import Crosses from './Frame/Crosses.svelte'
@@ -19,6 +20,7 @@ import { go } from './nav'
 import Palette from './Palette/Palette.svelte'
 import Settings from './Settings.svelte'
 import Today from './Today.svelte'
+import Trash from './Trash.svelte'
 import { chrome } from './view.svelte'
 
 /**
@@ -38,6 +40,8 @@ let unresolved = $derived(vault.unresolved)
 let crumb = $derived.by(() => {
   if (chrome.settings) return ['Config', 'Settings']
   if (chrome.today) return ['Aggregate', 'Today']
+  if (chrome.trash) return ['Recoverable', 'Trash']
+  if (chrome.attachments) return ['Derived', 'Attachments']
   if (chrome.conflict !== null) return ['Conflict', 'Unresolved']
   // The file's own trail, so the crumb answers where it is exactly as it does
   // for a note — `MEDIA / NOTES / DIAGRAM.PNG`.
@@ -126,6 +130,10 @@ $effect(() => {
         <Settings />
       {:else if chrome.today}
         <Today />
+      {:else if chrome.trash}
+        <Trash />
+      {:else if chrome.attachments}
+        <Attachments />
       {:else if chrome.conflict !== null}
         <Conflict copy={chrome.conflict} />
       {:else if chrome.media !== null}

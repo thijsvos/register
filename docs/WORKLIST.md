@@ -28,10 +28,15 @@ failures reproduce only on Linux.
 
 ## Your call
 
-**Empty.** All twenty-one were answered in one sitting on 2026-08-17 and the
-rulings are recorded in `ROADMAP.md` under *Ruled on after v0.6.3*, each with
-what was decided and why. Twenty are built; the twenty-first — per-screen
-screenshot baselines — was ruled against, and the reasoning is there too.
+**Empty, and everything ruled has shipped.** All twenty-one were answered in one
+sitting on 2026-08-17 and the rulings are recorded in `ROADMAP.md` under *Ruled
+on after v0.6.3*, each with what was decided and why. **Twenty are built**; the
+twenty-first — per-screen screenshot baselines — was ruled against, and the
+reasoning is there too.
+
+Three of them needed a surface rather than a rule and became §02b Screens 9 and
+10 plus §04 Rev Y's move: the trash, the attachments, and reorganising a vault
+without dropping to Finder.
 
 
 ## Not mine, or not yet understood

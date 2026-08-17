@@ -25,9 +25,13 @@ const inBrowser = typeof document !== 'undefined'
  * it with the truth.
  */
 export interface Pending {
-  kind: 'note' | 'folder'
+  kind: 'note' | 'folder' | 'move'
   path: string
   notes: number
+  /** Where a move is going. Only set for `kind: 'move'`. */
+  to?: string
+  /** How many notes a move would repoint, so the confirm can say it. */
+  repoint?: number
   /**
    * The vault revision this question was drawn against (§04 Rev X).
    *
@@ -50,6 +54,10 @@ class ChromeState {
   dark = $state(inBrowser && document.documentElement.classList.contains('dark'))
   inspector = $state(true)
   index = $state(true)
+  /** §02b Screen 9: the trash, raised over the note like TODAY. */
+  trash = $state(false)
+  /** §02b Screen 10: every file the INDEX never draws. */
+  attachments = $state(false)
   paletteOpen = $state(false)
 
   /**
@@ -94,7 +102,9 @@ class ChromeState {
 
   /** Whether a main view is showing instead of the note (§02b Screens 5, 6, 8). */
   get raised(): boolean {
-    return this.settings || this.today || this.media !== null
+    return (
+      this.settings || this.today || this.trash || this.attachments || this.media !== null
+    )
   }
 
   /**
@@ -247,6 +257,16 @@ class ChromeState {
     this.#only('settings')
   }
 
+  /** Raise §02b Screen 9 — what is in the trash, and what can come back. */
+  showTrash(): void {
+    this.#only('trash')
+  }
+
+  /** Raise §02b Screen 10 — every file the INDEX never draws. */
+  showAttachments(): void {
+    this.#only('attachments')
+  }
+
   showToday(): void {
     this.#only('today')
   }
@@ -275,9 +295,13 @@ class ChromeState {
    * by inspection; with three it is the kind of thing that gets forgotten in the
    * fourth, so the exclusion lives in one place instead of in every setter.
    */
-  #only(view: 'settings' | 'today' | 'conflict' | 'media' | null): void {
+  #only(
+    view: 'settings' | 'today' | 'conflict' | 'media' | 'trash' | 'attachments' | null,
+  ): void {
     this.settings = view === 'settings'
     this.today = view === 'today'
+    this.trash = view === 'trash'
+    this.attachments = view === 'attachments'
     if (view !== 'conflict') this.conflict = null
     if (view !== 'media') this.media = null
   }

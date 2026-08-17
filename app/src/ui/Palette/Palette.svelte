@@ -107,6 +107,18 @@ function excerpt(hit: Hit): string {
  * you would go looking for in `.register/trash/` afterwards.
  */
 function question(pending: Pending): string {
+  if (pending.kind === 'move') {
+    // The count is the whole reason this is a confirm rather than a keystroke:
+    // a move can edit notes you are not looking at, and §04 Rev Y's ruling was
+    // that it may — provided it says how many first. Usually none, because
+    // wikilinks resolve by ref and a folder carries its images with it.
+    const repoint = pending.repoint ?? 0
+    const also =
+      repoint === 0
+        ? 'Nothing else changes.'
+        : `This repoints ${repoint} reference${repoint === 1 ? '' : 's'}.`
+    return `Move ${pending.path} to ${pending.to}? ${also}`
+  }
   if (pending.kind === 'note') return `Delete ${pending.path}?`
   const notes = `${pending.notes} ${pending.notes === 1 ? 'note' : 'notes'}`
   // "and anything else in the folder", because the count is what the INDEX can
@@ -125,6 +137,15 @@ function question(pending: Pending): string {
  * on failure the row is still there and getting it back is exactly right.
  */
 async function answer(pending: Pending): Promise<void> {
+  // A move is not a deletion and takes no revision guard: it refuses an occupied
+  // destination on the server, which is the check that matters, and nothing is
+  // destroyed either way.
+  if (pending.kind === 'move' && pending.to !== undefined) {
+    chrome.closePalette()
+    await vault.move(pending.path, pending.to)
+    return
+  }
+
   const rev = pending.rev ?? undefined
   const gone =
     pending.kind === 'note'
@@ -364,7 +385,9 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
           onkeydown={onAnswerKey}
         >
           <span class="ref"></span>
-          <span class="name">CONFIRM · TRASH</span>
+          <span class="name"
+            >{pending.kind === 'move' ? 'CONFIRM · MOVE' : 'CONFIRM · TRASH'}</span
+          >
           <span class="hint">↵</span>
         </button>
         <button

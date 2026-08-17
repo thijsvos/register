@@ -213,6 +213,14 @@ export const go = {
     void vault.follow(target)
   },
 
+  trash(): void {
+    chrome.showTrash()
+  },
+
+  attachments(): void {
+    chrome.showAttachments()
+  },
+
   today(): void {
     chrome.showToday()
   },

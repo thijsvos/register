@@ -9,6 +9,8 @@ import {
   getNote,
   getTree,
   type Loaded,
+  type Moved,
+  movePath,
   openEvents,
   putNote,
   type Trashed,
@@ -18,6 +20,7 @@ import {
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { charCount, setField, touchModified, wordCount } from './frontmatter'
 import { NoteLookup } from './links'
+import { apply, moved as movedPath, rewrites } from './move'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
@@ -768,6 +771,92 @@ class VaultStore {
       this.notice = describe(error)
     }
     this.#scheduleRefresh()
+  }
+
+  /**
+   * Rename or move a note or a folder, rewriting what stops resolving.
+   *
+   * §04 Rev Y. The order is the safety property, and it is the same one
+   * `resolveConflict` takes: the **move first**, then the rewrites. A failure
+   * between them leaves every file on disk and some references stale, which is
+   * visible and fixable; the other order edits notes to point at a move that
+   * then does not happen, which is neither.
+   *
+   * Rewriting is narrow by construction. `[[wikilinks]]` resolve by ref or title
+   * and survive untouched, so `move.ts` only ever re-points relative
+   * `![](src)` — and moving a folder whole usually rewrites nothing, because
+   * the images travel with the notes.
+   */
+  async move(from: string, to: string): Promise<boolean> {
+    // Worked out before the move, against the corpus as it stands: afterwards
+    // the paths have changed and the question cannot be asked the same way.
+    const changes = rewrites(this.corpus, from, to)
+
+    let result: Moved
+    try {
+      result = await movePath(from, to)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+
+    // The corpus follows the files, so a rewrite lands on the note's new path.
+    for (const [path, held] of Object.entries(this.corpus)) {
+      const after = movedPath(path, from, to)
+      if (after === null) continue
+      delete this.corpus[path]
+      this.corpus[after] = held
+    }
+
+    let rewritten = 0
+    for (const path of new Set(changes.map((one) => one.note))) {
+      const held = this.corpus[path]
+      if (held === undefined) continue
+      const body = apply(
+        held.body,
+        changes.filter((one) => one.note === path),
+      )
+      if (body === held.body) continue
+      // Through the ordinary guarded write, so a note an agent touched in the
+      // meantime takes the §04 conflict path rather than being overwritten.
+      const saved = await this.#repoint(path, body, held.etag)
+      if (saved) rewritten += 1
+    }
+
+    const moved =
+      result.notes === 0
+        ? basename(to)
+        : `${result.notes} note${result.notes === 1 ? '' : 's'}`
+    this.notice =
+      rewritten === 0
+        ? `Moved ${moved} to ${to}.`
+        : `Moved ${moved} to ${to}; repointed ${rewritten} note${rewritten === 1 ? '' : 's'}.`
+
+    await this.refresh()
+    if (this.openPath !== null) {
+      const after = movedPath(this.openPath, from, to)
+      if (after !== null) await this.open(after)
+    }
+    return true
+  }
+
+  /**
+   * Write a body over a note we already hold the etag for.
+   *
+   * The rewrite path's only writer, and named apart from `#writeOnce` because it
+   * writes a *given* body rather than the open buffer. Guarded, so a note an
+   * agent edited between the move being planned and the rewrite landing takes
+   * §04's conflict route instead of being flattened.
+   */
+  async #repoint(path: string, body: string, etag: string): Promise<boolean> {
+    try {
+      const result = await putNote(path, body, etag)
+      if (!result.ok) return false
+      this.corpus[path] = { body, etag: result.etag }
+      return true
+    } catch {
+      return false
+    }
   }
 
   /**

@@ -1,4 +1,5 @@
 import { revealVault } from '../../core/api'
+import { rewrites } from '../../core/move'
 import { folders, isListed, isTemplate, splitFolder } from '../../core/paths'
 import { vault } from '../../core/store.svelte'
 import { folderTargets, notesUnder } from '../../core/tree'
@@ -26,6 +27,16 @@ export interface Command {
    * it is about to do. Only NEW · NOTE uses it, and only once a title is typed.
    */
   detail?: string
+  /**
+   * The query is this command's *argument*, not a filter over it.
+   *
+   * Such a command is exempt from the fuzzy match, for the reason
+   * `templateChoices` already is: `Launch plan` does not match `NEW · NOTE` and
+   * `MOVE archive` does not match `MOVE · NOTE`, so the one row that could act
+   * on what had been typed was the row that disappeared while it was typed.
+   * Exempt is not the same as first — an exact match still sorts above it.
+   */
+  takesQuery?: boolean
   /** Hidden when it cannot do anything, rather than shown and inert. */
   enabled?: () => boolean
   /**
@@ -45,6 +56,7 @@ export function allCommands(): Command[] {
       id: 'new',
       label: 'NEW · NOTE',
       keys: 'N',
+      takesQuery: true,
       // The query is the title, and the folder, exactly as NEW FROM TEMPLATE
       // already reads them. Throwing it away meant a titled note could only be
       // made from a stencil — so a vault whose `templates/` had been emptied
@@ -69,6 +81,20 @@ export function allCommands(): Command[] {
       label: 'GO · DAILY LOG',
       keys: '⌘D',
       run: () => go.daily(),
+    },
+    // §02b Screens 9 and 10. No keys: the frame draws none against them, and a
+    // binding nothing on screen names is a binding only its author knows about.
+    {
+      id: 'trash',
+      label: 'GO · TRASH',
+      keys: '',
+      run: () => go.trash(),
+    },
+    {
+      id: 'attachments',
+      label: 'GO · ATTACHMENTS',
+      keys: '',
+      run: () => go.attachments(),
     },
     {
       id: 'inbox',
@@ -196,6 +222,34 @@ export function allCommands(): Command[] {
         }
       },
     },
+    // §04 Rev Y. Typed as `MOVE <destination>` in the box, because a move needs
+    // a second path and the palette is the only surface that takes one — the
+    // same shape as typing a folder for a new note, which the reader has met.
+    {
+      id: 'move',
+      label: 'MOVE · NOTE',
+      keys: '',
+      takesQuery: true,
+      enabled: () => vault.openPath !== null,
+      takesFocus: true,
+      run: (query: string) => {
+        const path = vault.openPath
+        if (path === null) return
+        const to = destination(query, path)
+        if (to === null) {
+          vault.notice = 'Type where it should go: MOVE archive/003-note.md'
+          return
+        }
+        chrome.arm({
+          kind: 'move',
+          path,
+          to,
+          notes: 1,
+          rev: vault.rev,
+          repoint: rewrites(vault.corpus, path, to).length,
+        })
+      },
+    },
     {
       id: 'reveal',
       label: 'OPEN VAULT IN FILE MANAGER',
@@ -209,6 +263,24 @@ export function allCommands(): Command[] {
       },
     },
   ]
+}
+
+/**
+ * The destination a `MOVE …` query names, or null when it names none.
+ *
+ * A bare folder means "keep the filename": `MOVE archive` moves
+ * `notes/003-a.md` to `archive/003-a.md`, which is what a person means nine
+ * times in ten. Anything ending `.md` is taken whole, so a rename is the same
+ * command and needs no second one.
+ */
+export function destination(query: string, from: string): string | null {
+  const typed = query.replace(/^move\s+/i, '').trim()
+  // Unchanged means the query never said `MOVE`, so it names no destination —
+  // running the command from a bare `MOVE` should say what to type rather than
+  // guess a folder.
+  if (typed === '' || typed === query.trim()) return null
+  if (typed.endsWith('.md')) return typed
+  return `${typed.replace(/\/$/, '')}/${from.split('/').pop() ?? from}`
 }
 
 /**
@@ -370,9 +442,9 @@ export function matchCommands(query: string): Command[] {
  * note you were looking for.
  */
 function score(command: Command, query: string): number | null {
-  if (command.id === 'new')
-    return fuzzyScore(command.label, query) ?? Number.MAX_SAFE_INTEGER
-  return fuzzyScore(command.label, query)
+  const matched = fuzzyScore(command.label, query)
+  if (command.takesQuery === true) return matched ?? Number.MAX_SAFE_INTEGER
+  return matched
 }
 
 /**

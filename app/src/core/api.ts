@@ -474,6 +474,78 @@ export async function putConfig(value: unknown): Promise<void> {
   if (!response.ok) await refuse(response)
 }
 
+/** One deletion still in the trash (§02b Screen 9). */
+export interface Bucket {
+  /** The `<stamp>` directory name, and its identity in the API. */
+  name: string
+  /** Where its contents go back to, vault-relative. */
+  paths: string[]
+  notes: number
+  /** Everything that is not a note — images above all. */
+  files: number
+  /** Whether every original path is free. False does not prevent a restore. */
+  clear: boolean
+}
+
+/** What a restore put back, and what it could not. */
+export interface Restored {
+  restored: number
+  /** Left in the bucket because something already lives there. */
+  kept: number
+}
+
+export async function getTrash(): Promise<Bucket[]> {
+  const response = await fetch('/api/trash')
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Bucket[]
+}
+
+export async function restoreBucket(name: string): Promise<Restored> {
+  const response = await fetch(`/api/trash/${encodeURIComponent(name)}`, {
+    method: 'POST',
+  })
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Restored
+}
+
+/** Destroy a bucket. The one call in this API that really deletes. */
+export async function purgeBucket(name: string): Promise<void> {
+  const response = await fetch(`/api/trash/${encodeURIComponent(name)}`, {
+    method: 'DELETE',
+  })
+  if (!response.ok) await refuse(response)
+}
+
+/** Every non-note file in the vault (§02b Screen 10). */
+export async function getFiles(): Promise<string[]> {
+  const response = await fetch('/api/files')
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as string[]
+}
+
+/** What a move moved (§04 Rev Y). */
+export interface Moved {
+  from: string
+  to: string
+  notes: number
+}
+
+/**
+ * Rename or move a note or a folder.
+ *
+ * One call for both, because on disk they are one operation. Refuses an occupied
+ * destination rather than merging: §04 never destroys.
+ */
+export async function movePath(from: string, to: string): Promise<Moved> {
+  const response = await fetch('/api/move', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ from, to }),
+  })
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Moved
+}
+
 /**
  * `.register/local.json` — this machine's half of the settings (§04 Rev W).
  *
