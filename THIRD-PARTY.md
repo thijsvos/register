@@ -49,10 +49,13 @@ medium, not a combined work. REGISTER stays MIT and links none of the above.
 What it does mean is that pulling this image obtains GPL-2.0 software, and the
 corresponding source for every package above is published by Alpine at
 <https://gitlab.alpinelinux.org/alpine/aports> and mirrored alongside each
-release at `https://dl-cdn.alpinelinux.org/alpine/v3.24/`. Alpine distributes
-both, which is the ordinary way a derived image discharges this; whether to add
-an explicit written offer to the release notes is a call for the maintainer and
-is noted in `docs/ROADMAP.md`.
+release at `https://dl-cdn.alpinelinux.org/alpine/v3.24/`. Alpine distributing
+both is the ordinary way a derived image discharges this, and would have been
+enough on its own — **but every release page also says so in as many words**,
+from `deploy/image-notice.md`, because a page listing only binaries is where
+somebody looks and concludes there is nothing to look for. `tests/release.rs`
+holds the workflow to carrying it, including on the re-run path that edits an
+existing release rather than creating one.
 
 Neither `deploy/Dockerfile` nor `deploy/Dockerfile.release` installs anything
 else, and `tests/release.rs` compares their runtime stanzas line for line, so

@@ -836,3 +836,57 @@ fn between(text: &str, open: &str, close: &str) -> String {
         + start;
     text[start..end].trim().to_owned()
 }
+
+#[test]
+fn every_release_says_what_the_image_redistributes() {
+    // The container is `alpine:3.24` + `git`, so pulling it obtains GPL-2.0
+    // software — ten packages of it. REGISTER's own licence is untouched: it
+    // runs git as a subprocess rather than linking it, and an image is
+    // aggregation rather than a combined work. But somebody who receives GPL
+    // software is entitled to know where its source is, and a release page that
+    // lists only binaries does not tell them. Alpine publishes all of it, which
+    // is what makes this a notice rather than an obligation to host anything.
+    let notice = read("deploy/image-notice.md");
+    let workflow = read(".github/workflows/release.yml");
+
+    // The two facts the notice exists to carry.
+    assert!(
+        notice.contains("GPL-2.0"),
+        "the notice does not name the licence it is about"
+    );
+    assert!(
+        notice.contains("gitlab.alpinelinux.org/alpine/aports"),
+        "the notice does not say where the corresponding source is"
+    );
+    // And the one it exists to *prevent* being misread.
+    assert!(
+        notice.contains("MIT"),
+        "the notice does not say REGISTER's own licence is unaffected"
+    );
+
+    // It has to actually reach the release page. `--notes` rather than
+    // `--notes-file`, because only the former is prepended to `--generate-notes`
+    // — `--notes-file` replaces them, which would trade the changelog for the
+    // notice rather than carrying both.
+    assert!(
+        workflow.contains(r#"--notes "$(cat deploy/image-notice.md)""#),
+        "release.yml no longer prepends the notice when it creates a release"
+    );
+    // The re-run path creates nothing, and a release keeps the notes it was made
+    // with — so without this the notice is one dropped runner away from missing.
+    assert!(
+        workflow.contains("gh release edit \"$TAG\" --notes-file"),
+        "release.yml does not repair the notes on a re-run"
+    );
+
+    // The image the notice describes is the image that ships. If a base ever
+    // changes, this fails rather than letting the notice quietly describe an
+    // older one.
+    for dockerfile in ["deploy/Dockerfile", "deploy/Dockerfile.release"] {
+        let text = strip_comments(&read(dockerfile));
+        assert!(
+            text.contains("FROM alpine:3.24") && text.contains("apk add --no-cache git"),
+            "{dockerfile} no longer matches what deploy/image-notice.md describes"
+        );
+    }
+}

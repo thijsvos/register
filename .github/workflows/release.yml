@@ -192,10 +192,29 @@ jobs:
           # Branching on existence rather than `create || upload`, because that
           # form swallows the reason create failed and would silently upload into
           # a release made from a different commit.
+          #
+          # The image redistributes GPL-2.0 software from Alpine, so every
+          # release says so and says where the sources are. `--notes` is
+          # *prepended* to `--generate-notes`, which is the only combination gh
+          # supports: `--notes-file` would replace them instead. The text lives
+          # in `deploy/image-notice.md` so it is reviewed like anything else and
+          # `tests/release.rs` can hold this step to carrying it.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" dist/* --clobber
+            # A release keeps the notes it was created with, so this branch is
+            # where the notice would quietly go missing on a re-run.
+            gh release view "$TAG" --json body --jq .body > "$RUNNER_TEMP/existing.md"
+            if ! grep -q "gitlab.alpinelinux.org/alpine/aports" "$RUNNER_TEMP/existing.md"; then
+              # A blank line between them, or the notice's last paragraph and the
+              # generated notes' first heading run together as one block.
+              cat deploy/image-notice.md > "$RUNNER_TEMP/notes.md"
+              echo >> "$RUNNER_TEMP/notes.md"
+              cat "$RUNNER_TEMP/existing.md" >> "$RUNNER_TEMP/notes.md"
+              gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
+            fi
           else
-            gh release create "$TAG" dist/* --title "$TAG" --generate-notes
+            gh release create "$TAG" dist/* --title "$TAG" --generate-notes \
+              --notes "$(cat deploy/image-notice.md)"
           fi
 
   container:
