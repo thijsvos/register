@@ -411,7 +411,9 @@ describe('resolving a conflict (§02b Screen 4)', () => {
     const del = server.requests.findIndex((one) => one.startsWith('DELETE'))
     expect(put).toBeGreaterThanOrEqual(0)
     expect(del).toBeGreaterThanOrEqual(0)
-    // A failure between the two must leave both revisions, not neither.
+    // A failure between the two must leave both revisions, not neither — which
+    // §04's agent contract now states outright, so this order is a promise the
+    // vault makes to whoever reads it rather than an implementation detail.
     expect(put).toBeLessThan(del)
   })
 

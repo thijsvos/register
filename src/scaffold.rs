@@ -66,7 +66,9 @@ meant. Fill them in, or let the app cut it for you.
 ## Rules
 - Never touch .register/ .
 - *.conflict-*.md are unresolved conflicts: merge into the
-  original, then delete the conflict file.
+  original, then delete the conflict file — that order, so a
+  failure between the two never destroys a revision. The app
+  resolves one line by line if you would rather not.
 - If this vault is a git repo, commit in small units with
   messages like "note: 014 add crdt reading notes".
 "#;

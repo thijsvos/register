@@ -28,13 +28,12 @@ failures reproduce only on Linux.
 
 ## Your call
 
-Each carries a specific question. Two of them the roadmap already marks *"my
-call"* — meaning yours — and are one line each.
+Each carries a specific question. One of them the roadmap already marks *"my
+call"* — meaning yours — and is one line.
 
 | Item | The question |
 |---|---|
 | ⌘D is claimed twice | §08 P7 and §02b Screen 2 disagree about what ⌘D does. The entry says: *"My call on which; a one-line swap either way."* |
-| The vault contract still describes the manual merge route | `scaffold.rs` tells agents to merge by hand. The entry says: *"My call; it is one line and a test update."* It is a §04 edit. |
 | Frontmatter is shown in the editor | Folding it needs a §02 ruling on whether folding counts as hiding the source. |
 | Renaming and moving anything | Two entries, one question: does the app rewrite the `[[wikilinks]]` and `![](src)` that point into what moved? |
 | Nothing restores from the trash | Wants a §02b screen — a list of buckets, and an answer for a path whose home is gone. |
