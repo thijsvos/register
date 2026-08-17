@@ -5,6 +5,7 @@ import {
   allCommands,
   folderChoices,
   fuzzyScore,
+  matchCommands,
   openFolder,
   templateChoices,
   UNTITLED,
@@ -262,5 +263,44 @@ describe('templateChoices with a folder', () => {
     const [choice] = templateChoices('Launch plan')
     expect(choice?.folder).toBeNull()
     expect(choice?.title).toBe('Launch plan')
+  })
+})
+
+describe('NEW · NOTE takes the query as its title', () => {
+  // The title was typed, is on screen, and was being thrown away — so a titled
+  // note could only be made through NEW FROM TEMPLATE, and a vault whose
+  // `templates/` had been emptied could create nothing but `Untitled note`.
+  it('says what it is about to make, once something is typed', () => {
+    const row = matchCommands('Launch plan').find((one) => one.id === 'new')
+    expect(row?.detail).toBe('Launch plan')
+  })
+
+  it('says nothing extra with an empty box', () => {
+    expect(matchCommands('').find((one) => one.id === 'new')?.detail).toBeUndefined()
+  })
+
+  it('reads the folder out of the query too, exactly as a template does', () => {
+    // `splitFolder` is the shared rule, so NEW · NOTE and NEW FROM TEMPLATE
+    // cannot disagree about where a typed path puts the note.
+    const row = matchCommands('notes/projects/Launch plan').find(
+      (one) => one.id === 'new',
+    )
+    expect(row?.detail).toBe('Launch plan')
+  })
+
+  it('stays on screen while a title is being typed', () => {
+    // The row that acts on what you wrote was the one row that vanished while
+    // you wrote it: `Launch plan` does not fuzzy-match `NEW · NOTE`, so it was
+    // filtered out and only the stencils were left. That is the whole reason a
+    // vault with no `templates/` could create nothing but `Untitled note`.
+    const ids = matchCommands('Launch plan').map((one) => one.id)
+    expect(ids).toContain('new')
+  })
+
+  it('does not displace a command the query actually names', () => {
+    // Exempt from the filter is not the same as first: an exact match still
+    // sorts above it.
+    const ids = matchCommands('INVERT').map((one) => one.id)
+    expect(ids.indexOf('invert')).toBeLessThan(ids.indexOf('new'))
   })
 })

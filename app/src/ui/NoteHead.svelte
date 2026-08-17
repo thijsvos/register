@@ -1,5 +1,5 @@
 <script lang="ts">
-import { fields } from '../core/frontmatter'
+import { fields, hasFrontmatter, rawFields } from '../core/frontmatter'
 import { basename } from '../core/paths'
 import { vault } from '../core/store.svelte'
 
@@ -38,14 +38,58 @@ let kicker = $derived(ref === '' ? 'Note' : `Note · Ref ${ref}`)
 // Sentence case, per the frame, so this is the one heading in the app that is
 // not uppercased by CSS: it is the writer's words, not the instrument's.
 let title = $derived(front.get('title') || basename(vault.openPath ?? ''))
+
+/**
+ * The server could not read this note's frontmatter.
+ *
+ * A note whose YAML does not parse degrades to `title: null, tags: []` — which
+ * is right, because one bad note must not take `/api/tree` down, and is pinned
+ * by contract. What was missing was any way to *learn* of it: the index draws
+ * such a note exactly like one that simply has no title, so it is silent and
+ * permanent, and the note's tags are quietly absent from the tag index too.
+ *
+ * Derived rather than reported, because reporting it means a new field in §04's
+ * tree envelope. The three facts together are conclusive: the file has a
+ * frontmatter block, that block *has* a `title:` line, and the server still says
+ * this note has no title. Nothing but a parse failure produces that.
+ *
+ * `rawFields` is a line-wise regex rather than a YAML parser, so it reads the
+ * key the server choked on — which is exactly what makes the comparison work.
+ */
+let unreadable = $derived(
+  vault.openPath !== null &&
+    hasFrontmatter(vault.buffer) &&
+    rawFields(vault.buffer).has('title') &&
+    vault.active !== null &&
+    vault.active.title === null,
+)
 </script>
 
 <header class="note">
   <div class="stamp">{kicker}</div>
   <h2>{title}</h2>
+  {#if unreadable}
+    <p class="unreadable">
+      This note's frontmatter did not parse, so its title and tags are not being
+      read. A colon or a <code>#</code> in a value usually wants quoting.
+    </p>
+  {/if}
 </header>
 
 <style>
+/* Said where the note is, rather than in the index: a reader learns of this
+   while looking at the thing it is about, and the alternative — a state on the
+   index row — is a §04 envelope change for a condition that is rare and already
+   non-destructive. Hairline and dim, never the signal colour: nothing here is
+   live, and §02 keeps the accent for the edge of what is happening. */
+.unreadable {
+  margin-top: var(--s2);
+  border-left: var(--hairline) solid var(--line);
+  padding-left: var(--s3);
+  color: var(--dim);
+  font-size: var(--text-ui);
+}
+
 /* Measured and padded exactly as `.cm-content` is (editor/theme.ts), so the
    kicker and the title sit on the body's own left edge rather than on the
    pane's. */

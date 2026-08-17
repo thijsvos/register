@@ -339,3 +339,50 @@ describe('snippet', () => {
     )
   })
 })
+
+describe('tag: is an exact filter, not a search', () => {
+  // Clicking a tag types this, so it has to mean what it says. Free text would
+  // also find every note *mentioning* the word, which turns "what is tagged
+  // research" into "what is about research" — a different question.
+  const made = [
+    note({ ref: '001', title: 'Alpha', body: 'body one\n', tags: ['research', 'rust'] }),
+    note({ ref: '002', title: 'Beta', body: 'body two\n', tags: ['Research'] }),
+    note({
+      ref: '003',
+      title: 'Methods',
+      body: 'all about research\n',
+      tags: ['design'],
+    }),
+  ]
+  const index = new SearchIndex()
+  index.sync(
+    made.map((one) => one.entry),
+    Object.fromEntries(
+      made.map((one) => [one.entry.path, { body: one.body, etag: one.entry.etag }]),
+    ),
+  )
+
+  it('returns only what carries the tag', () => {
+    const paths = index.find('tag:research', 20).map((hit) => hit.entry.path)
+    expect(paths.sort()).toEqual([made[0]?.entry.path, made[1]?.entry.path].sort())
+  })
+
+  it('ignores case, because a tag is a name rather than a string', () => {
+    expect(index.find('tag:RESEARCH', 20)).toHaveLength(2)
+  })
+
+  it('accepts the hash the tag is drawn with', () => {
+    expect(index.find('tag:#research', 20)).toHaveLength(2)
+  })
+
+  it('leaves ordinary search alone', () => {
+    // The word still finds the note that only mentions it, which is what makes
+    // the filter worth having as a separate form.
+    const paths = index.find('research', 20).map((hit) => hit.entry.path)
+    expect(paths).toContain(made[2]?.entry.path)
+  })
+
+  it('finds nothing for a tag nobody uses', () => {
+    expect(index.find('tag:nonexistent', 20)).toEqual([])
+  })
+})

@@ -37,6 +37,9 @@ const SNIPPET_ALIGN = 16
  */
 const FIELDS = ['title', 'ref', 'tags', 'body']
 
+/** `tag:research`, with an optional `#` — what clicking a tag types. */
+const TAG_QUERY = /^tag:#?([^\s]+)$/i
+
 const SEARCH_OPTIONS: SearchOptions = {
   prefix: true,
   /**
@@ -115,6 +118,23 @@ export class SearchIndex {
    */
   find(query: string, limit: number): Hit[] {
     const wanted = query.trim()
+
+    // `tag:name` is an exact filter rather than a search, and it exists because
+    // clicking a tag has to mean what it says. Free text would find every note
+    // *mentioning* the word too, boosted or not, which turns "show me what is
+    // tagged research" into "show me research" — a different question with a
+    // longer answer. Tags are an exact set on every entry, so this reads them
+    // rather than the index.
+    const tag = TAG_QUERY.exec(wanted)
+    if (tag !== null) {
+      const wantedTag = (tag[1] ?? '').toLowerCase()
+      return [...this.#entries.values()]
+        .filter((entry) => entry.tags.some((one) => one.toLowerCase() === wantedTag))
+        .sort((a, b) => b.mtime - a.mtime)
+        .slice(0, limit)
+        .map((entry) => ({ entry, terms: [] }))
+    }
+
     if (wanted === '') {
       return [...this.#entries.values()]
         .sort((a, b) => b.mtime - a.mtime)

@@ -147,7 +147,11 @@ function meta(count: number): string {
   {:else}
     <ul class="tags">
       {#each tags as tag (tag.name)}
-        <li><span class="name">#{tag.name}</span><span class="count">{tag.count}</span></li>
+        <li>
+          <button class="name" onclick={() => chrome.openPalette(`tag:${tag.name}`)}>
+            #{tag.name}
+          </button><span class="count">{tag.count}</span>
+        </li>
       {/each}
     </ul>
   {/if}
@@ -271,6 +275,29 @@ nav {
   justify-content: space-between;
   gap: var(--s2);
   padding: var(--s1) 0;
+}
+/* Reset to the row, not to the browser's control defaults — see Sidebar. */
+.tags .name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tags .name:hover {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.tags .name:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 
 @container frame (max-width: 1080px) {

@@ -39,6 +39,12 @@
       "gzip": true
     },
     {
+      "name": "css",
+      "path": "dist/assets/*.css",
+      "limit": "10 kB",
+      "gzip": true
+    },
+    {
       "name": "editor",
       "path": "dist/assets/editor-*.js",
       "limit": "150 kB",

@@ -10,7 +10,9 @@ import { type Command, folderChoices, matchCommands, templateChoices } from './c
 /** What the list can show before it scrolls past being useful. */
 const LIMIT = 20
 
-let query = $state('')
+// Seeded rather than always empty: the component mounts on open, so this reads
+// whatever asked for the surface. Everything else opens it with nothing.
+let query = $state(chrome.paletteSeed)
 let selected = $state(0)
 let input: HTMLInputElement | null = $state(null)
 let list: HTMLDivElement | null = $state(null)
@@ -106,7 +108,11 @@ function excerpt(hit: Hit): string {
 function question(pending: Pending): string {
   if (pending.kind === 'note') return `Delete ${pending.path}?`
   const notes = `${pending.notes} ${pending.notes === 1 ? 'note' : 'notes'}`
-  return `Delete ${pending.path} and everything under it? ${notes}.`
+  // "and anything else in the folder", because the count is what the INDEX can
+  // see and the INDEX draws notes. A folder holding twenty images reports three,
+  // and a bare number reads as complete — so the sentence states the fact rather
+  // than the server being asked for a true tally inside a keystroke.
+  return `Delete ${pending.path} and everything under it? ${notes}, and anything else in the folder.`
 }
 
 /**
@@ -187,7 +193,7 @@ function choose(index: number) {
     // teardown one microtask after it runs.
     if (command.takesFocus === true) navigated = true
     chrome.closePalette()
-    void command.run()
+    void command.run(query)
     return
   }
 
@@ -399,6 +405,9 @@ function segments(text: string, needle: string): { text: string; hit: boolean }[
               {#each segments(command.label, query) as part, n (n)}
                 <span class:hit={part.hit}>{part.text}</span>
               {/each}
+              {#if command.detail !== undefined}
+                <span class="detail">{command.detail}</span>
+              {/if}
             </span>
             <span class="hint">{command.keys}</span>
           </button>
@@ -608,6 +617,10 @@ input::placeholder {
   color: var(--sel-fg);
 }
 .ref,
+.detail {
+  margin-left: var(--s3);
+  color: var(--dim);
+}
 .hint {
   color: var(--dim);
   font-size: var(--text-ui);

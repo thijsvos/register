@@ -175,9 +175,11 @@ test('a folder takes its notes, its nesting and its images', async ({ page }) =>
   await focusRow(page, /projects/i)
   await page.keyboard.press('Backspace')
 
-  // The count is what the INDEX draws: three notes, not the PNG it never showed.
+  // The count is what the INDEX draws: three notes, not the PNG it never showed
+  // — and the sentence says so, because a bare number reads as complete. The
+  // alternative was asking the server for a true tally inside a keystroke.
   await expect(page.locator('#pal-question')).toHaveText(
-    'Delete notes/projects and everything under it? 3 notes.',
+    'Delete notes/projects and everything under it? 3 notes, and anything else in the folder.',
   )
 
   await page.keyboard.press('Enter')

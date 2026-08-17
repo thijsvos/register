@@ -281,7 +281,17 @@ class ChromeState {
     this.index = !this.index
   }
 
-  openPalette(): void {
+  /**
+   * What the palette opens with in its box.
+   *
+   * Read once, when the surface mounts. Clicking a tag is the only thing that
+   * sets it: §02b defines no tag component, so rather than inventing a state
+   * the click hands the question to the surface that already answers it.
+   */
+  paletteSeed = $state('')
+
+  openPalette(seed = ''): void {
+    this.paletteSeed = seed
     this.paletteOpen = true
   }
 

@@ -5,6 +5,7 @@ import { vault } from '../../core/store.svelte'
 import { tagCounts } from '../../core/tags'
 import { ancestors, folderTree, type Node } from '../../core/tree'
 import { go, treeTraverse } from '../nav'
+import { chrome } from '../view.svelte'
 import PaneEmpty from './PaneEmpty.svelte'
 import PaneLabel from './PaneLabel.svelte'
 
@@ -63,7 +64,12 @@ function weekday(date: string): string {
     <ul class="tags">
       {#each tags as tag (tag.name)}
         <li>
-          <span class="tag">#{tag.name}</span>
+          <!-- The palette rather than a filter: §02b defines no tag component,
+               so a click hands the question to the surface that already answers
+               it, with the states it already draws. -->
+          <button class="tag" onclick={() => chrome.openPalette(`tag:${tag.name}`)}>
+            #{tag.name}
+          </button>
           <!-- Decorative: the number beside it is the content (§02, --faint). -->
           <span class="meter" aria-hidden="true">
             <i style:width="{(tag.count / busiest) * 100}%"></i>
@@ -247,10 +253,31 @@ nav {
   align-items: center;
   padding: var(--s1) 0;
 }
+/* A button, so the UA stylesheet is reset back to the row it lives in: font,
+   colour and background are all inherited from the pane rather than taken from
+   the browser's control defaults. Learned the hard way — a control that lost
+   its `text-transform` this way read as a different component. */
 .tag {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.tag:hover {
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+}
+.tag:focus-visible {
+  outline: var(--hairline) dashed var(--fg);
+  outline-offset: var(--focus-offset);
 }
 .count {
   font-variant-numeric: tabular-nums;

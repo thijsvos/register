@@ -28,33 +28,11 @@ failures reproduce only on Linux.
 
 ## Your call
 
-Each carries a specific question. The two the roadmap marked *"my call"* are
-both answered; what is left needs a ruling that is longer than one line.
+**Empty.** All twenty-one were answered in one sitting on 2026-08-17 and the
+rulings are recorded in `ROADMAP.md` under *Ruled on after v0.6.3*, each with
+what was decided and why. Twenty are built; the twenty-first — per-screen
+screenshot baselines — was ruled against, and the reasoning is there too.
 
-| Item | The question |
-|---|---|
-| Frontmatter is shown in the editor | Folding it needs a §02 ruling on whether folding counts as hiding the source. |
-| Renaming and moving anything | Two entries, one question: does the app rewrite the `[[wikilinks]]` and `![](src)` that point into what moved? |
-| Nothing restores from the trash | Wants a §02b screen — a list of buckets, and an answer for a path whose home is gone. |
-| A tag is not clickable | Filter the index, or seed ⌘K? §02b's matrix defines neither state. |
-| `--signal` has nine consumers | The token's comment still says "status LED only" and has been false since P4. A ruling on what the accent is *for* settles all nine at once. |
-| A theme change dirties the repo | `config.json` is tracked, so flipping to dark shows up in `git status`. Defensible either way. |
-| The reading column is a third of an ultrawide | Elastic rails turn §02's frame dimensions from constants into functions of width. |
-| The measure under-delivers by six characters | `68ch` renders 61.8ch because padding sits inside the cap. Needs a decision about which number §02 means. |
-| §06 budgets no CSS | `size-limit` weighs JS only. Adding a CSS row is a §06 amendment. |
-| SVG is not served | Sandbox CSP, `Content-Disposition`, or rasterise — three different answers. |
-| An orphan image is invisible | An attachments view is a §02b screen, not a filter. |
-| The confirm counts what the INDEX draws | Showing the true count means a round trip inside a keystroke. |
-| A deletion has no `If-Match` | A per-note etag cannot describe a subtree; a tree revision is a bigger idea. |
-| An unreadable note looks like an untitled one | Saying so in the tree is a §04 envelope change. |
-| A titled note still needs a stencil | A NEW · NOTE row taking the query as its title is a §02b decision about what `new` means. |
-| Screenshot baselines per screen | Needs a decision about which platform owns the baselines — almost certainly a container. |
-| Cross-tab ref collision | Two tabs can both take `015`. Closing it wants a create-if-absent addition to §04. |
-| Etag collision window | `mtime + len` is §04's; changing the scheme changes §04. |
-| Loopback is read as "the owner" | On a shared host every uid gets full access over 127.0.0.1. The fix wants a Unix socket, which is a §04 API-surface change. |
-| Any loopback origin is trusted | Narrowing it needs an explicit dev-origin flag. |
-| A checkpoint sweeps the staging area | `git add -A` takes your part-staged work with it. |
-| Slug folding is partial, not NFKD | Rust std has no Unicode normalisation, so this needs a crate — an ADR and your approval under rule 6. |
 
 ## Not mine, or not yet understood
 

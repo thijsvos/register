@@ -14,7 +14,18 @@ export interface Command {
   label: string
   /** Rendered right-aligned in the palette. Empty when there is no binding. */
   keys: string
-  run: () => void | Promise<void>
+  /**
+   * What it does, given whatever is in the box.
+   *
+   * The query is passed because NEW · NOTE names the note after it — see below.
+   * Every other command ignores the argument.
+   */
+  run: (query: string) => void | Promise<void>
+  /**
+   * Dim text after the label, when the command has something to say about what
+   * it is about to do. Only NEW · NOTE uses it, and only once a title is typed.
+   */
+  detail?: string
   /** Hidden when it cannot do anything, rather than shown and inert. */
   enabled?: () => boolean
   /**
@@ -34,7 +45,15 @@ export function allCommands(): Command[] {
       id: 'new',
       label: 'NEW · NOTE',
       keys: 'N',
-      run: () => go.create(UNTITLED),
+      // The query is the title, and the folder, exactly as NEW FROM TEMPLATE
+      // already reads them. Throwing it away meant a titled note could only be
+      // made from a stencil — so a vault whose `templates/` had been emptied
+      // could create nothing but `Untitled note`, with the title the user had
+      // just typed sitting in the box above the row.
+      run: (query: string) => {
+        const { folder, title } = splitFolder(query)
+        go.create(title === '' ? UNTITLED : title, undefined, folder ?? undefined)
+      },
     },
     // §02b Screen 2 drew this row with [⌘D] against it and §08 P7 gave ⌘D to
     // the daily log. Both were normative; Rev T settled it on P7's side, so the
@@ -332,8 +351,38 @@ export function fuzzyScore(haystack: string, needle: string): number | null {
 export function matchCommands(query: string): Command[] {
   return allCommands()
     .filter((command) => command.enabled?.() ?? true)
-    .map((command) => ({ command, score: fuzzyScore(command.label, query) }))
+    .map((command) => ({ command, score: score(command, query) }))
     .filter((entry): entry is { command: Command; score: number } => entry.score !== null)
     .sort((a, b) => a.score - b.score)
-    .map((entry) => entry.command)
+    .map((entry) => withDetail(entry.command, query))
+}
+
+/**
+ * How well a command answers the query, or null when it does not.
+ *
+ * NEW · NOTE is exempt from the match for the reason `templateChoices` is: the
+ * query is its *argument*, not a filter over it. Scoring it like the others hid
+ * it the moment a title was typed — `Launch plan` does not fuzzy-match
+ * `NEW · NOTE` — so the one row that could act on what you had written was the
+ * one row that disappeared while you wrote it, leaving only the stencils.
+ * Sorted last of the exact matches rather than first, so it never displaces a
+ * note you were looking for.
+ */
+function score(command: Command, query: string): number | null {
+  if (command.id === 'new')
+    return fuzzyScore(command.label, query) ?? Number.MAX_SAFE_INTEGER
+  return fuzzyScore(command.label, query)
+}
+
+/**
+ * Say what NEW · NOTE is about to make.
+ *
+ * The row would otherwise read `NEW · NOTE` whether or not a title had been
+ * typed, which gives no sign the typing was noticed — and this command is the
+ * one place where what is in the box changes what the row does.
+ */
+function withDetail(command: Command, query: string): Command {
+  if (command.id !== 'new') return command
+  const { title } = splitFolder(query)
+  return title === '' ? command : { ...command, detail: title }
 }
