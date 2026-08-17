@@ -97,6 +97,25 @@ async fn start(tmp: &TempVault) -> SocketAddr {
     start_with(tmp, None).await
 }
 
+/// A server, and a handle on the vault behind it.
+///
+/// For the tests that have to say what the *watcher* would have said. The
+/// revision a deletion is guarded by moves in exactly one place — `changed`,
+/// which the watcher calls — and these tests run no watcher, so without the
+/// handle they can only assert the guard never fires.
+async fn start_holding(tmp: &TempVault) -> (SocketAddr, Arc<Vault>) {
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state = AppState::new(vault.clone(), events);
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(bound, router(state)).await;
+    });
+    (addr, vault)
+}
+
 /// A WebSocket handshake, spoken by hand, returning the status line's code.
 ///
 /// `request` above always sends `Connection: close`, which contradicts
@@ -1476,6 +1495,7 @@ mod file_endpoint {
     use super::*;
 
     const PNG: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR";
+    const PDF: &[u8] = b"%PDF-1.7\n";
 
     fn put_bytes(tmp: &TempVault, rel: &str, bytes: &[u8]) {
         let path = tmp.path().join(rel);
@@ -1583,61 +1603,210 @@ mod file_endpoint {
         let reply = request(addr, "GET", "/api/file/notes/absent.png", &[], "").await;
         assert_eq!(reply.status, 404);
     }
+
+    #[tokio::test]
+    async fn an_svg_is_served_sandboxed_and_nothing_else_is_loosened() {
+        // Rev O excluded SVG outright: it is XML that can carry script and it is
+        // served from this origin. The cost was the output format of every diagram
+        // tool — Excalidraw, Figma, Mermaid, draw.io — showing "not in the vault"
+        // with the file sitting right there. A sandbox on that one response closes
+        // the threat instead of paying for it forever.
+        let tmp = TempVault::new();
+        tmp.put(
+            "notes/diagram.svg",
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>",
+        );
+        let addr = start(&tmp).await;
+
+        let reply = request(addr, "GET", "/api/file/notes/diagram.svg", &[], "").await;
+        assert_eq!(reply.status, 200, "an SVG in the vault was not served");
+        assert_eq!(
+            reply.headers.get("content-type").map(String::as_str),
+            Some("image/svg+xml")
+        );
+
+        let policy = reply
+            .headers
+            .get("content-security-policy")
+            .map(String::as_str)
+            .unwrap_or_default();
+        // `sandbox` with no tokens is the whole point: no script, no plugins, no
+        // forms, no navigation, no same-origin access. `default-src 'none'` stops it
+        // fetching anything to phone home with.
+        assert!(
+            policy.contains("sandbox"),
+            "an SVG was served without a sandbox: {policy}"
+        );
+        assert!(
+            policy.contains("default-src 'none'"),
+            "an SVG was served able to fetch: {policy}"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_svg_owns_its_policy_and_a_pdf_can_still_be_framed() {
+        // Setting a policy on every file response was the first attempt and it broke
+        // §02b Screen 8: the header layer defers to a policy a handler set, so a PDF
+        // stopped receiving `frame-ancestors 'self'` and the app could no longer
+        // frame its own viewer. One format, one header — everything that is only
+        // pixels keeps the frame-wide policy, which is what carries that carve-out.
+        let tmp = TempVault::new();
+        put_bytes(&tmp, "notes/shot.png", PNG);
+        put_bytes(&tmp, "notes/spec.pdf", PDF);
+        tmp.put("notes/diagram.svg", "<svg/>");
+        let addr = start(&tmp).await;
+
+        for (path, framable) in [("notes/shot.png", true), ("notes/spec.pdf", true)] {
+            let reply = request(addr, "GET", &format!("/api/file/{path}"), &[], "").await;
+            assert_eq!(reply.status, 200, "{path} was not served");
+            let policy = reply
+                .headers
+                .get("content-security-policy")
+                .map(String::as_str)
+                .unwrap_or_default();
+            assert!(
+                !policy.is_empty(),
+                "{path} was served with no policy at all"
+            );
+            assert_eq!(
+                policy.contains("frame-ancestors 'self'"),
+                framable,
+                "{path} framing: {policy}"
+            );
+            assert!(
+                !policy.contains("sandbox"),
+                "{path} was sandboxed and did not need to be: {policy}"
+            );
+        }
+
+        // The one that does own its policy, and therefore has no frame-ancestors of
+        // its own: `sandbox` denies framing-relevant capabilities outright.
+        let svg = request(addr, "GET", "/api/file/notes/diagram.svg", &[], "").await;
+        let policy = svg
+            .headers
+            .get("content-security-policy")
+            .map(String::as_str)
+            .unwrap_or_default();
+        assert!(policy.starts_with("sandbox"), "svg policy: {policy}");
+    }
+
+    #[tokio::test]
+    async fn an_html_file_pretending_to_be_a_drawing_is_still_refused() {
+        // The allowlist exists to stop this origin serving HTML. Recognising SVG by
+        // its *root* element rather than by "contains `<svg`" is what keeps that
+        // true — and serving this as `image/svg+xml` would not have made it safe.
+        let tmp = TempVault::new();
+        tmp.put("notes/trap.svg", "<html><body><svg/></body></html>");
+        let addr = start(&tmp).await;
+
+        let reply = request(addr, "GET", "/api/file/notes/trap.svg", &[], "").await;
+        assert_eq!(reply.status, 415, "an HTML page was served as a drawing");
+    }
 }
 
 #[tokio::test]
-async fn an_svg_is_served_sandboxed_and_nothing_else_is_loosened() {
-    // Rev O excluded SVG outright: it is XML that can carry script and it is
-    // served from this origin. The cost was the output format of every diagram
-    // tool — Excalidraw, Figma, Mermaid, draw.io — showing "not in the vault"
-    // with the file sitting right there. A sandbox on that one response closes
-    // the threat instead of paying for it forever.
+async fn a_deletion_is_refused_when_the_vault_moved_under_the_question() {
+    // Every write was guarded by an etag and no deletion was, so a note an agent
+    // edited in the second between the confirm being drawn and answered was
+    // trashed carrying that edit. Nothing was lost — it is in the bucket — but
+    // the reader agreed to a different file than the one that went. An etag
+    // cannot describe a subtree, which is why the guard is the tree's revision.
     let tmp = TempVault::new();
-    tmp.put(
-        "notes/diagram.svg",
-        "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>",
-    );
-    let addr = start(&tmp).await;
+    let (addr, vault) = start_holding(&tmp).await;
 
-    let reply = request(addr, "GET", "/api/file/notes/diagram.svg", &[], "").await;
-    assert_eq!(reply.status, 200, "an SVG in the vault was not served");
+    let tree: serde_json::Value =
+        serde_json::from_str(&request(addr, "GET", "/api/tree", &[], "").await.body)
+            .expect("tree json");
+    let rev = tree["rev"].as_u64().expect("the tree carries a revision");
+
+    // Somebody else writes, and the watcher reports it. Both halves matter: the
+    // write path deliberately does not move the revision — one change is one
+    // bump, whoever made it — so this is what a real edit looks like from here.
+    let wrote = request(
+        addr,
+        "PUT",
+        "/api/note/notes/003-a.md",
+        &[],
+        "an agent got here first",
+    )
+    .await;
+    assert_eq!(wrote.status, 200);
+    vault.changed();
+
+    let refused = request(
+        addr,
+        "DELETE",
+        "/api/note/notes/003-a.md",
+        &[("If-Match", &rev.to_string())],
+        "",
+    )
+    .await;
+    assert_eq!(refused.status, 409, "a stale deletion was carried out");
+    // The current revision comes back, so the client can re-arm rather than
+    // fetch again to find out what it should have sent.
     assert_eq!(
-        reply.headers.get("content-type").map(String::as_str),
-        Some("image/svg+xml")
+        refused.headers.get("etag").map(String::as_str),
+        Some(format!("\"{}\"", rev + 1).as_str())
     );
+    // And the note is still there.
+    let held = request(addr, "GET", "/api/note/notes/003-a.md", &[], "").await;
+    assert_eq!(held.status, 200);
 
-    let policy = reply
-        .headers
-        .get("content-security-policy")
-        .map(String::as_str)
-        .unwrap_or_default();
-    // `sandbox` with no tokens is the whole point: no script, no plugins, no
-    // forms, no navigation, no same-origin access. `default-src 'none'` stops it
-    // fetching anything to phone home with.
-    assert!(
-        policy.contains("sandbox"),
-        "an SVG was served without a sandbox: {policy}"
-    );
-    assert!(
-        policy.contains("default-src 'none'"),
-        "an SVG was served able to fetch: {policy}"
-    );
-
-    // And a PNG beside it did not inherit a looser policy — the point is one
-    // format, one header.
-    let png = request(addr, "GET", "/api/file/notes/shot.png", &[], "").await;
-    assert_eq!(png.status, 404, "the fixture should not hold this yet");
+    // Armed with what the vault says now, it goes.
+    let gone = request(
+        addr,
+        "DELETE",
+        "/api/note/notes/003-a.md",
+        &[("If-Match", &(rev + 1).to_string())],
+        "",
+    )
+    .await;
+    assert_eq!(gone.status, 204, "a current deletion was refused");
 }
 
 #[tokio::test]
-async fn an_html_file_pretending_to_be_a_drawing_is_still_refused() {
-    // The allowlist exists to stop this origin serving HTML. Recognising SVG by
-    // its *root* element rather than by "contains `<svg`" is what keeps that
-    // true — and serving this as `image/svg+xml` would not have made it safe.
+async fn a_deletion_without_a_revision_is_still_allowed() {
+    // `curl -X DELETE` is a documented way to use this API, and demanding a
+    // revision it has no way to have read would break it. The client always
+    // sends one; absent means unguarded, deliberately.
     let tmp = TempVault::new();
-    tmp.put("notes/trap.svg", "<html><body><svg/></body></html>");
+    tmp.put("notes/003-a.md", NOTE);
     let addr = start(&tmp).await;
 
-    let reply = request(addr, "GET", "/api/file/notes/trap.svg", &[], "").await;
-    assert_eq!(reply.status, 415, "an HTML page was served as a drawing");
+    let gone = request(addr, "DELETE", "/api/note/notes/003-a.md", &[], "").await;
+    assert_eq!(gone.status, 204);
+}
+
+#[tokio::test]
+async fn a_folder_deletion_takes_the_same_guard() {
+    // The case an etag could never describe: a subtree has no single version, so
+    // before this a folder deletion had nothing to be guarded by at all.
+    let tmp = TempVault::new();
+    tmp.put("notes/projects/010-launch.md", NOTE);
+    let (addr, vault) = start_holding(&tmp).await;
+
+    let tree: serde_json::Value =
+        serde_json::from_str(&request(addr, "GET", "/api/tree", &[], "").await.body)
+            .expect("tree json");
+    let rev = tree["rev"].as_u64().expect("rev");
+
+    request(addr, "PUT", "/api/note/notes/004-b.md", &[], "elsewhere").await;
+    vault.changed();
+
+    let refused = request(
+        addr,
+        "DELETE",
+        "/api/folder/notes/projects",
+        &[("If-Match", &rev.to_string())],
+        "",
+    )
+    .await;
+    assert_eq!(
+        refused.status, 409,
+        "a stale folder deletion was carried out"
+    );
+    assert!(
+        tmp.path().join("notes/projects/010-launch.md").is_file(),
+        "the folder went anyway"
+    );
 }

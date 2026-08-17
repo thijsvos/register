@@ -3,6 +3,7 @@ import { tick } from 'svelte'
 import { DEFAULT_FOLDER } from '../../core/refs'
 import { type Hit, highlight, search, snippet } from '../../core/search'
 import { vault } from '../../core/store.svelte'
+import { notesUnder } from '../../core/tree'
 import { enterIndex, go, traverse } from '../nav'
 import { chrome, type Pending } from '../view.svelte'
 import { type Command, folderChoices, matchCommands, templateChoices } from './commands'
@@ -124,11 +125,37 @@ function question(pending: Pending): string {
  * on failure the row is still there and getting it back is exactly right.
  */
 async function answer(pending: Pending): Promise<void> {
-  chrome.closePalette()
+  const rev = pending.rev ?? undefined
   const gone =
     pending.kind === 'note'
-      ? await vault.trashNote(pending.path)
-      : await vault.trashFolder(pending.path)
+      ? await vault.trashNote(pending.path, rev)
+      : await vault.trashFolder(pending.path, rev)
+
+  // The vault moved while the question was on screen — an agent wrote, or our
+  // own save landed — so the confirm was describing a folder that has since
+  // changed. §04 Rev X refuses it, and the answer is to **ask again** rather than
+  // to report a failure: the reader still wants to delete this, they just have
+  // not been shown what it holds now.
+  //
+  // Re-asking rather than failing is what makes the guard usable at all. Any
+  // write bumps the revision, including one of our own — so a confirm drawn a
+  // moment before the debounced save landed would otherwise refuse against
+  // nobody but the reader themselves.
+  if (gone === 'moved') {
+    await vault.refresh()
+    chrome.arm({
+      ...pending,
+      notes:
+        pending.kind === 'folder' ? notesUnder(vault.tree, pending.path) : pending.notes,
+      rev: vault.rev,
+    })
+    vault.notice = 'The vault changed. This is what it holds now.'
+    return
+  }
+
+  // Closed only once the answer is settled: closing first, as this used to, left
+  // nothing on screen to re-arm.
+  chrome.closePalette()
   // §01's mouse-free promise breaks on the *next* keystroke, not this one, which
   // is where it is hardest to notice. `enterIndex` is a no-op with no INDEX.
   //

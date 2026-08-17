@@ -356,6 +356,20 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub struct Tree {
     /// Absolute path of the vault, for the status bar (§02b Screen 1).
     pub vault: String,
+    /// How many times this vault has changed since the server started (Rev X).
+    ///
+    /// The optimistic lock a *deletion* needs. Every write is guarded by an
+    /// etag, and no deletion was — so a note edited by an agent in the second
+    /// between a confirm being drawn and answered was trashed carrying that
+    /// edit. Nothing was lost, since it is in the bucket, but the reader agreed
+    /// to a different file than the one that went. An etag cannot describe a
+    /// subtree, so a folder deletion had nothing to be guarded by at all.
+    ///
+    /// In-process, and sound because of the claim: one server holds a vault, so
+    /// there is exactly one counter. It resets on restart, which is safe — a
+    /// client holding a number from before simply loses the comparison and looks
+    /// again, which is what it does on any mismatch.
+    pub rev: u64,
     /// The ref a new note must take.
     pub next_ref: String,
     /// The vault's git state, or `null` when it is not a repository of its own
@@ -428,6 +442,8 @@ pub struct Vault {
     /// cache would be shared by every test in a parallel binary — an answer one
     /// test cached is not one another test should be able to read.
     git: Mutex<Option<(Instant, Option<git::Status>)>>,
+    /// Bumped by every change this process makes or sees. See [`Tree::rev`].
+    revision: AtomicU64,
 }
 
 /// Where a vault's claim lives: the temp directory, named for the vault.
@@ -607,6 +623,7 @@ impl Vault {
             writes: Mutex::new(()),
             git_ttl: GIT_TTL,
             git: Mutex::new(None),
+            revision: AtomicU64::new(0),
         })
     }
 
@@ -770,6 +787,7 @@ impl Vault {
             // the tree is already a blocking walk of the whole vault, so a
             // `git status` on top of it is not what makes this call expensive.
             git: self.git_status(),
+            rev: self.revision(),
             notes: self.list()?,
         })
     }
@@ -813,7 +831,41 @@ impl Vault {
         claim_path(&self.root)
     }
 
-    /// Drop the cached git state, because the vault has changed.
+    /// What [`Tree::rev`] reports.
+    pub fn revision(&self) -> u64 {
+        self.revision.load(Ordering::Relaxed)
+    }
+
+    /// Note that the vault has changed. Cheap by construction: this is on every
+    /// write path, and a revision derived by walking the tree would put a walk
+    /// of the whole vault behind every keystroke that saves.
+    fn bump(&self) {
+        self.revision.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// The watcher saw the vault change: the cached git state is describing the
+    /// past, and the revision every deletion is guarded by has moved.
+    ///
+    /// **The only place the revision moves**, and that is the point. Bumping it
+    /// on the write path as well counted one change twice — the write bumped
+    /// immediately and the watcher bumped again ~50 ms later, so a confirm
+    /// re-armed after a refused deletion went stale a moment after it was
+    /// redrawn, and the reader was refused twice for one edit. Measured as a
+    /// WebKit-only e2e failure, which is the timing window made visible.
+    ///
+    /// The watcher sees every change to the vault, ours included, so one source
+    /// is enough and is symmetric: our own save and an agent's edit move the
+    /// number the same way, once each. A deletion answered inside the coalescing
+    /// window carries a revision the server has not bumped yet and succeeds —
+    /// which is right, because the change it has not heard about is the reader's
+    /// own.
+    pub fn changed(&self) {
+        self.forget_git();
+        self.bump();
+    }
+
+    /// Drop the cached git state alone. Tests reach for this; every production
+    /// caller wants [`Vault::changed`].
     pub fn forget_git(&self) {
         if let Ok(mut slot) = self.git.lock() {
             *slot = None;
@@ -1202,9 +1254,10 @@ impl Vault {
         write_atomically(&path, body.as_bytes())?;
 
         // This vault just changed the working tree, so the GIT field's cached
-        // answer is now describing the past. The watcher clears it too, but a
+        // answer is now describing the past. The watcher says so too, but a
         // batch later — and the client refetches the tree the instant a save
-        // returns, without waiting to be told.
+        // returns, without waiting to be told. The *revision* is deliberately
+        // not bumped here; see `changed`.
         self.forget_git();
 
         Ok(etag_of(&fs::metadata(&path)?))

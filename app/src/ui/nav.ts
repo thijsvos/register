@@ -131,8 +131,8 @@ function armFromRow(event: KeyboardEvent): void {
   event.preventDefault()
   chrome.arm(
     row.dataset.kind === 'folder'
-      ? { kind: 'folder', path, notes: notesUnder(vault.tree, path) }
-      : { kind: 'note', path, notes: 1 },
+      ? { kind: 'folder', path, notes: notesUnder(vault.tree, path), rev: vault.rev }
+      : { kind: 'note', path, notes: 1, rev: vault.rev },
   )
 }
 

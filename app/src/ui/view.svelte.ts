@@ -28,6 +28,15 @@ export interface Pending {
   kind: 'note' | 'folder'
   path: string
   notes: number
+  /**
+   * The vault revision this question was drawn against (§04 Rev X).
+   *
+   * Sent with the deletion, so a vault that moved while the reader was deciding
+   * refuses rather than trashing something they were never shown. Null before
+   * the first tree lands, which goes unguarded — there is nothing to compare,
+   * and nothing has been drawn to confirm against either.
+   */
+  rev: number | null
 }
 
 /** Where a note was being read: the caret, and how far it was scrolled. */

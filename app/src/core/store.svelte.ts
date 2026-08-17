@@ -13,6 +13,7 @@ import {
   putNote,
   type Trashed,
   type VaultEvent,
+  VaultMoved,
 } from './api'
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { charCount, setField, touchModified, wordCount } from './frontmatter'
@@ -20,6 +21,17 @@ import { NoteLookup } from './links'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
+
+/**
+ * What a deletion did: it happened, it failed, or the vault moved first.
+ *
+ * `'moved'` is not a failure. §04 Rev X guards a deletion with the tree's
+ * revision, so a note an agent edited between the confirm being drawn and
+ * answered refuses rather than being trashed carrying an edit the reader was
+ * never shown — and the answer to that is to ask again about what is there now,
+ * which only the surface that drew the question can do.
+ */
+export type Trashing = boolean | 'moved'
 
 /**
  * The two §04 fields nothing in the UI may rewrite.
@@ -94,6 +106,14 @@ class VaultStore {
   vaultPath = $state<string | null>(null)
   /** The ref a new note must take. The server owns it: only it sees the trash. */
   nextRef = $state<string | null>(null)
+  /**
+   * The vault's revision, and what a deletion is guarded by (§04 Rev X).
+   *
+   * Null until the first tree lands, which is why a confirm armed before that
+   * goes unguarded rather than refusing — there is nothing to compare and
+   * nothing has been drawn to confirm against either.
+   */
+  rev = $state<number | null>(null)
   /** The vault's git state, or null when it is not a repository (§08 P12). */
   git = $state<GitStatus | null>(null)
 
@@ -317,6 +337,7 @@ class VaultStore {
       this.vaultPath = tree.vault
       this.nextRef = tree.nextRef
       this.git = tree.git
+      this.rev = tree.rev
     } catch (error) {
       this.notice = describe(error)
       return
@@ -757,10 +778,13 @@ class VaultStore {
    * disk on the way to deleting it is work whose only effect is a larger file in
    * the trash.
    */
-  async trashNote(path: string): Promise<boolean> {
+  async trashNote(path: string, rev?: number): Promise<Trashing> {
     try {
-      await deleteNote(path)
+      await deleteNote(path, rev)
     } catch (error) {
+      // Not a failure to report: the vault moved under the question, so the
+      // question has to be put again. §04 Rev X, and the caller re-arms.
+      if (error instanceof VaultMoved) return 'moved'
       this.notice = describe(error)
       return false
     }
@@ -780,11 +804,12 @@ class VaultStore {
    * all — and a folder that took an image with it should say so rather than let
    * the reader find out in Finder.
    */
-  async trashFolder(path: string): Promise<boolean> {
+  async trashFolder(path: string, rev?: number): Promise<Trashing> {
     let moved: Trashed
     try {
-      moved = await deleteFolder(path)
+      moved = await deleteFolder(path, rev)
     } catch (error) {
+      if (error instanceof VaultMoved) return 'moved'
       this.notice = describe(error)
       return false
     }

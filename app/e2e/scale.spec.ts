@@ -27,8 +27,12 @@ const railHeight = (page: import('@playwright/test').Page) =>
     () => document.querySelector('header')?.getBoundingClientRect().height ?? 0,
   )
 
+// From `local.json`, not `config.json`: the plate scale describes the machine
+// you are sitting at — the app itself vetoes a 2x scale on a laptop — so §04
+// Rev W keeps it out of the tracked file, where it used to make switching theme
+// dirty the vault.
 const storedScale = async (page: import('@playwright/test').Page) =>
-  (await (await page.request.get(`${server.url}/api/config`)).json()).scale
+  (await (await page.request.get(`${server.url}/api/local`)).json()).scale
 
 async function openSettings(page: import('@playwright/test').Page) {
   await page.keyboard.press('ControlOrMeta+k')
@@ -223,7 +227,7 @@ test('choosing a scale does not discard the other settings', async ({ page }) =>
   await expect
     .poll(
       async () =>
-        (await (await page.request.get(`${server.url}/api/config`)).json()).scheme,
+        (await (await page.request.get(`${server.url}/api/local`)).json()).scheme,
       { timeout: 3000 },
     )
     .toBe('dark')
@@ -231,15 +235,18 @@ test('choosing a scale does not discard the other settings', async ({ page }) =>
   await page.getByRole('button', { name: '1×', exact: true }).click()
   await expect.poll(() => storedScale(page), { timeout: 3000 }).toBe(1)
 
+  // Both halves, because §04 Rev W split them and this test exists to catch a
+  // field `#save` silently forgets. Comparing the whole of each document is what
+  // makes that catchable — and the split is exactly the kind of change that
+  // could have dropped one on the floor.
   const config = await (await page.request.get(`${server.url}/api/config`)).json()
-  // The whole document, not a subset: this test exists because `#save` writes an
-  // explicit literal, so a field it forgets is silently never persisted. That is
-  // also why `expanded` is named here — the journal's fold state is stored, and
-  // a config that dropped it would forget the folder was ever opened.
-  expect(config).toEqual({
+  const local = await (await page.request.get(`${server.url}/api/local`)).json()
+  expect(local).toEqual({
     scheme: 'dark',
     bodyFace: 'teletype',
     scale: 1,
+  })
+  expect(config).toEqual({
     collapsed: [],
     expanded: [],
   })

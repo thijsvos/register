@@ -135,7 +135,10 @@ class Settings {
    */
   async start(): Promise<void> {
     try {
-      const raw = await getConfig()
+      // Both at once. Sequential awaits put a second round trip in the boot path
+      // for no reason — neither answer depends on the other, and §06 budgets
+      // start-to-editable at 500 ms with settings inside it.
+      const [raw, rawLocal] = await Promise.all([getConfig(), getLocal()])
       const stored = asConfig(raw)
       this.collapsed = stored.collapsed
       this.expanded = stored.expanded
@@ -150,7 +153,6 @@ class Settings {
       // them from `config.json` — they are `OURS`, so they are not kept as
       // foreign keys — so the move happens the first time a setting changes and
       // there is no migration step for anybody to run.
-      const rawLocal = await getLocal()
       const machine = asConfig(rawLocal)
       const pick = <K extends (typeof LOCAL_KEYS)[number]>(key: K): Config[K] => {
         if (present(rawLocal, key)) return machine[key]

@@ -172,7 +172,7 @@ export function allCommands(): Command[] {
       takesFocus: true,
       run: () => {
         const path = vault.openPath
-        if (path !== null) chrome.arm({ kind: 'note', path, notes: 1 })
+        if (path !== null) chrome.arm({ kind: 'note', path, notes: 1, rev: vault.rev })
       },
     },
     // The folder the open note is in — the only folder the palette can name
@@ -191,6 +191,7 @@ export function allCommands(): Command[] {
             kind: 'folder',
             path: folder,
             notes: notesUnder(vault.tree, folder),
+            rev: vault.rev,
           })
         }
       },

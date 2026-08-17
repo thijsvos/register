@@ -155,3 +155,50 @@ test('a vault that predates the split keeps the theme it was given', async ({ pa
   const tracked = await (await page.request.get(`${server.url}/api/config`)).json()
   expect(tracked.collapsed).toEqual(['notes'])
 })
+
+test('a deletion re-asks when the vault moved under the question', async ({ page }) => {
+  // §04 Rev X. Every write was etag-guarded and no deletion was, so a note an
+  // agent edited between the confirm being drawn and answered was trashed
+  // carrying that edit. Re-asking rather than failing is what makes the guard
+  // usable: any write bumps the revision, including one of our own.
+  await page.goto(server.url)
+  await page.getByRole('button', { name: /Alpha/ }).first().click()
+  await expect(page.locator('.cm-content')).toBeVisible()
+
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('DELETE · NOTE')
+  await page.keyboard.press('Enter')
+  await expect(page.locator('#pal-question')).toContainText('001-alpha.md')
+
+  // An agent writes while the question is on screen — and the wait matters. The
+  // revision moves in exactly one place, `Vault::changed`, which the *watcher*
+  // calls: one change is one bump whoever made it, so the write path deliberately
+  // does not move it. Answering before the watcher has reported would carry a
+  // revision the server has not left behind yet and would rightly succeed.
+  // Waiting for the row to appear is waiting for the vault to have moved.
+  await page.request.put(`${server.url}/api/note/notes/009-agent.md`, {
+    data: '---\nref: 009\ntitle: Agent wrote this\n---\nBody.\n',
+    headers: { 'content-type': 'text/markdown' },
+  })
+  await expect(page.getByRole('button', { name: /Agent wrote this/ })).toBeVisible()
+
+  await page.keyboard.press('Enter')
+
+  // Asked again rather than refused, and the note is still there.
+  await expect(page.locator('#pal-question')).toContainText('001-alpha.md')
+  await expect(page.locator('footer')).toContainText(/vault changed/i)
+  const still = await page.request.get(`${server.url}/api/note/notes/001-alpha.md`)
+  expect(still.status()).toBe(200)
+
+  // Answering the re-asked question deletes it. Waiting for the answer to take
+  // focus first, which is what a reader does — they see the question before they
+  // answer it, and the re-arm has a render to get through. Pressing straight
+  // through it raced the focus on WebKit and the key went nowhere.
+  await expect(page.locator('.row.answer').first()).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect
+    .poll(async () =>
+      (await page.request.get(`${server.url}/api/note/notes/001-alpha.md`)).status(),
+    )
+    .toBe(404)
+})

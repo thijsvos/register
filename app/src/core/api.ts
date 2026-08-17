@@ -20,6 +20,16 @@ export interface Tree {
   nextRef: string
   /** §08 P12: the vault's git state, or null when it is not a repository. */
   git: GitStatus | null
+  /**
+   * How many times the vault has changed since the server started (Rev X).
+   *
+   * The optimistic lock a *deletion* needs. Every write is guarded by an etag
+   * and no deletion was, so a note an agent edited between the confirm being
+   * drawn and answered was trashed carrying that edit — and an etag cannot
+   * describe a subtree, so a folder deletion had nothing to be guarded by at
+   * all.
+   */
+  rev: number
   notes: Entry[]
 }
 
@@ -213,9 +223,36 @@ export async function revealVault(): Promise<void> {
   if (!response.ok) await refuse(response)
 }
 
-export async function deleteNote(path: string): Promise<void> {
-  const response = await fetch(noteUrl(path), { method: 'DELETE' })
+/**
+ * A deletion refused because the vault moved under the confirm (§04 Rev X).
+ *
+ * Distinct from `ApiError` so the caller can re-ask rather than report: a stale
+ * revision is not a failure, it is the question needing to be put again about
+ * what the folder holds *now*.
+ */
+export class VaultMoved extends Error {
+  constructor(readonly rev: number | null) {
+    super('the vault changed while you were being asked')
+    this.name = 'VaultMoved'
+  }
+}
+
+/** The revision a delete was armed against, or undefined to go unguarded. */
+export async function deleteNote(path: string, rev?: number): Promise<void> {
+  const response = await fetch(noteUrl(path), {
+    method: 'DELETE',
+    headers: rev === undefined ? {} : { 'If-Match': String(rev) },
+  })
+  if (response.status === 409) throw new VaultMoved(revisionOf(response))
   if (!response.ok) await refuse(response)
+}
+
+/** The revision the server reports on a refusal, so the retry is armed right. */
+function revisionOf(response: Response): number | null {
+  const etag = etagOf(response)
+  if (etag === null) return null
+  const parsed = Number.parseInt(etag, 10)
+  return Number.isNaN(parsed) ? null : parsed
 }
 
 /** What a folder deletion moved (§04 Rev P). */
@@ -236,8 +273,12 @@ export interface Trashed {
  * `vault.rs::trash_folder` for the rest of that argument, including why the loop
  * cannot move the images either.
  */
-export async function deleteFolder(path: string): Promise<Trashed> {
-  const response = await fetch(`/api/folder/${urlPath(path)}`, { method: 'DELETE' })
+export async function deleteFolder(path: string, rev?: number): Promise<Trashed> {
+  const response = await fetch(`/api/folder/${urlPath(path)}`, {
+    method: 'DELETE',
+    headers: rev === undefined ? {} : { 'If-Match': String(rev) },
+  })
+  if (response.status === 409) throw new VaultMoved(revisionOf(response))
   if (!response.ok) await refuse(response)
   return (await response.json()) as Trashed
 }
@@ -347,6 +388,11 @@ function asTree(value: unknown): Tree {
     vault: value.vault,
     nextRef: value.nextRef,
     git: asGit(value.git),
+    // A server that predates Rev X sends no `rev`. Zero rather than a throw: a
+    // deletion then sends a revision the server ignores, which is the same
+    // unguarded behaviour it had before — and refusing to read the tree at all
+    // would be a worse answer to an old server than working without the guard.
+    rev: typeof value.rev === 'number' ? value.rev : 0,
     notes: value.notes.map(asEntry).filter((entry): entry is Entry => entry !== null),
   }
 }

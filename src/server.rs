@@ -538,15 +538,21 @@ async fn read_file(
                 // SVG outright was the Rev O position and it cost the product the
                 // output format of every diagram tool — a real cost paid to a
                 // threat a sandbox closes.
+                //
+                // **SVG only.** Setting a policy on every file response was the
+                // first attempt and it broke Screen 8: the header layer defers to
+                // a policy a handler set, so a PDF stopped getting
+                // `frame-ancestors 'self'` and the app could no longer frame its
+                // own viewer. Anything that is only pixels keeps the frame-wide
+                // policy, which is the one that carries that carve-out.
                 (
                     header::CONTENT_SECURITY_POLICY,
                     if format.media_type == "image/svg+xml" {
                         "sandbox; default-src 'none'; style-src 'unsafe-inline'".to_owned()
                     } else {
-                        // Not blank: an empty header value is a policy some
-                        // proxies drop and others mis-parse. This is the same
-                        // shape the shell gets for a resource that loads nothing.
-                        "default-src 'none'".to_owned()
+                        // Empty means "the frame-wide policy applies", which is
+                        // what the header layer reads it as.
+                        String::new()
                     },
                 ),
             ],
@@ -576,7 +582,14 @@ async fn write_note(
     }
 }
 
-async fn delete_note(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+async fn delete_note(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = stale_revision(&state, &headers) {
+        return response;
+    }
     let vault = state.vault.clone();
     match blocking(move || vault.trash(&path)).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
@@ -584,12 +597,53 @@ async fn delete_note(State(state): State<AppState>, Path(path): Path<String>) ->
     }
 }
 
+/// Refuse a deletion whose `If-Match` names a revision the vault has left
+/// behind (§04 Rev X).
+///
+/// Every write is guarded by an etag and no deletion was, so a note an agent
+/// edited in the second between the confirm being drawn and answered was trashed
+/// carrying that edit. Nothing was lost — it is in the bucket — but the reader
+/// agreed to a different file than the one that went. An etag cannot describe a
+/// subtree, which is why a folder deletion had nothing to be guarded by at all,
+/// and why the guard is the tree's revision rather than any file's.
+///
+/// Absent means unguarded, deliberately: `curl -X DELETE` is a documented way to
+/// use this API and demanding a revision it has no way to have read would break
+/// it. The client always sends one.
+fn stale_revision(state: &AppState, headers: &HeaderMap) -> Option<Response> {
+    let wanted: u64 = headers
+        .get(header::IF_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(unquoted)?
+        .parse()
+        .ok()?;
+    let now = state.vault.revision();
+    if wanted == now {
+        return None;
+    }
+    Some(
+        (
+            StatusCode::CONFLICT,
+            [(header::ETAG, quoted(&now.to_string()))],
+            "the vault changed while you were being asked\n",
+        )
+            .into_response(),
+    )
+}
+
 /// Trash a folder and everything under it, in one bucket (§04 Rev P).
 ///
 /// Answers with what it moved rather than `204`, because the count is the point:
 /// the client confirms against the notes the INDEX draws and cannot see the rest
 /// of the folder, so this is the only honest report of what left.
-async fn delete_folder(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+async fn delete_folder(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    if let Some(response) = stale_revision(&state, &headers) {
+        return response;
+    }
     let vault = state.vault.clone();
     match blocking(move || vault.trash_folder(&path)).await {
         Ok(trashed) => Json(trashed).into_response(),
@@ -1053,9 +1107,16 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
     // anything: the alternative shape, teaching this layer which routes are
     // special, is what already made `framable` a path match rather than a
     // decision the route makes.
+    // A *non-empty* policy, because a handler that wants the frame-wide one sets
+    // an empty value rather than reasoning about how to omit a header from a
+    // fixed-size array. Checking `contains_key` alone read that empty value as a
+    // policy and suppressed the real one — which is how the PDF route briefly
+    // lost `frame-ancestors 'self'` and the app stopped being able to frame its
+    // own viewer.
     let owns_its_policy = response
         .headers()
-        .contains_key(header::CONTENT_SECURITY_POLICY);
+        .get(header::CONTENT_SECURITY_POLICY)
+        .is_some_and(|value| !value.is_empty());
     let headers = response.headers_mut();
     for (name, value) in [
         (

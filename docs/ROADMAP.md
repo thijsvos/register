@@ -295,7 +295,26 @@ rather than with the outcome.
 | **SVG was not served** | Built, sandboxed. Rev O's principle was right — "an allowlist of containers, not a passthrough" — and the price turned out to be the output format of every diagram tool anyone uses: Excalidraw, Figma, Mermaid, draw.io, all showing "not in the vault" with the file sitting there. It is XML that can carry script and it comes from this origin, so that one response carries `sandbox; default-src 'none'`: no script, no plugins, no forms, no navigation, no same-origin access, nothing to fetch with. Per-response, as this route already relaxes `frame-ancestors` on itself — and the frame-wide header layer now **defers** to a policy a handler set, which it previously overwrote, so the tightening actually reached the response that needed it. Recognised by its **root element**, never by "contains `<svg`": an HTML page can hold one, and serving HTML from this origin is what the allowlist exists to stop. Thirteen accepted shapes and seven refused ones are pinned, including `<html><body><svg/></body></html>`. | A format that wants the same treatment; the shape is now established. |
 | **A theme change dirtied the repo** | Built as a split, and the ruling was the interesting part: the file had become two different things. `.register/local.json` (gitignored) takes the scheme, body face and plate scale — the machine you are sitting at, and the app already vetoes a 2× scale on a laptop — while `config.json` keeps the collapsed folders, the journal's fold and the checkpoint flag, which describe the content and *should* travel. Ignoring the whole file loses the second half; tracking it kept losing the first. **No migration step**: the machine keys fall back to the tracked file until the local one carries them, and the next save moves them across and stops writing them to `config.json` — so a vault made before this keeps the theme it was given and migrates itself the first time anything changes. An upgrade that silently reset everybody's theme would have been a worse bug than the one being fixed. Verified on a real git vault: a theme change now leaves `git status` empty, and a folder fold still shows as a diff. | The `.gitignore` line reaches new vaults only, which is what "init never overwrites" costs. An existing vault needs the one line by hand. |
 
+| **A deletion had no `If-Match`** | Built as a **tree revision**, which was the more ambitious of the two options and needed one thing to be usable. `GET /api/tree` carries `rev`; both delete routes take it as `If-Match` and answer 409 with the current one. It is in-process and sound *because of the claim* — one server holds a vault, so there is exactly one counter, which is the second thing that mechanism bought. Bumped by every write this process makes and by every change the watcher sees, since an agent's edit moves the vault exactly as our own save does. Absent means unguarded, deliberately: `curl -X DELETE` is documented and cannot have read a revision. **The confirm re-asks rather than failing**, and that is the thing that makes the guard usable rather than an irritation — any write bumps the revision, including the reader's own debounced save, so a confirm drawn a moment earlier would otherwise refuse against nobody but themselves. On a 409 the palette refetches, redraws the count and puts the question again. **The revision moves in exactly one place**, and that was the second thing this needed: bumping it on the write path *and* in the watcher counted one edit twice, so a re-armed confirm went stale a moment after being redrawn and the reader was refused twice for one change — surfaced as a WebKit-only e2e failure, which is that 50 ms window made visible. The watcher sees every change including ours, so one source is symmetric. | — |
+
 | **§06 budgeted no CSS** | Built at 10 kB gz, against 4.4 today. `size-limit` weighed `*.js` only, so the one render-blocking asset was unweighed — in a design system where a whole change can be pure CSS, which is exactly why nobody would notice the day it stopped being small. | A number that needs raising for ordinary work, which would mean the design system had grown rather than the budget being wrong. |
+
+### A note on the latency budgets
+
+They failed five times in this session and every one was the same artifact: the
+**first e2e run against a freshly written binary**. `start → editable` read 961 ms,
+4520 ms and exactly 500 ms cold, then passed 4/4 and 5/5 warm; `agent edit → paint`
+did the same at 110 ms. A 10 MB binary's first exec pages in from disk, and the
+build-then-immediately-measure loop puts that cost inside the measurement.
+
+Two things were nevertheless found by chasing it. The vault claim was keyed on an
+inode, so a few hundred stranded lock files from killed e2e servers each cost a
+`fork`+`exec` of `kill` at startup — fixed with a `stat` before the pid probe. And
+the config split had put a second sequential round trip in the boot path, which is
+now one `Promise.all`. Neither was the flake; both were worth fixing.
+
+**Run the suite twice and read the second one.** A cold measurement is not a
+measurement.
 
 ## Found by audit after v0.6.3 (the worklist was empty)
 

@@ -53,6 +53,14 @@ class FakeVault {
 
   /** What §08 P12's git field reports, or null for a vault that is not a repo. */
   git: Record<string, unknown> | null = null
+  /**
+   * The vault's revision (§04 Rev X), and what a deletion is guarded by.
+   *
+   * Settable, so a test can move it under an armed confirm — which is the whole
+   * race being modelled: an agent writing between the question being drawn and
+   * answered.
+   */
+  rev = 1
 
   seed(path: string, body: string): void {
     this.files.set(path, { body, etag: `etag-${++this.#version}` })
@@ -136,6 +144,7 @@ class FakeVault {
         vault: '/tmp/fake-vault',
         nextRef: this.#nextRef(),
         git: this.git,
+        rev: this.rev,
         notes: tree,
       })
     }
@@ -146,6 +155,8 @@ class FakeVault {
     // holding one such file, so the notice has something to be wrong about.
     if (path.startsWith('/api/folder/')) {
       if (method !== 'DELETE') return new Response('no', { status: 405 })
+      const stale = this.#staleRevision(init)
+      if (stale !== null) return stale
       const folder = decodeURIComponent(path.replace('/api/folder/', ''))
       const held = [...this.files.keys()].filter((one) => one.startsWith(`${folder}/`))
       if (held.length === 0) return new Response('no such folder', { status: 404 })
@@ -180,10 +191,29 @@ class FakeVault {
       return new Response('', { headers: { etag: `"${etag}"` } })
     }
     if (method === 'DELETE') {
+      const stale = this.#staleRevision(init)
+      if (stale !== null) return stale
       this.files.delete(notePath)
       return new Response(null, { status: 204 })
     }
     return new Response('no such endpoint', { status: 404 })
+  }
+
+  /**
+   * 409 when a deletion names a revision this vault has left behind (Rev X).
+   *
+   * Absent means unguarded, which is what the real server does: `curl -X DELETE`
+   * has no way to have read a revision, and demanding one would break it.
+   */
+  #staleRevision(init?: RequestInit): Response | null {
+    const headers = new Headers(init?.headers)
+    const wanted = headers.get('If-Match')
+    if (wanted === null) return null
+    if (Number.parseInt(wanted, 10) === this.rev) return null
+    return new Response('the vault changed while you were being asked', {
+      status: 409,
+      headers: { etag: `"${this.rev}"` },
+    })
   }
 }
 
@@ -1313,5 +1343,40 @@ describe('an equal etag is not proof that nothing happened', () => {
     await settle()
 
     expect(vault.buffer, 'the collided write was dropped').toBe(collided)
+  })
+})
+
+describe('a deletion is guarded by the tree’s revision (§04 Rev X)', () => {
+  // Every write was etag-guarded and no deletion was, so a note an agent edited
+  // between the confirm being drawn and answered was trashed carrying that edit.
+  it('reports that the vault moved rather than deleting what was not shown', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    const armed = vault.rev
+
+    // Somebody else writes; the server's revision moves past the armed one.
+    server.rev = (armed ?? 0) + 1
+
+    expect(await vault.trashNote('notes/003-a.md', armed ?? undefined)).toBe('moved')
+    expect(server.files.has('notes/003-a.md'), 'the note went anyway').toBe(true)
+    // Not reported as a failure: the question needs asking again, and a notice
+    // saying something broke would be the wrong story.
+    expect(vault.notice).toBeNull()
+  })
+
+  it('goes through when armed with the revision the vault is actually on', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+
+    expect(await vault.trashNote('notes/003-a.md', vault.rev ?? undefined)).toBe(true)
+    expect(server.files.has('notes/003-a.md')).toBe(false)
+  })
+
+  it('is unguarded when the tree has not landed yet', async () => {
+    // Nothing to compare, and nothing has been drawn to confirm against either —
+    // so refusing would be worse than the race it guards.
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    expect(await vault.trashNote('notes/003-a.md', undefined)).toBe(true)
   })
 })

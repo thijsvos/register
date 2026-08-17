@@ -115,7 +115,7 @@ async fn coalesce(
             // events, which is exactly the request that would otherwise be
             // served the pre-change answer out of the cache. The watcher is the
             // only thing that knows a change happened before anyone asks.
-            vault.forget_git();
+            vault.changed();
         }
 
         for event in batch {
