@@ -34,7 +34,6 @@ call"* — meaning yours — and are one line each.
 | Item | The question |
 |---|---|
 | **The container ships GPL software and the release notes do not say so** | `THIRD-PARTY.md` now lists it accurately. Whether a written offer for the Alpine sources belongs in the release notes, or whether Alpine distributing them is the whole answer, is a compliance posture rather than a fact. |
-| **SPEC §07 still calls the container `scratch`** | Both images are Alpine now, for a reason recorded in three places. §07's wording is normative, so it is yours to change. |
 | ⌘D is claimed twice | §08 P7 and §02b Screen 2 disagree about what ⌘D does. The entry says: *"My call on which; a one-line swap either way."* |
 | The vault contract still describes the manual merge route | `scaffold.rs` tells agents to merge by hand. The entry says: *"My call; it is one line and a test update."* It is a §04 edit. |
 | Frontmatter is shown in the editor | Folding it needs a §02 ruling on whether folding counts as hiding the source. |

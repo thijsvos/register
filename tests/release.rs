@@ -786,3 +786,53 @@ fn mutation_testing_reports_rather_than_gates() {
         "a run that mutated nothing would read as a run that caught everything"
     );
 }
+
+#[test]
+fn the_spec_states_one_revision_of_itself() {
+    // Four places carry it: the `<title>`, the masthead, the Issued line and the
+    // end-of-record footer. They have drifted apart twice — Rev J fixed the
+    // masthead and footer after they read REV F through two revisions, and by
+    // Rev Q they read REV O again. A document whose own front page disagrees
+    // with its back page about which revision it is has a real cost: this repo
+    // settles arguments by citing it, and a stale stamp is how somebody cites
+    // the wrong one confidently.
+    let spec = read("SPEC.html");
+
+    let title = between(&spec, "Build Specification · Rev ", "</title>");
+    let masthead = between(&spec, "RG-SPEC-001 · REV ", " ");
+    let issued = between(&spec, "</label><span>2026-", "</span>");
+    let footer = between(
+        &spec,
+        "<div class=\"eor\">RG-SPEC-001 · REV ",
+        " · End of record",
+    );
+
+    let issued_rev = issued
+        .rsplit_once("Rev ")
+        .map(|(_, rev)| rev.to_owned())
+        .unwrap_or_else(|| panic!("the Issued line names no revision: {issued}"));
+
+    assert_eq!(title, masthead, "the title and the masthead disagree");
+    assert_eq!(title, issued_rev, "the title and the Issued line disagree");
+    assert_eq!(title, footer, "the title and the end of record disagree");
+
+    // And it is a revision letter, so a half-finished edit cannot pass by
+    // leaving all four equally empty.
+    assert!(
+        title.len() == 1 && title.chars().all(|c| c.is_ascii_uppercase()),
+        "not a revision letter: {title:?}"
+    );
+}
+
+/// The text between two markers, from the first occurrence of the opening one.
+fn between(text: &str, open: &str, close: &str) -> String {
+    let start = text
+        .find(open)
+        .unwrap_or_else(|| panic!("SPEC.html has no {open:?}"))
+        + open.len();
+    let end = text[start..]
+        .find(close)
+        .unwrap_or_else(|| panic!("SPEC.html has no {close:?} after {open:?}"))
+        + start;
+    text[start..end].trim().to_owned()
+}
