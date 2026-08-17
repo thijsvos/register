@@ -32,6 +32,26 @@ const PATIENCE: Duration = Duration::from_secs(5);
 /// Never served in place: `serve` writes `.register/config.json`, the watcher
 /// touches the tree, and a test that mutated the fixture would quietly rewrite
 /// the one input in this repository that is supposed to outlive the code.
+/// Read a response, accepting a reset once one has arrived.
+///
+/// A server that answers without draining the request body closes with unread
+/// bytes still in the socket, and the kernel sends RST — which a real client
+/// tolerates and `read_to_string` does not. It surfaced on the CI runner as
+/// several tests failing at once with `Connection reset by peer` where the same
+/// suite is green on a developer machine, which is the shape of a race the
+/// slower box loses more often rather than a fault it has.
+///
+/// The assertion is what keeps this honest: a reset with *nothing* read is still
+/// a failure, and says so.
+fn read_tolerating_reset(stream: &mut TcpStream, into: &mut String) {
+    if let Err(error) = stream.read_to_string(into) {
+        assert!(
+            !into.is_empty(),
+            "no response before the connection dropped: {error}"
+        );
+    }
+}
+
 fn copy_of_fixture() -> PathBuf {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -102,7 +122,7 @@ impl Server {
         );
         stream.write_all(request.as_bytes()).expect("write request");
         let mut raw = String::new();
-        stream.read_to_string(&mut raw).expect("read response");
+        read_tolerating_reset(&mut stream, &mut raw);
         raw.split_once("\r\n\r\n")
             .map(|(_, body)| body.to_owned())
             .unwrap_or_default()
@@ -128,7 +148,7 @@ impl Server {
         stream.write_all(body.as_bytes()).expect("write body");
 
         let mut raw = String::new();
-        stream.read_to_string(&mut raw).expect("read response");
+        read_tolerating_reset(&mut stream, &mut raw);
         let status = raw.lines().next().unwrap_or_default();
         assert!(
             status.starts_with("HTTP/1.1 2"),

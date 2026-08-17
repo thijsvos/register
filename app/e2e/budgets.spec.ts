@@ -239,7 +239,11 @@ test('the palette opens on a 1k-note vault without a pause', async ({ page }) =>
         // Cleared first so the query genuinely changes and the derived re-runs.
         await page.getByRole('combobox').fill('')
         await page.getByRole('combobox').fill('Paragraph 0500')
-        return await page.getByRole('option').count()
+        // The *note* rows, not every row. `NEW · NOTE` is exempt from the fuzzy
+        // match — the query is its argument rather than a filter over it — so it
+        // is always on screen, and counting options satisfied this poll before
+        // a single body had been indexed.
+        return await page.getByRole('option').filter({ hasText: 'Note 0500' }).count()
       },
       { timeout: 60_000, message: 'the search index never covered the corpus' },
     )
@@ -257,7 +261,8 @@ test('the palette opens on a 1k-note vault without a pause', async ({ page }) =>
   const { limit, label } = budget(250, '⌘K open')
   expect(took, `${label}; took ${took} ms`).toBeLessThan(limit)
 
-  // And it searches bodies, not just the titles the tree already carries.
+  // And it searches bodies, not just the titles the tree already carries. The
+  // note rows come before the commands, so the first is the best match.
   await page.getByRole('combobox').fill('Paragraph 0500')
   await expect(page.getByRole('option').first()).toContainText('Note 0500')
 })
