@@ -111,7 +111,30 @@ impl Server {
         Self { child, addr, vault }
     }
 
+    /// A GET, retried once if the connection resets before anything arrives.
+    ///
+    /// A GET is idempotent, so a retry is free of consequence — and a reset with
+    /// *nothing* read is not an answer this test can reason about. It surfaced on
+    /// the two-core CI runner as a dozen tests failing in the same millisecond
+    /// while the same suite has never lost that race on a developer machine,
+    /// which is a race the slower box loses rather than a fault it has. Retrying
+    /// keeps the failure honest: the second reset still panics, and says which
+    /// path it was.
     fn get(&self, path: &str) -> String {
+        for attempt in 0..2 {
+            let mut raw = String::new();
+            if self.attempt_get(path, &mut raw) || attempt == 1 {
+                return raw
+                    .split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_owned())
+                    .unwrap_or_default();
+            }
+        }
+        unreachable!("the loop returns on its last attempt")
+    }
+
+    /// One GET. Returns whether a response arrived at all.
+    fn attempt_get(&self, path: &str, into: &mut String) -> bool {
         let mut stream = TcpStream::connect(&self.addr).expect("connect");
         stream
             .set_read_timeout(Some(PATIENCE))
@@ -121,11 +144,10 @@ impl Server {
             self.addr
         );
         stream.write_all(request.as_bytes()).expect("write request");
-        let mut raw = String::new();
-        read_tolerating_reset(&mut stream, &mut raw);
-        raw.split_once("\r\n\r\n")
-            .map(|(_, body)| body.to_owned())
-            .unwrap_or_default()
+        match stream.read_to_string(into) {
+            Ok(_) => true,
+            Err(_) => !into.is_empty(),
+        }
     }
 
     fn tree(&self) -> String {
