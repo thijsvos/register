@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { asConfig, foreign } from './settings.svelte'
+import { asConfig, foreign, halves, LOCAL_KEYS } from './settings.svelte'
 
 /**
  * The config parser, not the class.
@@ -214,5 +214,55 @@ describe('foreign', () => {
     // The array case is not idle: `typeof [] === 'object'`, so without a guard
     // this returns `{0: 'checkpoints'}` and writes numbered keys into the file.
     expect(foreign(value)).toEqual({})
+  })
+})
+
+describe('halves — which file a setting belongs in (§04 Rev W)', () => {
+  // `config.json` is tracked, so everything in it was a diff: switching to dark
+  // dirtied the vault and committing it pushed your theme at whoever you shared
+  // it with. But the file had become two things. The scheme, the face and the
+  // scale describe the machine you are sitting at — the app itself vetoes a 2x
+  // scale on a laptop — while the collapsed folders describe the content and
+  // should travel with it. Ignoring the whole file loses the second half;
+  // tracking it kept losing the first.
+  const all = {
+    scheme: 'dark',
+    bodyFace: 'teletype',
+    scale: 2,
+    collapsed: ['notes/archive'],
+    expanded: ['daily'],
+  } as const
+
+  it('puts the machine’s settings in the local file', () => {
+    expect(halves(all as never).local).toEqual({
+      scheme: 'dark',
+      bodyFace: 'teletype',
+      scale: 2,
+    })
+  })
+
+  it('keeps what describes the content in the tracked file', () => {
+    expect(halves(all as never).tracked).toEqual({
+      collapsed: ['notes/archive'],
+      expanded: ['daily'],
+    })
+  })
+
+  it('splits every key it owns, so a new setting cannot fall between them', () => {
+    // The failure this guards against is silent: a key added to `Config` and to
+    // neither half would simply never be persisted.
+    const { tracked, local } = halves(all as never)
+    expect([...Object.keys(tracked), ...Object.keys(local)].sort()).toEqual(
+      Object.keys(all).sort(),
+    )
+  })
+
+  it('never writes a machine setting into the tracked file', () => {
+    // The migration, stated as a test: a vault that predates the split holds
+    // these three in `config.json`, and this is what takes them out of it the
+    // first time anything is saved.
+    for (const key of LOCAL_KEYS) {
+      expect(halves(all as never).tracked).not.toHaveProperty(key)
+    }
   })
 })

@@ -280,7 +280,7 @@ describe('bodyOffset', () => {
     // The bug this exists for: typing at 0 pushes the opening fence off byte
     // zero, and the file stops parsing as a note at all.
     const note = '---\nref: 003\ntitle: A\n---\nbody\n'
-    const typed = note.slice(0, bodyOffset(note)) + 'x' + note.slice(bodyOffset(note))
+    const typed = `${note.slice(0, bodyOffset(note))}x${note.slice(bodyOffset(note))}`
     expect(hasFrontmatter(typed)).toBe(true)
     expect(hasFrontmatter(`x${note}`)).toBe(false)
   })

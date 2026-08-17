@@ -7,7 +7,15 @@
  * and the licensed font's bytes live in `.register/fonts/`, gitignored by
  * `register init` so they cannot leak into a public repo (§03).
  */
-import { deleteFont, getConfig, getFont, putConfig, putFont } from './api'
+import {
+  deleteFont,
+  getConfig,
+  getFont,
+  getLocal,
+  putConfig,
+  putFont,
+  putLocal,
+} from './api'
 import { DAILY_DIR } from './paths'
 
 /** Unset means "follow the OS", which is the default and the way back. */
@@ -129,13 +137,28 @@ class Settings {
     try {
       const raw = await getConfig()
       const stored = asConfig(raw)
-      this.scheme = stored.scheme
-      this.bodyFace = stored.bodyFace
-      this.scale = stored.scale
       this.collapsed = stored.collapsed
       this.expanded = stored.expanded
       this.#foreign = foreign(raw)
       this.#foreignKnown = true
+
+      // The machine's half comes from `local.json`, **falling back to the
+      // tracked file**. That fallback is the whole migration: every vault made
+      // before this holds its scheme, face and scale in `config.json`, and a
+      // reader whose theme silently reset on upgrade would be a worse bug than
+      // the one being fixed. The next save writes them to `local.json` and drops
+      // them from `config.json` — they are `OURS`, so they are not kept as
+      // foreign keys — so the move happens the first time a setting changes and
+      // there is no migration step for anybody to run.
+      const rawLocal = await getLocal()
+      const machine = asConfig(rawLocal)
+      const pick = <K extends (typeof LOCAL_KEYS)[number]>(key: K): Config[K] => {
+        if (present(rawLocal, key)) return machine[key]
+        return present(raw, key) ? stored[key] : machine[key]
+      }
+      this.scheme = pick('scheme')
+      this.bodyFace = pick('bodyFace')
+      this.scale = pick('scale')
     } catch {
       // Defaults already hold.
     }
@@ -305,14 +328,21 @@ class Settings {
       // The foreign keys go first so ours always win: a hand-edited `"scheme"`
       // is read at boot and becomes `this.scheme`, and letting the stale copy
       // overwrite it here would make the screen unable to change its own mind.
-      await putConfig({
-        ...this.#foreign,
+      // Split by what the fact is about (§04 Rev W). The tracked file keeps
+      // what describes the content; `local.json` takes what describes this
+      // machine. The machine keys are not written to the tracked file at all, so
+      // a vault that predates this stops carrying them the first time anything
+      // is saved — that is the migration, and it needs no step.
+      const { tracked, local } = halves({
         scheme: this.scheme,
         bodyFace: this.bodyFace,
         scale: this.scale,
         collapsed: this.collapsed,
         expanded: this.expanded,
       })
+      // The foreign keys go first so ours always win.
+      await putConfig({ ...this.#foreign, ...tracked })
+      await putLocal(local)
       this.notice = null
     } catch (error) {
       this.notice = describe(error)
@@ -347,6 +377,41 @@ const OURS = new Set<string>([
   'collapsed',
   'expanded',
 ] satisfies (keyof Config)[])
+
+/**
+ * The keys that describe *this machine* rather than the vault (§04 Rev W).
+ *
+ * These live in `.register/local.json`, which is gitignored. A 2x plate scale
+ * chosen on an ultrawide is vetoed on a laptop by the app itself, so it was never
+ * something to carry between machines — while a collapsed folder describes the
+ * content and should travel with it. Keeping them in one tracked file meant
+ * switching to dark mode dirtied the vault.
+ */
+export const LOCAL_KEYS = ['scheme', 'bodyFace', 'scale'] satisfies (keyof Config)[]
+
+/** Split a whole settings object into what each file gets. */
+export function halves(config: Config): {
+  tracked: Record<string, unknown>
+  local: Record<string, unknown>
+} {
+  const tracked: Record<string, unknown> = {}
+  const local: Record<string, unknown> = {}
+  for (const key of OURS) {
+    const value = (config as unknown as Record<string, unknown>)[key]
+    if ((LOCAL_KEYS as readonly string[]).includes(key)) local[key] = value
+    else tracked[key] = value
+  }
+  return { tracked, local }
+}
+
+/** Does this document actually carry the key, as opposed to defaulting it? */
+function present(value: unknown, key: string): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    key in (value as Record<string, unknown>)
+  )
+}
 
 /** Read a config document without trusting its shape. */
 export function asConfig(value: unknown): Config {

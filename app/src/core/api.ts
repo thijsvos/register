@@ -429,6 +429,32 @@ export async function putConfig(value: unknown): Promise<void> {
 }
 
 /**
+ * `.register/local.json` — this machine's half of the settings (§04 Rev W).
+ *
+ * `config.json` is tracked, so everything in it was a diff: switching to dark
+ * dirtied the vault, and committing it pushed your theme at whoever you shared
+ * it with. The scheme, body face and plate scale describe the machine you are
+ * sitting at — a 2x scale chosen on an ultrawide is vetoed on a laptop by the app
+ * itself — while collapsed folders and the checkpoint flag describe the content
+ * and should travel with it. Two files rather than one compromise that gets half
+ * of them wrong.
+ */
+export async function getLocal(): Promise<unknown> {
+  const response = await fetch('/api/local')
+  if (!response.ok) await refuse(response)
+  return await response.json()
+}
+
+export async function putLocal(value: unknown): Promise<void> {
+  const response = await fetch('/api/local', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(value),
+  })
+  if (!response.ok) await refuse(response)
+}
+
+/**
  * The licensed face's bytes, or null when none is loaded (§03 BYOF).
  *
  * Always same-origin: §08 P9 is explicit that fonts are never fetched from the

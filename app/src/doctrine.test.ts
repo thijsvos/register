@@ -273,7 +273,8 @@ describe('frame geometry (§02 component doctrine)', () => {
     // cannot disagree with each other.
     expect(tokens).not.toMatch(/--frame-(side|insp):\s*clamp/)
     expect(tokens).not.toMatch(/--frame-(side|insp):[^;]*cqw/)
-    const steps = tokens.match(/@media \(min-width: \d+px\) \{\s*:root \{ --frame-side/g) ?? []
+    const steps =
+      tokens.match(/@media \(min-width: \d+px\) \{\s*:root \{ --frame-side/g) ?? []
     expect(steps.length, 'the rails never widen').toBeGreaterThan(0)
   })
 

@@ -101,11 +101,18 @@ const INBOX_BODY: &str = "Capture queue. Append, don't reorganize.\n";
 /// checkpointer commits at all, and the client through `GET /api/config`.
 const CONFIG_JSON: &str = "{}\n";
 
-/// `--git`: the two directories that must never be committed (§08 P8).
+/// `--git`: what must never be committed (§08 P8, and §04 Rev W).
 ///
 /// BYOF font bytes are licensed to the user, not to the repository (§03), and
-/// trash is deleted notes kept only so a ref is never reissued.
-const GITIGNORE: &str = ".register/fonts/\n.register/trash/\n";
+/// trash is deleted notes kept only so a ref is never reissued. `local.json` is
+/// the third: it holds the settings that describe the machine you are sitting at
+/// rather than the vault, and tracking them meant switching to dark mode dirtied
+/// the repository and committing it pushed your theme at a collaborator.
+///
+/// It reaches vaults made after this and no others — `init` never overwrites,
+/// which is what makes re-running it safe — so `init` on an existing vault
+/// reports the line to add rather than adding it.
+const GITIGNORE: &str = ".register/fonts/\n.register/trash/\n.register/local.json\n";
 
 /// What `init` did, so the caller can say it rather than guess.
 #[derive(Debug, Default)]

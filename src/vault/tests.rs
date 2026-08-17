@@ -1318,14 +1318,52 @@ mod media {
             assert_eq!(found.media_type, wanted);
         }
 
-        // SVG is deliberately absent (see MEDIA_FORMATS), and so is anything
-        // whose first bytes happen to look like text.
-        assert!(media_format(b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>").is_none());
         assert!(media_format(b"").is_none());
         assert!(
             media_format(b"RIFF\x00\x00\x00\x00WAVE").is_none(),
             "a wav is not an image"
         );
+    }
+
+    #[test]
+    fn svg_is_recognised_by_its_root_element() {
+        // It has no magic number, being XML, so it is the one format sniffed by
+        // finding its root element rather than by matching bytes at an offset.
+        for accepted in [
+            &b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>"[..],
+            b"<svg>\n<rect/>\n</svg>\n",
+            b"  \n\t<svg viewBox=\"0 0 1 1\"></svg>",
+            b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg/>",
+            b"<?xml version=\"1.0\"?>\n<!-- drawn by hand -->\n<svg/>",
+            b"<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x.dtd\">\n<svg/>",
+            // A BOM, which a Windows editor will happily add.
+            "\u{feff}<svg/>".as_bytes(),
+        ] {
+            let found = media_format(accepted)
+                .unwrap_or_else(|| panic!("not recognised: {}", String::from_utf8_lossy(accepted)));
+            assert_eq!(found.media_type, "image/svg+xml");
+        }
+
+        // The *root* element, not "contains `<svg`". An HTML page can hold one,
+        // and serving HTML from this origin is what the allowlist exists to
+        // prevent — so a page that merely embeds a drawing is refused, and being
+        // served as `image/svg+xml` would not have made it safe.
+        for refused in [
+            &b"<html><body><svg/></body></html>"[..],
+            b"<!DOCTYPE html>\n<html><svg/></html>",
+            b"<svgnotreally/>",
+            b"# a markdown note mentioning <svg/>\n",
+            b"<?xml version=\"1.0\"?><rss><svg/></rss>",
+            // An unterminated prologue is not a document.
+            b"<?xml version=\"1.0\"\n<svg/>",
+            b"<!-- forever",
+        ] {
+            assert!(
+                media_format(refused).is_none(),
+                "should be refused: {}",
+                String::from_utf8_lossy(refused)
+            );
+        }
     }
 
     #[test]

@@ -372,6 +372,10 @@ pub fn router(state: AppState) -> Router {
         // vault *format* is untouched — both paths were already drawn in §04's
         // layout — so this grows the API table, not the contract.
         .route("/api/config", get(read_config).put(write_config))
+        // The machine's half of the same idea (§04 Rev W). Its own route rather
+        // than a query parameter on the one above, because they are two files
+        // with two lifetimes: one travels with the vault and one does not.
+        .route("/api/local", get(read_local).put(write_local))
         .route(
             "/api/font",
             get(read_font).put(write_font).delete(delete_font),
@@ -519,6 +523,32 @@ async fn read_file(
                 // `nosniff` is set on every response, so this has to be right or
                 // the browser renders nothing rather than guessing.
                 (header::CONTENT_TYPE, format.media_type.to_owned()),
+                // SVG is XML that can carry script, and it is served from this
+                // origin — so on that one response the policy is tightened to
+                // nothing at all. `sandbox` with no tokens denies scripting,
+                // plugins, forms, navigation and same-origin access in one word;
+                // `default-src 'none'` stops it fetching anything it might want
+                // to phone home with. The image still draws: `<img>` never runs
+                // script in an SVG anyway, and this closes the case where it is
+                // opened on its own surface or framed.
+                //
+                // Per-response rather than global for the reason the PDF route
+                // already relaxes `frame-ancestors` on itself: one format, one
+                // header, and every other response keeps what it had. Excluding
+                // SVG outright was the Rev O position and it cost the product the
+                // output format of every diagram tool — a real cost paid to a
+                // threat a sandbox closes.
+                (
+                    header::CONTENT_SECURITY_POLICY,
+                    if format.media_type == "image/svg+xml" {
+                        "sandbox; default-src 'none'; style-src 'unsafe-inline'".to_owned()
+                    } else {
+                        // Not blank: an empty header value is a policy some
+                        // proxies drop and others mis-parse. This is the same
+                        // shape the shell gets for a resource that loads nothing.
+                        "default-src 'none'".to_owned()
+                    },
+                ),
             ],
             bytes,
         )
@@ -645,6 +675,36 @@ async fn write_config(State(state): State<AppState>, body: String) -> Response {
 
     let vault = state.vault.clone();
     match blocking(move || vault.write_config(&body)).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+/// This machine's half of the settings (§04 Rev W).
+///
+/// `config.json` is tracked, so every setting in it was a diff — switching to
+/// dark dirtied the vault, and committing it pushed your theme at whoever you
+/// shared it with. The scheme, the body face and the plate scale are about the
+/// machine you are sitting at; the collapsed folders and the checkpoint flag are
+/// about the content and should travel with it. Two files rather than one
+/// compromise that gets half of them wrong.
+async fn read_local(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.read_local()).await {
+        Ok(body) => ([(header::CONTENT_TYPE, "application/json")], body).into_response(),
+        Err(response) => response,
+    }
+}
+
+async fn write_local(State(state): State<AppState>, body: String) -> Response {
+    // Parsed before it is stored, for `write_config`'s reason: a settings file
+    // that is not JSON fails every later read at boot with nothing on screen.
+    if serde_json::from_str::<serde_json::Value>(&body).is_err() {
+        return (StatusCode::BAD_REQUEST, "local settings must be JSON\n").into_response();
+    }
+
+    let vault = state.vault.clone();
+    match blocking(move || vault.write_local(&body)).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(response) => response,
     }
@@ -985,9 +1045,23 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
     let policy = policy.as_str();
 
     let mut response = next.run(request).await;
+    // A handler that set its own policy meant it. `read_file` tightens this to
+    // `sandbox; default-src 'none'` for an SVG, which is XML that can carry
+    // script and is served from this origin — and inserting the frame-wide
+    // policy over the top would undo exactly the response that needed it. Only
+    // *tighter* policies are ever set below, so deferring cannot loosen
+    // anything: the alternative shape, teaching this layer which routes are
+    // special, is what already made `framable` a path match rather than a
+    // decision the route makes.
+    let owns_its_policy = response
+        .headers()
+        .contains_key(header::CONTENT_SECURITY_POLICY);
     let headers = response.headers_mut();
     for (name, value) in [
-        (header::CONTENT_SECURITY_POLICY, policy),
+        (
+            header::CONTENT_SECURITY_POLICY,
+            if owns_its_policy { "" } else { policy },
+        ),
         // Legacy, and still honoured — a `DENY` here would override the CSP
         // above and refuse the frame anyway, so the two have to agree.
         (
@@ -1000,6 +1074,11 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
         // Referer of anything the page links to.
         (header::REFERRER_POLICY, "no-referrer"),
     ] {
+        // An empty value is the "leave it alone" signal from the table above,
+        // never a header worth sending.
+        if value.is_empty() {
+            continue;
+        }
         if let Ok(value) = value.parse() {
             headers.insert(name, value);
         }

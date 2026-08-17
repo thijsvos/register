@@ -42,6 +42,17 @@ pub const APP_DIR: &str = ".register";
 const TRASH_DIR: &str = "trash";
 const FONTS_DIR: &str = "fonts";
 const CONFIG_FILE: &str = "config.json";
+/// The machine's half of the config, kept out of git.
+///
+/// `config.json` is tracked, so every setting in it was a diff — switching to
+/// dark mode dirtied the vault and committing it pushed your theme at whoever
+/// you shared it with. But the file had become two different things: the scheme,
+/// the body face and the plate scale are about *this machine* (a 2× scale chosen
+/// on an ultrawide is vetoed on a laptop, by the app itself), while the collapsed
+/// folders, the journal's fold and the checkpoint flag are about the *content*
+/// and should travel with it. Ignoring the whole file would lose the second half;
+/// tracking it kept losing the first. So there are two.
+const LOCAL_FILE: &str = "local.json";
 /// One licensed face per vault, under a fixed name — §03 registers it as the
 /// single family "TX-02", so a second would have nowhere to go.
 const FONT_STEM: &str = "licensed";
@@ -147,15 +158,83 @@ const MEDIA_FORMATS: &[MediaFormat] = &[
     },
 ];
 
+/// SVG, which has no magic number because it is XML.
+///
+/// Kept out of `MEDIA_FORMATS` because that table matches bytes at fixed
+/// offsets and this cannot: an SVG may open with a BOM, an XML declaration, a
+/// doctype, comments, or none of them. So it is sniffed by finding the root
+/// element, which is the same question the table asks — *what is this* — put to
+/// a format that answers it differently.
+const SVG: MediaFormat = MediaFormat {
+    media_type: "image/svg+xml",
+    magic: &[],
+};
+
+/// Is the root element of this document an `<svg>`?
+///
+/// The root element, not "does `<svg` appear": an HTML page can contain one, and
+/// serving HTML from this origin is the thing the allowlist exists to prevent.
+/// So everything XML is allowed to put *before* the root is skipped explicitly,
+/// and the first tag that is not one of those has to be the `<svg`.
+fn is_svg(bytes: &[u8]) -> bool {
+    // A prologue longer than this is not a picture, it is an argument.
+    const LOOK: usize = 1024;
+    let head = &bytes[..bytes.len().min(LOOK)];
+    let Ok(text) = std::str::from_utf8(head) else {
+        // Invalid UTF-8 inside the first kilobyte is not an XML document. A
+        // truncated multi-byte character at the boundary would land here too,
+        // which costs an SVG with a kilobyte of leading comments and non-ASCII
+        // in them — a trade worth making for not hand-rolling a decoder.
+        return false;
+    };
+    let mut rest = text.trim_start_matches('\u{feff}').trim_start();
+    loop {
+        if let Some(after) = rest.strip_prefix("<?") {
+            // `<?xml … ?>`
+            let Some((_, tail)) = after.split_once("?>") else {
+                return false;
+            };
+            rest = tail.trim_start();
+        } else if let Some(after) = rest.strip_prefix("<!--") {
+            let Some((_, tail)) = after.split_once("-->") else {
+                return false;
+            };
+            rest = tail.trim_start();
+        } else if let Some(after) = rest.strip_prefix("<!") {
+            // A doctype. Nested brackets are legal in one and are not followed
+            // here; a doctype with an internal subset simply is not recognised,
+            // which refuses rather than mis-serves.
+            let Some((_, tail)) = after.split_once('>') else {
+                return false;
+            };
+            rest = tail.trim_start();
+        } else {
+            // The root element. `<svg>` or `<svg …`, and nothing else.
+            let Some(after) = rest.strip_prefix("<svg") else {
+                return false;
+            };
+            return after
+                .chars()
+                .next()
+                .is_none_or(|ch| ch.is_whitespace() || ch == '>' || ch == '/');
+        }
+    }
+}
+
 /// Which servable format `bytes` is, by content — never by extension.
 pub fn media_format(bytes: &[u8]) -> Option<&'static MediaFormat> {
-    MEDIA_FORMATS.iter().find(|format| {
+    let found = MEDIA_FORMATS.iter().find(|format| {
         format.magic.iter().all(|(at, want)| {
             bytes
                 .get(*at..at.saturating_add(want.len()))
                 .is_some_and(|found| found == *want)
         })
-    })
+    });
+    match found {
+        Some(format) => Some(format),
+        None if is_svg(bytes) => Some(&SVG),
+        None => None,
+    }
 }
 /// §04's dated-log directory. Its filenames are dates, not refs.
 const DAILY_DIR: &str = "daily/";
@@ -1167,16 +1246,36 @@ impl Vault {
     }
 
     pub fn write_config(&self, body: &str) -> Result<()> {
+        self.write_app_json(CONFIG_FILE, body)
+    }
+
+    /// `.register/local.json` — this machine's settings, gitignored (§04 Rev W).
+    pub fn read_local(&self) -> Result<String> {
+        match fs::read_to_string(self.app_file(LOCAL_FILE)?) {
+            Ok(text) => Ok(text),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok("{}".to_owned()),
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+
+    pub fn write_local(&self, body: &str) -> Result<()> {
+        self.write_app_json(LOCAL_FILE, body)
+    }
+
+    fn write_app_json(&self, name: &str, body: &str) -> Result<()> {
         let _writing = self.lock();
         self.require_root()?;
 
-        let path = self.app_file(CONFIG_FILE)?;
+        let path = self.app_file(name)?;
         // A vault made by hand rather than by `register init` has no
         // `.register/` at all, and the first setting anyone changes is where
         // that shows up.
         fs::create_dir_all(path.parent().ok_or(Error::InvalidPath)?)?;
         write_atomically(&path, body.as_bytes())?;
-        // `.register/config.json` is tracked, so a theme change is a diff.
+        // `config.json` is tracked, so writing it is a diff the GIT field should
+        // report. `local.json` is ignored and cannot be — but the scaffolded
+        // `.gitignore` only reaches vaults made after this, so a clearing here is
+        // the honest answer for one that predates it.
         self.forget_git();
         Ok(())
     }

@@ -110,3 +110,48 @@ test('an untitled note is not mistaken for an unreadable one', async ({ page }) 
   await expect(page.locator('header.note h2')).toHaveText('Untitled note')
   await expect(page.locator('header.note .unreadable')).toHaveCount(0)
 })
+
+test('a theme change no longer dirties the vault', async ({ page }) => {
+  // §04 Rev W. `config.json` is tracked, so every setting in it was a diff —
+  // switching to dark made the vault dirty and committing it pushed your theme
+  // at whoever you shared it with. The scheme, face and scale describe the
+  // machine; the collapsed folders describe the content and still travel.
+  await page.goto(server.url)
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('INVERT')
+  await page.keyboard.press('Enter')
+
+  // The machine's half landed in the ignored file…
+  await expect
+    .poll(async () => (await page.request.get(`${server.url}/api/local`)).json())
+    .toHaveProperty('scheme')
+
+  // …and not in the tracked one.
+  const tracked = await (await page.request.get(`${server.url}/api/config`)).json()
+  expect(tracked).not.toHaveProperty('scheme')
+  expect(tracked).not.toHaveProperty('bodyFace')
+  expect(tracked).not.toHaveProperty('scale')
+})
+
+test('a vault that predates the split keeps the theme it was given', async ({ page }) => {
+  // The migration, and the reason there is no migration step: an upgrade that
+  // silently reset everybody's theme would be a worse bug than the one fixed.
+  // `config.json` is the fallback until `local.json` carries the key, and the
+  // next save moves it across.
+  await page.request.put(`${server.url}/api/config`, {
+    data: { scheme: 'dark', bodyFace: 'teletype', collapsed: ['notes'] },
+    headers: { 'content-type': 'application/json' },
+  })
+  await page.goto(server.url)
+
+  // Read off the document, which is where the setting actually lands.
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains('teletype')),
+    )
+    .toBe(true)
+
+  // And the folder fold, which belongs to the vault, survived in the tracked file.
+  const tracked = await (await page.request.get(`${server.url}/api/config`)).json()
+  expect(tracked.collapsed).toEqual(['notes'])
+})

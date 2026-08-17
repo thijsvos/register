@@ -56,7 +56,22 @@ async fn request(
     stream.write_all(body.as_bytes()).await.expect("write body");
 
     let mut raw = Vec::new();
-    stream.read_to_end(&mut raw).await.expect("read");
+    // A reset is tolerated *if a response arrived first*, which is a thing a
+    // real client does and this raw socket did not. A rejection from the origin
+    // or token guard answers without draining the request body, so the server
+    // closes with unread bytes still in the socket and the kernel sends RST —
+    // the response is already here, and `read_to_end` was failing on the reset
+    // that followed it. Measured as a 2-in-9 flake on the tests that make
+    // several refused PUTs in a row.
+    match stream.read_to_end(&mut raw).await {
+        Ok(_) => {}
+        Err(error) => {
+            assert!(
+                !raw.is_empty(),
+                "no response before the connection dropped: {error}"
+            );
+        }
+    }
     let raw = String::from_utf8_lossy(&raw).into_owned();
 
     let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw.as_str(), ""));
@@ -1568,4 +1583,61 @@ mod file_endpoint {
         let reply = request(addr, "GET", "/api/file/notes/absent.png", &[], "").await;
         assert_eq!(reply.status, 404);
     }
+}
+
+#[tokio::test]
+async fn an_svg_is_served_sandboxed_and_nothing_else_is_loosened() {
+    // Rev O excluded SVG outright: it is XML that can carry script and it is
+    // served from this origin. The cost was the output format of every diagram
+    // tool — Excalidraw, Figma, Mermaid, draw.io — showing "not in the vault"
+    // with the file sitting right there. A sandbox on that one response closes
+    // the threat instead of paying for it forever.
+    let tmp = TempVault::new();
+    tmp.put(
+        "notes/diagram.svg",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\"><rect width=\"1\" height=\"1\"/></svg>",
+    );
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "GET", "/api/file/notes/diagram.svg", &[], "").await;
+    assert_eq!(reply.status, 200, "an SVG in the vault was not served");
+    assert_eq!(
+        reply.headers.get("content-type").map(String::as_str),
+        Some("image/svg+xml")
+    );
+
+    let policy = reply
+        .headers
+        .get("content-security-policy")
+        .map(String::as_str)
+        .unwrap_or_default();
+    // `sandbox` with no tokens is the whole point: no script, no plugins, no
+    // forms, no navigation, no same-origin access. `default-src 'none'` stops it
+    // fetching anything to phone home with.
+    assert!(
+        policy.contains("sandbox"),
+        "an SVG was served without a sandbox: {policy}"
+    );
+    assert!(
+        policy.contains("default-src 'none'"),
+        "an SVG was served able to fetch: {policy}"
+    );
+
+    // And a PNG beside it did not inherit a looser policy — the point is one
+    // format, one header.
+    let png = request(addr, "GET", "/api/file/notes/shot.png", &[], "").await;
+    assert_eq!(png.status, 404, "the fixture should not hold this yet");
+}
+
+#[tokio::test]
+async fn an_html_file_pretending_to_be_a_drawing_is_still_refused() {
+    // The allowlist exists to stop this origin serving HTML. Recognising SVG by
+    // its *root* element rather than by "contains `<svg`" is what keeps that
+    // true — and serving this as `image/svg+xml` would not have made it safe.
+    let tmp = TempVault::new();
+    tmp.put("notes/trap.svg", "<html><body><svg/></body></html>");
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "GET", "/api/file/notes/trap.svg", &[], "").await;
+    assert_eq!(reply.status, 415, "an HTML page was served as a drawing");
 }
