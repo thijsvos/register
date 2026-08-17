@@ -95,3 +95,27 @@ test('the file count still counts notes, not days', async ({ page }) => {
   await expect(page.locator('footer')).toContainText('1')
   await expect(page.locator('[aria-label="Index"]')).toContainText('[1]')
 })
+
+test('⌘D opens today, and the palette says so', async ({ page }) => {
+  // Rev T. §08 P7 always read "⌘D / GO DAILY"; §02b Screen 2 drew the key
+  // against GO · TODAY / TASKS and the build followed the frame, so for four
+  // months a whole modifier reached a view `G T` already reached while the note
+  // you open every morning had only the chord.
+  await page.goto(server.url)
+  await page.keyboard.press('ControlOrMeta+d')
+
+  // Today's log, which the fixture does not contain — so this also pins that
+  // the key creates the day rather than failing on a note that is not there.
+  const today = new Date().toISOString().slice(0, 10)
+  await expect(page.locator('header .crumb')).toContainText(today)
+  await expect(page.locator('.cm-content')).toBeVisible()
+
+  // And the two rows carry the keys the ruling gave them, because §01 asks a
+  // control to show its key and a swap the palette did not follow would be
+  // worse than no swap at all.
+  await page.keyboard.press('ControlOrMeta+k')
+  const palette = page.getByRole('dialog')
+  const row = (label: string) => palette.getByRole('option').filter({ hasText: label })
+  await expect(row('GO · DAILY LOG')).toContainText('⌘D')
+  await expect(row('GO · TODAY / TASKS')).toContainText('G T')
+})

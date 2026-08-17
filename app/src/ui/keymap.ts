@@ -157,13 +157,18 @@ export function installKeymap(): () => void {
       return
     }
 
-    // §02b Screen 2 draws this key against "GO · TODAY / TASKS", so that is what
-    // it does. The daily log keeps G D, which is what §08 P7 calls GO DAILY.
+    // §08 P7's "⌘D / GO DAILY", which §02b Screen 2 contradicted by drawing the
+    // key against GO · TODAY / TASKS. Both were normative and the frame won for
+    // four months; the ruling went the other way (Rev T). D is for the day.
+    //
+    // TODAY loses nothing: `G T` already opened it and is what Screen 2 draws
+    // now, so the aggregate keeps a key and stops being the only thing reachable
+    // two ways while the log — the note you open every morning — had one.
     if (bare && event.key.toLowerCase() === 'd') {
       event.preventDefault()
       disarm()
       chrome.closePalette()
-      go.today()
+      go.daily()
       return
     }
 
@@ -214,6 +219,12 @@ export function installKeymap(): () => void {
       const second = event.key.toLowerCase()
       disarm()
       if (second === 'd') {
+        // Kept, though ⌘D now reaches the same note. `G I` and `G T` are the
+        // rest of a family, and dropping only this one to avoid a second route
+        // would be an arbitrary hole in it — while removing a binding people
+        // already have in their hands buys nothing. The palette draws ⌘D
+        // against the row, because §01 asks a control to show *a* key and that
+        // is the shorter one.
         event.preventDefault()
         go.daily()
       } else if (second === 'i') {

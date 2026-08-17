@@ -243,9 +243,10 @@ test('leaving the viewer puts the note back, not the file', async ({ page }) => 
   await page.locator('.cm-embed').first().click()
   await expect(page.locator('.media img')).toBeVisible()
 
-  // ⌘D raises TODAY; it does not toggle back, so the note is reopened the way a
-  // reader would — from the index.
-  await page.keyboard.press('ControlOrMeta+d')
+  // `G T` raises TODAY; it does not toggle back, so the note is reopened the way
+  // a reader would — from the index.
+  await page.keyboard.press('g')
+  await page.keyboard.press('t')
   await expect(page.locator('.media')).toHaveCount(0)
 
   await page.getByRole('button', { name: /Note/ }).first().click()

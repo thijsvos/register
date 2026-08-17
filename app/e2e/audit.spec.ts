@@ -60,8 +60,9 @@ test('a whole session without touching the mouse', async ({ page }) => {
   await page.keyboard.press('[')
   await expect(page.getByRole('complementary', { name: 'Index' })).toBeVisible()
 
-  // ⌘D is TODAY; the aggregate is reachable and so is the way back.
-  await page.keyboard.press('ControlOrMeta+d')
+  // `G T` is TODAY since Rev T; the aggregate is reachable and so is the way back.
+  await page.keyboard.press('g')
+  await page.keyboard.press('t')
   await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible()
 
   // Enter from <body> hands the caret back to the note.
@@ -220,9 +221,9 @@ test('Escape is the way out of every raised view', async ({ page }) => {
   await expect(page.locator('.cm-content')).toContainText('Body.')
 
   // §02b raises TODAY and SETTINGS over the note exactly as it raises a media
-  // surface, and none of the three drew a way back — so a reader who pressed
-  // ⌘D had to know that opening a note from the index was the route home.
-  for (const raise of ['ControlOrMeta+d', 'settings'] as const) {
+  // surface, and none of the three drew a way back — so a reader who reached
+  // TODAY had to know that opening a note from the index was the route home.
+  for (const raise of ['today', 'settings'] as const) {
     if (raise === 'settings') {
       await page.keyboard.press('ControlOrMeta+k')
       await page.getByRole('combobox').fill('SETTINGS')
@@ -230,7 +231,14 @@ test('Escape is the way out of every raised view', async ({ page }) => {
       await expect(page.locator('.settings')).toBeVisible()
       await expect(page.locator('.settings .back')).toContainText('Esc')
     } else {
-      await page.keyboard.press(raise)
+      // Through the palette, like SETTINGS beside it. `G T` is the key, but a
+      // chord is deliberately inert while the caret is in a note — that is what
+      // stops `g` navigating mid-sentence — and this loop comes back to the
+      // editor between iterations. Raising it the way that works from anywhere
+      // keeps the test measuring the exit rather than the entry.
+      await page.keyboard.press('ControlOrMeta+k')
+      await page.getByRole('combobox').fill('TODAY')
+      await page.keyboard.press('Enter')
       await expect(page.locator('.today')).toBeVisible()
       await expect(page.locator('.today .back')).toContainText('Esc')
     }
@@ -245,7 +253,9 @@ test('Escape is the way out of every raised view', async ({ page }) => {
   }
 
   // And clicking it does what the key does.
-  await page.keyboard.press('ControlOrMeta+d')
+  await page.keyboard.press('ControlOrMeta+k')
+  await page.getByRole('combobox').fill('TODAY')
+  await page.keyboard.press('Enter')
   await expect(page.locator('.today')).toBeVisible()
   await page.getByRole('button', { name: /^\[Esc\] back/i }).click()
   await expect(page.locator('.cm-content')).toContainText('Body.')

@@ -36,17 +36,19 @@ export function allCommands(): Command[] {
       keys: 'N',
       run: () => go.create(UNTITLED),
     },
-    // §02b Screen 2 draws this row with [⌘D] against it.
+    // §02b Screen 2 drew this row with [⌘D] against it and §08 P7 gave ⌘D to
+    // the daily log. Both were normative; Rev T settled it on P7's side, so the
+    // keys below are swapped from what shipped for four months.
     {
       id: 'today',
       label: 'GO · TODAY / TASKS',
-      keys: '⌘D',
+      keys: 'G T',
       run: () => go.today(),
     },
     {
       id: 'daily',
       label: 'GO · DAILY LOG',
-      keys: 'G D',
+      keys: '⌘D',
       run: () => go.daily(),
     },
     {
