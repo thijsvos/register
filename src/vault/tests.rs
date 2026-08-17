@@ -1529,6 +1529,33 @@ fn a_claim_left_by_a_killed_process_does_not_lock_the_vault_out() {
 }
 
 #[test]
+fn a_claim_left_by_a_different_vault_on_a_recycled_inode_is_stale() {
+    // The claim is keyed on device and inode, and a filesystem reissues an inode
+    // the moment the directory using it is deleted — routinely on ext4. So a
+    // throwaway vault leaves a claim filed under the key a later, unrelated
+    // vault computes, and obeying it means the newcomer refuses to start.
+    // Measured on a two-core CI runner as a dozen servers failing to come up at
+    // once, where this machine had never collided.
+    let tmp = TempVault::new();
+    let other = TempVault::new();
+    let vault = tmp.open();
+    let path = vault.claim_path_for_test();
+
+    // A live pid — this process — so the liveness probe would say "held". What
+    // makes it stale is that it is about a different directory.
+    fs::write(
+        &path,
+        format!("pid {} · {}\n", std::process::id(), other.path().display()),
+    )
+    .expect("write a claim");
+
+    let taken = vault
+        .claim()
+        .expect("a claim about another directory is not about this one");
+    drop(taken);
+}
+
+#[test]
 fn a_claim_naming_a_vault_that_is_gone_is_stale_without_asking_about_its_pid() {
     // The claim is keyed on the directory's inode, and a filesystem reissues an
     // inode once the directory holding it is deleted — so every throwaway vault

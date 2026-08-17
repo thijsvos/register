@@ -597,10 +597,27 @@ fn holder_is_gone(path: &Path, held: &str) -> bool {
     // reissues an inode once the directory using it is deleted, so every
     // throwaway vault that ever existed can leave a file that a later, unrelated
     // vault has to disprove. One `stat` rather than a `fork`+`exec` to do it.
-    if let Some((_, root)) = held.split_once(" · ")
-        && !Path::new(root.trim()).exists()
-    {
-        return true;
+    if let Some((_, named)) = held.split_once(" · ") {
+        let named = Path::new(named.trim());
+        if !named.exists() {
+            return true;
+        }
+        // The claim names a directory that still exists but is **not this one**.
+        // The file is keyed on device and inode, and a filesystem reissues an
+        // inode as soon as the directory using it is deleted — routinely on
+        // ext4 — so a claim left by a throwaway vault lands on the key a later,
+        // unrelated vault computes. Without this the newcomer obeys a claim that
+        // was never about it and refuses to start: measured on a two-core CI
+        // runner as a dozen servers failing to come up at once, where a
+        // developer machine had never once collided.
+        //
+        // Safe because it compares identities rather than spellings: a live
+        // server's own root resolves to the inode its claim is filed under, and
+        // a bind-mount alias has a different device and so a different key
+        // entirely. Anything unreadable answers "not stale" and the claim holds.
+        if claim_path(named) != path {
+            return true;
+        }
     }
 
     // `kill -0` sends no signal; it only reports whether the process could be
