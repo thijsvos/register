@@ -104,6 +104,18 @@ is not in the binary until you `cargo install --path . --force`, and the
 symptom is a fix that appears not to work. `register serve --assets app/dist`
 reads the UI from disk instead, which is the fast loop for anything visual.
 
+**`pnpm dev` needs the server told about it.** The origin guard accepts only the
+origin the app is served from, so vite on another port is a stranger to it:
+
+```sh
+register serve ~/vault --dev-origin http://localhost:5173
+```
+
+It used to accept any loopback origin, which meant every other web server on
+your machine had the same authority — a page open in a tab on
+`http://localhost:3000` could read your vault, write to it and delete from it.
+That is a hole in every install to save contributors a flag, so it is a flag.
+
 The container has the same shape of trap: `docker compose up` reuses the image
 it built last time, so building from source needs `up --build` or your change is
 not in there at all.

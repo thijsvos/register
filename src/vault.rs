@@ -197,6 +197,12 @@ pub enum Error {
     /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
     /// 50 MB for the whole process.
     TooLarge,
+    /// The ref this path would take is already held by another note. §04 Rev F:
+    /// a ref is allocated once and never reissued, so two notes sharing one is a
+    /// vault whose `[[NNN]]` links have stopped being unambiguous.
+    RefTaken {
+        taken: String,
+    },
     /// Another `register` already holds this vault. Carries the lock's path and
     /// whatever it says, so the message can name both rather than tell somebody
     /// there is a problem and leave them to find it.
@@ -217,6 +223,9 @@ impl fmt::Display for Error {
             Self::UnsupportedMedia => write!(f, "not an image or pdf this app will serve"),
             Self::NoSuchFolder => write!(f, "no such folder"),
             Self::TooLarge => write!(f, "file is larger than this app will serve"),
+            Self::RefTaken { taken } => {
+                write!(f, "that ref is already held by {taken}")
+            }
             Self::AlreadyServed { lock, held } => write!(
                 f,
                 "another register is already serving this vault ({held}).\n\
@@ -876,6 +885,26 @@ impl Vault {
         Ok(format!("{:0width$}", highest + 1, width = width))
     }
 
+    /// The note already holding `rel`'s ref, if one does and it is not `rel`.
+    ///
+    /// Only asked when a note is being *created*: an existing note rewriting
+    /// itself holds its own ref, and a conflict copy deliberately has none. A
+    /// path with no ref at all — a daily log — cannot collide, so it is free.
+    fn ref_holder(&self, rel: &str) -> Result<Option<String>> {
+        let Some(wanted) = ref_from_path(rel) else {
+            return Ok(None);
+        };
+        for other in self.paths()? {
+            if other == rel {
+                continue;
+            }
+            if ref_from_path(&other).is_some_and(|found| found == wanted) {
+                return Ok(Some(other));
+            }
+        }
+        Ok(None)
+    }
+
     /// Vault-relative paths of trashed notes, as they were before deletion.
     fn trashed_paths(&self) -> Vec<String> {
         let root = self.root.join(APP_DIR).join(TRASH_DIR);
@@ -1042,6 +1071,24 @@ impl Vault {
             // than as the 500 this arm used to raise.
             Err(e) => return Err(e.into()),
         };
+
+        // A ref is allocated once and never reissued (§04 Rev F), and this is
+        // where that stops being a promise the *client* keeps. The server hands
+        // out `nextRef`, so one tab cannot reissue one — but two tabs that fetch
+        // the tree in the same instant both receive `015`, pick different slugs,
+        // and land on different paths, so the free-name check passes for both
+        // and two notes end up sharing a ref. A `[[015]]` link then resolves to
+        // whichever the index reaches first.
+        //
+        // Checked here rather than by adding a route that allocates, because the
+        // shape the server already has is "verify what the client assumed" — the
+        // etag check three lines down is the same idea — and it is inside the
+        // write lock, so the second tab loses cleanly rather than racing.
+        if current.is_none()
+            && let Some(taken) = self.ref_holder(rel)?
+        {
+            return Err(Error::RefTaken { taken });
+        }
 
         if let Some(expected) = if_match {
             // Matched against `Option`, never against `unwrap_or_default()`.

@@ -338,9 +338,26 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
     }
     // Cheaper than staging and finding out: `add -A` on a large vault is real
     // work, and the common case at idle is that nothing changed.
-    match git(root, &["status", "--porcelain"]) {
-        Some(dirty) if !dirty.trim().is_empty() => {}
+    let porcelain = match git(root, &["status", "--porcelain"]) {
+        Some(dirty) if !dirty.trim().is_empty() => dirty,
         _ => return Checkpoint::Nothing,
+    };
+
+    // Your index is yours. `add -A` sweeps whatever you staged with `git add -p`
+    // into the app's commit, which quietly destroys work you were composing —
+    // and a checkpoint is bookkeeping, so it has no business being the thing
+    // that decides your next commit. It stands aside instead, and says so, and
+    // resumes on its own the moment you have finished.
+    //
+    // Read from the porcelain already in hand rather than by asking again: the
+    // first column is the index, and anything but a space or `?` there is
+    // something staged.
+    if porcelain.lines().any(staged) {
+        return Checkpoint::Refused(
+            "something is staged, and a checkpoint would commit it. Nothing was written; \
+             checkpoints resume once your index is clear."
+                .to_owned(),
+        );
     }
 
     if let Err(why) = try_git(root, &["add", "-A"]) {
@@ -374,6 +391,16 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
 /// the server. Off unless the file says otherwise — §08 P12 is explicit that
 /// this is "behind config flags, OFF by default", and silently rewriting
 /// somebody's git history is not a default.
+/// Is this porcelain line something the user put in the index?
+///
+/// `XY path`, where X is the index and Y the working tree. A space means
+/// unchanged there and `?` is the untracked marker — `??` is a new file nobody
+/// has staged, which is the ordinary state of a vault being written in and must
+/// not stand a checkpoint down.
+fn staged(line: &str) -> bool {
+    !matches!(line.as_bytes().first(), None | Some(b' ') | Some(b'?'))
+}
+
 pub fn checkpoints_enabled(config: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(config)
         .ok()

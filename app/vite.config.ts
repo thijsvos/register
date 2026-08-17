@@ -39,6 +39,18 @@ export default defineConfig({
   },
   server: {
     // The Rust binary owns /api; vite only serves the shell in dev.
+    //
+    // The server has to be told to accept this origin, because it otherwise
+    // accepts only the one it serves the app from:
+    //
+    //     register serve ~/vault --dev-origin http://localhost:5173
+    //
+    // It used to accept any loopback origin so this proxy would work without a
+    // flag, which handed the same authority to every other web server on the
+    // machine — a page on `http://localhost:3000`, in any tab, could read the
+    // vault and write to it. `changeOrigin` rewrites Host, not Origin, so what
+    // arrives is `Origin: http://localhost:5173` against `Host: localhost:7777`
+    // and the two no longer match by design.
     proxy: {
       '/api': {
         target: 'http://localhost:7777',

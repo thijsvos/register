@@ -61,6 +61,15 @@ pub struct AppState {
     /// `Checkpointer::with_idle`'s reason: a test should not have to wait half a
     /// minute to find out whether this works.
     ping: Duration,
+    /// One extra origin the guard will accept, for `pnpm dev`.
+    ///
+    /// Empty in every shipped configuration. The guard used to accept *any*
+    /// loopback origin so vite could proxy from another port — which handed the
+    /// same authority to every other web server on the machine, so a page on
+    /// `http://localhost:3000` could read, write and delete the vault from a
+    /// tab. That is a hole in every install to buy a convenience for
+    /// contributors; it is a flag they pass instead.
+    dev_origin: Option<String>,
 }
 
 impl AppState {
@@ -72,6 +81,7 @@ impl AppState {
             token: None,
             assets: None,
             ping: PING_EVERY,
+            dev_origin: None,
         }
     }
 
@@ -93,6 +103,12 @@ impl AppState {
     }
 
     /// Require this token from anything that is not loopback (§08 P12).
+    /// Accept this origin as well as the one the app is served from.
+    pub fn with_dev_origin(mut self, origin: Option<String>) -> Self {
+        self.dev_origin = origin;
+        self
+    }
+
     pub fn with_token(mut self, token: Option<String>) -> Self {
         // An empty `--token ""` is a mistake, not a secret. Refusing it here
         // stops it becoming "remote mode is on and lets everyone in".
@@ -366,7 +382,10 @@ pub fn router(state: AppState) -> Router {
         // note with an unexplained 413 that nothing in the codebase decided on.
         .layer(DefaultBodyLimit::max(MAX_NOTE_BYTES))
         .layer(middleware::from_fn(hardening_headers))
-        .layer(middleware::from_fn(same_origin_only))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            same_origin_only,
+        ))
         // Outside `same_origin_only`, so it runs first: an unauthenticated
         // stranger is refused before anything reasons about their Origin.
         .layer(middleware::from_fn_with_state(state.clone(), token_gate))
@@ -988,7 +1007,11 @@ async fn hardening_headers(request: Request, next: Next) -> Response {
     response
 }
 
-async fn same_origin_only(request: Request, next: Next) -> Result<Response, Response> {
+async fn same_origin_only(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, Response> {
     // A request that presented the token is authenticated, and the Host rule
     // below does not apply to it.
     //
@@ -1021,16 +1044,51 @@ async fn same_origin_only(request: Request, next: Next) -> Result<Response, Resp
             .into_response());
     }
 
+    // Same origin, or the one origin an operator named. Any loopback origin used
+    // to pass, because `pnpm dev` serves the UI from vite on another port — and
+    // that handed the same authority to every other web server on the machine.
+    // A page on `http://localhost:3000`, in any tab, could read the vault, write
+    // to it and delete from it. It needed no second user account and no hostile
+    // file: just something else listening. So the convenience is a flag now, and
+    // the default is what the browser calls same-origin.
+    let host = request
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    let allowed = state.dev_origin.clone();
     let foreign = request
         .headers()
         .get(header::ORIGIN)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|origin| !is_loopback(origin));
+        .is_some_and(|origin| !origin_is_ours(origin, &host, allowed.as_deref()));
     if foreign {
         return Err((StatusCode::FORBIDDEN, "cross-origin request refused\n").into_response());
     }
 
     Ok(next.run(request).await)
+}
+
+/// Is this `Origin` the one the app is served from, or the one named by
+/// `--dev-origin`?
+///
+/// Compared by authority rather than by string, because `Origin` carries a
+/// scheme and `Host` does not — and the scheme is checked separately, since an
+/// `Origin` of anything but http/https is not a page this app served.
+fn origin_is_ours(origin: &str, host: &str, dev: Option<&str>) -> bool {
+    if dev.is_some_and(|allowed| allowed.eq_ignore_ascii_case(origin.trim_end_matches('/'))) {
+        return true;
+    }
+    let Some((scheme, authority)) = origin.split_once("://") else {
+        return false;
+    };
+    if scheme != "http" && scheme != "https" {
+        return false;
+    }
+    // The port matters: `localhost:3000` and `localhost:7777` are different
+    // origins to a browser and must be different here.
+    authority.eq_ignore_ascii_case(host)
 }
 
 /// The host part of an `authority`, dropping any port and IPv6 brackets.
@@ -1051,16 +1109,6 @@ fn is_loopback_host(authority: &str) -> bool {
         || host
             .parse::<std::net::Ipv4Addr>()
             .is_ok_and(|ip| ip.is_loopback())
-}
-
-fn is_loopback(origin: &str) -> bool {
-    let Some((scheme, rest)) = origin.split_once("://") else {
-        return false;
-    };
-    if scheme != "http" && scheme != "https" {
-        return false;
-    }
-    is_loopback_host(rest)
 }
 
 // --------------------------------------------------------------------- shared
@@ -1093,6 +1141,15 @@ fn error_response(error: vault::Error) -> Response {
         )
             .into_response(),
         vault::Error::NoSuchFolder => (StatusCode::NOT_FOUND, "no such folder\n").into_response(),
+        // 409, the same status a stale etag gets, and for the same reason: the
+        // client assumed something about the vault that stopped being true, and
+        // the answer is to look again rather than to change the request. It
+        // refetches the tree, takes the next free ref and writes.
+        vault::Error::RefTaken { taken } => (
+            StatusCode::CONFLICT,
+            format!("that ref is already held by {taken}\n"),
+        )
+            .into_response(),
         // Startup-only: `claim` is taken before the listener binds, so no
         // request can ever produce this. Mapped rather than left to a catch-all
         // so that adding a variant keeps failing this match until somebody has

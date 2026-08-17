@@ -452,7 +452,12 @@ class VaultStore {
    * path either way, so the free-name guard and the ref allocation cannot drift
    * between a blank note and a templated one.
    */
-  async create(title: string, from?: string, folder?: string): Promise<void> {
+  async create(
+    title: string,
+    from?: string,
+    folder?: string,
+    retry = true,
+  ): Promise<void> {
     // Refresh first so the ref is the vault's current one, not the one it had
     // when this tab was opened.
     await this.refresh()
@@ -512,6 +517,20 @@ class VaultStore {
       const body = noteFrom(template, { ref, title, now: new Date() })
       const result = await putNote(path, body)
       if (!result.ok) {
+        // Two tabs that read the tree in the same instant are handed the same
+        // `nextRef`, and because they usually type different titles the paths
+        // differ — so the free-name check above passes for both. The server
+        // refuses the second, because §04 allocates a ref once and never
+        // reissues it. Losing that race is not an error to report: refetch and
+        // take the next one, exactly as this would have done a moment later.
+        //
+        // Once. A second failure is something other than a lost race, and a
+        // client that retried forever would be worse than one that gave up.
+        if (retry) {
+          await this.refresh()
+          await this.create(title, from, folder, false)
+          return
+        }
         this.notice = 'That note already exists on disk.'
         return
       }

@@ -229,6 +229,71 @@ fn a_path_below_a_regular_file_is_not_there_rather_than_a_server_fault() {
 }
 
 #[test]
+fn a_ref_another_note_holds_is_refused() {
+    // §04 Rev F: a ref is allocated once and never reissued. The server hands
+    // out `nextRef`, so one client cannot reissue one — but two tabs fetching
+    // the tree in the same instant both receive `015`, pick different slugs, and
+    // land on different paths, so the free-name check passes for both. A
+    // `[[015]]` link then resolves to whichever the index reaches first.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    vault
+        .write("notes/015-launch.md", NOTE, None)
+        .expect("the first tab writes");
+
+    match vault.write("notes/015-review.md", NOTE, None) {
+        Err(Error::RefTaken { taken }) => assert_eq!(taken, "notes/015-launch.md"),
+        other => panic!("expected RefTaken, got {other:?}"),
+    }
+    assert!(
+        !tmp.path().join("notes/015-review.md").exists(),
+        "the second note was written anyway"
+    );
+
+    // The next ref is free, which is what the client retries with.
+    assert!(vault.write("notes/016-review.md", NOTE, None).is_ok());
+}
+
+#[test]
+fn a_note_rewriting_itself_still_holds_its_own_ref() {
+    // The check must not fire on an ordinary save, which is every save.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    let etag = vault
+        .write("notes/015-launch.md", NOTE, None)
+        .expect("write");
+    assert!(
+        vault
+            .write("notes/015-launch.md", "second revision\n", Some(&etag))
+            .is_ok(),
+        "a note could not save over itself"
+    );
+    // And without an etag either — `create` is not the only caller.
+    assert!(vault.write("notes/015-launch.md", "third\n", None).is_ok());
+}
+
+#[test]
+fn a_path_with_no_ref_cannot_collide() {
+    // A daily log is named for its date and takes no ref (§04), and a conflict
+    // copy deliberately has none. Neither can collide, so neither is checked.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+
+    assert!(vault.write("daily/2026-08-17.md", NOTE, None).is_ok());
+    assert!(vault.write("daily/2026-08-18.md", NOTE, None).is_ok());
+
+    vault.write("notes/015-a.md", NOTE, None).expect("write");
+    assert!(
+        vault
+            .write("notes/015-a.conflict-20260817T100000000Z.md", NOTE, None)
+            .is_ok(),
+        "a conflict copy of a note was refused for taking its ref"
+    );
+}
+
+#[test]
 fn no_etag_creates_the_note() {
     let tmp = TempVault::new();
     let vault = tmp.open();
@@ -754,15 +819,19 @@ fn concurrent_deletions_never_destroy_a_note() {
 
     // Same basename, different folders: every one lands on the same
     // `<millis>-007-note.md` candidate in the trash.
+    //
+    // Seeded on disk rather than through `write`, which now refuses a second
+    // note taking a ref another note holds. That refusal guards *creation*
+    // through the API; a vault can still contain duplicate refs, because an
+    // agent editing the files directly is not something the server gets a vote
+    // on — and refusing to trash what a vault actually holds would be the wrong
+    // lesson to take from it. This is that vault.
     let folders = ["a", "b", "c", "d", "e", "f", "g", "h"];
     for folder in folders {
-        vault
-            .write(
-                &format!("{folder}/007-note.md"),
-                &format!("unique content of {folder}"),
-                None,
-            )
-            .expect("seed");
+        tmp.put(
+            &format!("{folder}/007-note.md"),
+            &format!("unique content of {folder}"),
+        );
     }
 
     let threads: Vec<_> = folders

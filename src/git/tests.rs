@@ -596,3 +596,62 @@ fn a_detached_head_has_no_branch_to_name() {
     assert_eq!(detached.branch, None);
     assert!(detached.clean, "detaching changed no file");
 }
+
+#[test]
+fn a_checkpoint_stands_aside_when_something_is_staged() {
+    // `add -A` sweeps whatever you staged with `git add -p` into the app's
+    // commit, which destroys work you were composing — and a checkpoint is the
+    // app's bookkeeping, so it has no business deciding your next commit.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nsomething\n");
+
+    // You stage a hunk.
+    let staged = std::process::Command::new("git")
+        .args(["add", "notes/004-b.md"])
+        .current_dir(tmp.path())
+        .status()
+        .expect("git add");
+    assert!(staged.success());
+
+    match checkpoint(tmp.path(), "2026-08-17T10:00:00Z") {
+        Checkpoint::Refused(why) => {
+            assert!(
+                why.contains("staged"),
+                "the refusal does not say why: {why}"
+            );
+        }
+        other => panic!("expected the checkpoint to stand aside, got {other:?}"),
+    }
+
+    // And it wrote nothing: the hunk is still yours to commit.
+    let log = std::process::Command::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(tmp.path())
+        .output()
+        .expect("git log");
+    let history = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        !history.contains("checkpoint:"),
+        "a checkpoint committed over a staged index: {history}"
+    );
+}
+
+#[test]
+fn an_untracked_note_is_not_a_staged_one() {
+    // `??` is the ordinary state of a vault being written in. Reading it as
+    // "something is staged" would stand every checkpoint down forever, which is
+    // the failure mode this rule invites.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    tmp.put(
+        "notes/004-b.md",
+        "---\nref: 004\n---\nwritten, never staged\n",
+    );
+
+    assert_eq!(
+        checkpoint(tmp.path(), "2026-08-17T10:00:00Z"),
+        Checkpoint::Committed,
+        "an untracked note should still be checkpointed"
+    );
+}

@@ -544,48 +544,124 @@ async fn a_cross_origin_request_is_refused() {
 }
 
 #[tokio::test]
-async fn loopback_origins_are_allowed_so_pnpm_dev_works() {
+async fn only_the_origin_the_app_is_served_from_is_accepted() {
+    // Any loopback origin used to pass, so `pnpm dev` could proxy from vite on
+    // another port — and that handed the same authority to every other web
+    // server on the machine. A page open in a tab on `http://localhost:3000`
+    // could read the vault, write to it and delete from it: no shared host
+    // needed, no hostile file, just something else listening.
     let tmp = TempVault::new();
     let addr = start(&tmp).await;
 
-    for origin in [
-        "http://localhost:5173",
-        "http://127.0.0.1:7777",
-        "http://[::1]:7777",
+    let ours = request(
+        addr,
+        "PUT",
+        "/api/note/notes/003-a.md",
+        &[("Origin", "http://localhost")],
+        "same origin",
+    )
+    .await;
+    assert_eq!(ours.status, 200, "the app's own origin must be accepted");
+
+    for other in [
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "https://evil.example",
     ] {
         let reply = request(
             addr,
             "PUT",
             "/api/note/notes/003-a.md",
-            &[("Origin", origin)],
-            "from the dev proxy",
+            &[("Origin", other)],
+            "from somewhere else",
         )
         .await;
-        assert_eq!(reply.status, 200, "{origin} should be allowed");
+        assert_eq!(reply.status, 403, "{other} must not be accepted");
     }
 }
 
+#[tokio::test]
+async fn a_named_dev_origin_is_accepted_and_nothing_else_is() {
+    // The convenience is a flag contributors pass, rather than a hole every
+    // install ships with.
+    let tmp = TempVault::new();
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state =
+        AppState::new(vault, events).with_dev_origin(Some("http://localhost:5173".to_owned()));
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(bound, router(state)).await;
+    });
+
+    let allowed = request(
+        addr,
+        "PUT",
+        "/api/note/notes/003-a.md",
+        &[("Origin", "http://localhost:5173")],
+        "from the dev proxy",
+    )
+    .await;
+    assert_eq!(allowed.status, 200, "the named dev origin must be accepted");
+
+    // One origin, not "any loopback origin" again by another name.
+    let refused = request(
+        addr,
+        "PUT",
+        "/api/note/notes/003-a.md",
+        &[("Origin", "http://localhost:3000")],
+        "from a different local server",
+    )
+    .await;
+    assert_eq!(refused.status, 403, "only the named origin may be accepted");
+}
+
 #[test]
-fn loopback_detection() {
-    for allowed in [
-        "http://localhost",
+fn origin_matching_is_by_authority_and_scheme() {
+    assert!(origin_is_ours(
+        "http://localhost:7777",
+        "localhost:7777",
+        None
+    ));
+    assert!(origin_is_ours(
+        "https://127.0.0.1:7777",
+        "127.0.0.1:7777",
+        None
+    ));
+    // A port is part of an origin to a browser, so it is part of one here.
+    assert!(!origin_is_ours(
+        "http://localhost:3000",
+        "localhost:7777",
+        None
+    ));
+    // Not a page this app served, whatever the authority says.
+    assert!(!origin_is_ours(
+        "file://localhost:7777",
+        "localhost:7777",
+        None
+    ));
+    assert!(!origin_is_ours("null", "localhost:7777", None));
+    assert!(!origin_is_ours("", "localhost:7777", None));
+    // A name that merely starts with ours is somebody else's.
+    assert!(!origin_is_ours(
+        "http://localhost:7777.evil.example",
+        "localhost:7777",
+        None
+    ));
+
+    let dev = Some("http://localhost:5173");
+    assert!(origin_is_ours(
         "http://localhost:5173",
-        "http://127.0.0.1:7777",
-        "https://127.0.0.5:1",
-        "http://[::1]:7777",
-    ] {
-        assert!(is_loopback(allowed), "{allowed} should be loopback");
-    }
-    for refused in [
-        "https://evil.example",
-        "http://localhost.evil.example",
-        "http://127.0.0.1.evil.example",
-        "null",
-        "file://",
-        "",
-    ] {
-        assert!(!is_loopback(refused), "{refused} should not be loopback");
-    }
+        "localhost:7777",
+        dev
+    ));
+    assert!(!origin_is_ours(
+        "http://localhost:5174",
+        "localhost:7777",
+        dev
+    ));
 }
 
 #[tokio::test]

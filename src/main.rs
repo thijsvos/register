@@ -64,6 +64,17 @@ enum Command {
         /// `pnpm build` is enough, with no reinstall.
         #[arg(long, value_name = "DIR")]
         assets: Option<PathBuf>,
+        /// Also accept requests from this origin, for `pnpm dev`.
+        ///
+        /// The guard otherwise accepts only the origin the app is served from.
+        /// It used to accept any loopback origin so vite could proxy from
+        /// another port — which gave the same authority to every other web
+        /// server on the machine, so a page open in a tab on
+        /// `http://localhost:3000` could read, write and delete the vault. A
+        /// hole in every install to buy contributors a convenience; they pass
+        /// this instead. Example: `--dev-origin http://localhost:5173`.
+        #[arg(long, value_name = "ORIGIN")]
+        dev_origin: Option<String>,
     },
     /// Scaffold a new vault.
     Init {
@@ -102,13 +113,24 @@ async fn main() -> ExitCode {
             token_file,
             allow_tokenless_network,
             assets,
+            dev_origin,
         } => match read_token(token, token_file.as_deref()) {
             Err(message) => {
                 eprintln!("{message}");
                 ExitCode::FAILURE
             }
             Ok(token) => {
-                match serve(vault, &host, port, token, allow_tokenless_network, assets).await {
+                match serve(
+                    vault,
+                    &host,
+                    port,
+                    token,
+                    allow_tokenless_network,
+                    assets,
+                    dev_origin,
+                )
+                .await
+                {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(message) => {
                         eprintln!("{message}");
@@ -253,6 +275,44 @@ fn create(title: &str, at: Option<&Path>) -> Result<String, String> {
     scaffold::create(&vault, title).map_err(|error| format!("new: {error}"))
 }
 
+/// Does this machine plausibly have other people on it?
+///
+/// A weak signal by construction — there is no portable way to ask "am I alone
+/// here" — so it errs towards silence. More than one real home directory is the
+/// cheapest thing that distinguishes a laptop from a shared box, and being wrong
+/// costs one extra line on a server or one missing line at home. It never fails
+/// the start: a machine whose home directory root cannot be read is a machine
+/// this has nothing to say about.
+fn shared_host() -> bool {
+    #[cfg(unix)]
+    {
+        let root = if cfg!(target_os = "macos") {
+            "/Users"
+        } else {
+            "/home"
+        };
+        let Ok(entries) = std::fs::read_dir(root) else {
+            return false;
+        };
+        entries
+            .flatten()
+            .filter(|entry| {
+                // `Shared`, `.localized` and the like are not people.
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                !name.starts_with('.')
+                    && name != "Shared"
+                    && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            })
+            .count()
+            > 1
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
 async fn serve(
     root: PathBuf,
     host: &str,
@@ -260,6 +320,7 @@ async fn serve(
     token: Option<String>,
     allow_tokenless_network: bool,
     assets: Option<PathBuf>,
+    dev_origin: Option<String>,
 ) -> Result<(), String> {
     // Argument validation first, before anything binds a port or prints a
     // banner. A refusal that follows "register · vault … · http://…" reads as a
@@ -368,13 +429,29 @@ published to loopback, a firewall — then say so explicitly:
     let state = server::AppState::new(vault, events)
         .bound_to(addr)
         .with_token(token)
-        .with_assets(assets);
+        .with_assets(assets)
+        .with_dev_origin(dev_origin.clone());
+    if let Some(origin) = dev_origin.as_deref() {
+        println!("register · also accepting requests from {origin}");
+    }
     if state.guarded() {
         println!("register · remote mode: a token is required from anything but localhost");
     } else if !addr.ip().is_loopback() {
         println!(
             "register · WARNING: serving {addr} with no token. Anything that can reach \
              this port can read and write the vault."
+        );
+    } else if shared_host() {
+        // Loopback is trusted as the vault's owner, which is right on your own
+        // machine and is what makes `register serve ~/vault` the whole of setup.
+        // On a shared host it is not: every other account can reach 127.0.0.1,
+        // so they get read, write and delete on a vault whose mode 700 is
+        // keeping them out at the filesystem level — the app handing over what
+        // the filesystem denies. Said here rather than only in SECURITY.md,
+        // because the people this reaches will never read a file in the repo.
+        println!(
+            "register · note: any account on this machine can reach {addr}. \
+             On a shared host, start with --token."
         );
     }
     server::serve(listener, state)
