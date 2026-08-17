@@ -11,6 +11,27 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tokio::sync::broadcast;
 
+/// Say something on stdout, and survive nobody listening.
+///
+/// `println!` **panics** when the pipe is closed — Rust sets `SIGPIPE` to
+/// `SIG_IGN` at startup, so the write returns `EPIPE` and the macro turns that
+/// into `failed printing to stdout: Broken pipe`, which unwinds out of `main`
+/// and takes the server with it. A serving process must not die because nobody
+/// is reading its console: `register serve … | head -1`, a supervisor that
+/// stopped draining, or a test that reads the banner and drops the pipe are all
+/// ordinary, and none of them is a reason to stop answering requests.
+///
+/// Found the hard way. A second banner line — printed only when the host looks
+/// shared, which is true on a CI runner and false on a laptop — killed seventeen
+/// servers on the runner and none here, and the panic it produced was sitting in
+/// the log being read as noise for three rounds.
+macro_rules! say {
+    ($($arg:tt)*) => {{
+        use std::io::Write as _;
+        let _ = writeln!(std::io::stdout(), $($arg)*);
+    }};
+}
+
 /// How many events may queue for a client before it starts missing them. A
 /// client that lags resyncs from `/api/tree` rather than stalling the vault.
 const EVENT_BACKLOG: usize = 256;
@@ -102,7 +123,7 @@ enum Command {
 async fn main() -> ExitCode {
     match Cli::parse().command {
         Command::Health => {
-            println!("ok");
+            say!("ok");
             ExitCode::SUCCESS
         }
         Command::Serve {
@@ -148,7 +169,7 @@ async fn main() -> ExitCode {
 fn report(outcome: Result<String, String>) -> ExitCode {
     match outcome {
         Ok(said) => {
-            println!("{said}");
+            say!("{said}");
             ExitCode::SUCCESS
         }
         Err(message) => {
@@ -350,10 +371,10 @@ async fn serve(
         let made = scaffold::init(&root, false)
             .map_err(|error| format!("init {}: {error}", root.display()))?;
         for rel in &made.created {
-            println!("  + {rel}");
+            say!("  + {rel}");
         }
         for note in &made.notes {
-            println!("  ! {note}");
+            say!("  ! {note}");
         }
     }
 
@@ -407,7 +428,7 @@ published to loopback, a firewall — then say so explicitly:
         ));
     }
 
-    println!(
+    say!(
         "register · vault {} · http://{addr}",
         vault.root().display()
     );
@@ -415,7 +436,7 @@ published to loopback, a firewall — then say so explicitly:
     // Said out loud: this is the one mode where what you are looking at is not
     // what the binary would ship.
     if let Some(dir) = assets.as_deref() {
-        println!(
+        say!(
             "register · serving the UI from {} (not the built-in copy)",
             dir.display()
         );
@@ -432,12 +453,12 @@ published to loopback, a firewall — then say so explicitly:
         .with_assets(assets)
         .with_dev_origin(dev_origin.clone());
     if let Some(origin) = dev_origin.as_deref() {
-        println!("register · also accepting requests from {origin}");
+        say!("register · also accepting requests from {origin}");
     }
     if state.guarded() {
-        println!("register · remote mode: a token is required from anything but localhost");
+        say!("register · remote mode: a token is required from anything but localhost");
     } else if !addr.ip().is_loopback() {
-        println!(
+        say!(
             "register · WARNING: serving {addr} with no token. Anything that can reach \
              this port can read and write the vault."
         );
@@ -449,7 +470,7 @@ published to loopback, a firewall — then say so explicitly:
         // keeping them out at the filesystem level — the app handing over what
         // the filesystem denies. Said here rather than only in SECURITY.md,
         // because the people this reaches will never read a file in the repo.
-        println!(
+        say!(
             "register · note: any account on this machine can reach {addr}. \
              On a shared host, start with --token."
         );

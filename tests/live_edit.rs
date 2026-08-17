@@ -777,3 +777,65 @@ fn assets_that_are_not_a_directory_are_refused_before_serving() {
         "it printed a serving banner and then refused: {printed}"
     );
 }
+
+#[test]
+fn a_server_survives_nobody_reading_its_console() {
+    // `println!` **panics** when stdout is closed: Rust ignores SIGPIPE, so the
+    // write returns EPIPE and the macro unwinds — and out of `main` that takes
+    // the whole server with it. A serving process must not die because nobody is
+    // draining its console. `register serve ~/vault | head -0` is this exactly.
+    //
+    // Found the expensive way. A banner line printed only when the host looks
+    // shared — true on a CI runner, false on a laptop — raced the test letting go
+    // of the pipe, and killed seventeen servers there and none here across four
+    // rounds, while `failed printing to stdout: Broken pipe` sat in the log being
+    // read as noise.
+    //
+    // The pipe is closed *before* the first write rather than after the banner,
+    // which is what makes this deterministic: the start-up lines otherwise land
+    // in the pipe buffer before any reader can let go, and the race that bit CI
+    // cannot be scheduled on demand. A fixed port stands in for the banner this
+    // deliberately never reads.
+    const PORT: &str = "7899";
+
+    let root = scratch("closed-stdout");
+    let vault = root.join("vault");
+    register(&["init", vault.to_str().expect("utf-8")], &root);
+
+    let mut child = Command::new(BINARY)
+        .args(["serve", vault.to_str().expect("utf-8"), "--port", PORT])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("spawn server");
+
+    // Nobody ever reads it. The next thing the server says goes nowhere.
+    drop(child.stdout.take().expect("piped stdout"));
+
+    let addr = format!("127.0.0.1:{PORT}");
+    let deadline = Instant::now() + PATIENCE;
+    let mut stream = loop {
+        match TcpStream::connect(&addr) {
+            Ok(stream) => break stream,
+            Err(error) => assert!(
+                Instant::now() < deadline,
+                "the server never served with its console closed: {error}"
+            ),
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+
+    stream
+        .set_read_timeout(Some(PATIENCE))
+        .expect("set timeout");
+    let request = format!("GET /api/tree HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");
+    stream.write_all(request.as_bytes()).expect("write request");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).expect("read response");
+    assert!(
+        raw.contains("\"notes\""),
+        "a server whose console closed stopped answering: {raw}"
+    );
+
+    let _ = child.kill();
+    let _ = child.wait();
+}

@@ -303,6 +303,36 @@ rather than with the outcome.
 
 | **§06 budgeted no CSS** | Built at 10 kB gz, against 4.4 today. `size-limit` weighed `*.js` only, so the one render-blocking asset was unweighed — in a design system where a whole change can be pure CSS, which is exactly why nobody would notice the day it stopped being small. | A number that needs raising for ordinary work, which would mean the design system had grown rather than the budget being wrong. |
 
+### The one CI found that a laptop could not
+
+`register serve` **died when nobody read its stdout**, and it took four CI rounds
+to see it.
+
+`println!` panics on a closed pipe — Rust sets `SIGPIPE` to `SIG_IGN`, so the
+write returns `EPIPE` and the macro unwinds out of `main`. The banner line added
+for the loopback warning is printed only when the host looks shared, which is
+true on a GitHub runner and false on a developer machine; `tests/compat.rs` reads
+one banner line and lets go of the pipe, so on the runner the *next* line met a
+closed pipe and killed the server. Seventeen of them, in the same millisecond.
+
+Three fixes went in ahead of it, all correct, none of them the cause: a reset
+after a response is tolerable, an idempotent GET is retryable, and a claim keyed
+on an inode must not be believed when the inode has been recycled. What kept the
+search going in circles was the diagnostic — it asked whether `/proc/<pid>`
+existed, and that directory survives for a **zombie**, so a server that had
+exited and not been reaped was reported as "still running".
+
+Two lessons worth the cost. **A `failed printing to stdout: Broken pipe` panic
+was in the very first log** and was read as noise for three rounds. And a
+diagnostic that cannot distinguish *alive* from *exited-and-unreaped* is worse
+than none, because it answers confidently.
+
+Every stdout write in `main.rs` goes through `say!` now, which ignores a broken
+pipe. `register serve ~/vault | head -0` is the same shape and is pinned by
+`a_server_survives_nobody_reading_its_console` — closing the pipe *before* the
+first write, because the start-up lines otherwise land in the buffer before any
+reader can let go, and the race that bit CI cannot be scheduled on demand.
+
 ### A note on the latency budgets
 
 They failed five times in this session and every one was the same artifact: the
