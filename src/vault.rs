@@ -1152,8 +1152,9 @@ impl Vault {
     /// Every deletion still in the trash, newest first (§02b Screen 9).
     ///
     /// Newest first because a restore is nearly always the thing that just
-    /// happened, and the stamp sorts lexically in time order — which is what
-    /// `<stamp>` being an ISO instant buys.
+    /// happened. The stamp is `now_millis()`, so sorting the names lexically is
+    /// time order while they are all the same width — true until the year 2286,
+    /// and the screen parses the number rather than trusting the shape.
     pub fn buckets(&self) -> Result<Vec<Bucket>> {
         let root = self.root.join(APP_DIR).join(TRASH_DIR);
         let Ok(entries) = fs::read_dir(&root) else {

@@ -17,6 +17,16 @@ const FRAME = { width: 1400, height: 900 }
 
 export default defineConfig({
   testDir: './e2e',
+  // `shots.spec.ts` writes the README's screenshots rather than asserting
+  // anything, so it is not part of the suite — it is run on purpose, by
+  // `pnpm shots`, when the frame has changed enough that the pictures lie.
+  // Kept as code rather than as two files somebody remembers to recapture,
+  // because a screenshot nobody can regenerate is a screenshot that goes stale.
+  //
+  // Gated on the variable rather than excluded outright: `testIgnore` wins even
+  // when the file is named on the command line, so an unconditional one makes
+  // the shots unrunnable rather than opt-in.
+  testIgnore: process.env.SHOTS === undefined ? '**/shots.spec.ts' : [],
   // Timings are the point of half these tests, and a parallel worker measuring
   // latency while another worker builds a 1000-note vault measures the machine.
   workers: 1,

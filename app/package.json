@@ -14,7 +14,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "size": "size-limit",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "shots": "SHOTS=1 playwright test --project=chromium e2e/shots.spec.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.7",

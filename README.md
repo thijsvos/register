@@ -55,8 +55,8 @@ so this table is a convenience, not a manual.
 | Key | Does |
 |---|---|
 | `⌘K` / `Ctrl-K` | Command palette — search, commands, templates |
-| `⌘D` | TODAY — every open task in the vault, grouped by note |
-| `G` `D` · `G` `I` | The daily log · the inbox, note `000` |
+| `⌘D` | Today's daily log |
+| `G` `T` · `G` `I` | TODAY, every open task in the vault · the inbox, note `000` |
 | `N` · `I` | New note · switch light ↔ dark |
 | `[` · `]` | Toggle the index · the inspector |
 | `Esc` · `↵` | Leave the editor · go back into it |
@@ -84,19 +84,44 @@ focused index row puts the new note in that folder.
 
 **Nothing is ever hard-deleted.** `⌫` on an index row asks a single question,
 then moves the files to `.register/trash/<timestamp>/` keeping the paths they
-had, so putting them back is one `mv`. A folder takes everything under it,
-images and PDFs included. Trashed notes still count when the server hands out the
-next reference number, so a `[[003]]` written last month can never quietly start
-pointing at different prose.
+had. A folder takes everything under it, images and PDFs included. Trashed notes
+still count when the server hands out the next reference number, so a `[[003]]`
+written last month can never quietly start pointing at different prose.
+
+`GO · TRASH` in ⌘K shows what is in there and puts it back — folders and all,
+recreating any that have since gone. A path something else now occupies is
+skipped rather than overwritten, and the screen says so. Purging is the one
+operation in the product that really destroys, and it is the only way a
+reference number is ever handed out twice.
+
+<picture>
+  <img alt="The trash: two deletions listed by date and original path, each offering restore and purge" src="docs/screenshot-trash.png">
+</picture>
+
+**Reorganising is not Finder's job.** `MOVE archive` in ⌘K renames or moves the
+open note — or a whole folder — and the confirm says how many references it will
+repoint before it touches one. Usually none: `[[wikilinks]]` resolve by title or
+reference number rather than by path, so they survive a move untouched, and a
+folder carries its images with it. Only a relative `![](image.png)` left behind
+needs help, and it is kept relative.
+
+**Files that are not notes have a home too.** `GO · ATTACHMENTS` lists every
+image and PDF in the vault with the notes pointing at it — and marks the ones
+nothing points at, which used to be invisible because the index is a register of
+notes.
 
 **The journal is a folder that stays shut.** `G` `D` opens today's log; the
 DAILY folder in the index holds every other day, newest first, each row showing
 its date and weekday. It costs one row until you open it, which is why a year of
 daily logs doesn't bury the notes you actually filed.
 
-**Settings** (`GO · SETTINGS` in ⌘K) keeps the scheme and the body face in
-`.register/config.json`, and your own licensed font in `.register/fonts/` —
-nothing in browser storage, because the vault is the only state there is.
+**Settings** (`GO · SETTINGS` in ⌘K) keeps your own licensed font in
+`.register/fonts/` and nothing in browser storage, because the vault is the only
+state there is. Settings live in two files, split by what the setting is *about*:
+the scheme, body face and display scale describe the machine you are sitting at
+and go in `.register/local.json`, which `--git` ignores — so switching to dark no
+longer makes your vault dirty. Collapsed folders and the checkpoint flag describe
+the content, stay in `config.json`, and travel with it.
 
 ## Agents
 
@@ -118,8 +143,9 @@ breaks one gets smaller — the budget does not.
 | Budget | Limit | Measured |
 |---|---|---|
 | Release binary | ≤ 10 MB | 3.3–4.3 MB depending on platform |
-| Shell JS (initial) | ≤ 60 kB gz | 43.6 kB |
-| Editor chunk (lazy) | ≤ 150 kB gz | 102.2 kB |
+| Shell JS (initial) | ≤ 60 kB gz | 50.1 kB |
+| Editor chunk (lazy) | ≤ 150 kB gz | 102.9 kB |
+| Stylesheet | ≤ 10 kB gz | 4.8 kB |
 | Agent edit → visible | ≤ 100 ms | asserted, real file write |
 | Server start → editable | < 500 ms | asserted |
 

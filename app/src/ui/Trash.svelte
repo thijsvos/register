@@ -69,15 +69,21 @@ function count(n: number, noun: string): string {
   return `${n} ${noun}${n === 1 ? '' : 's'}`
 }
 
-/** `20260817T104233000Z` → `17 AUG 10:42`, which is what a person reads. */
+/**
+ * `1786993247536` → `17 AUG 10:42`, which is what a person reads.
+ *
+ * A bucket is named for the millisecond it was made — `vault.rs` uses
+ * `now_millis()` — so this parses an integer rather than a stamp. The first
+ * version of it expected `20260817T104233000Z`, matched nothing, and fell back
+ * to printing the raw number, which is how the screenshot caught it.
+ *
+ * An unparsable name is still shown: a bucket somebody renamed by hand is still
+ * a bucket, and a row that refused to draw would hide something restorable.
+ */
 function when(name: string): string {
-  const parsed = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/.exec(name)
-  if (parsed === null) return name
-  const [, year, month, day, hour, minute] = parsed
-  const date = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute)),
-  )
-  return date
+  const millis = Number.parseInt(name, 10)
+  if (Number.isNaN(millis)) return name
+  return new Date(millis)
     .toLocaleString('en-GB', {
       day: '2-digit',
       month: 'short',
