@@ -95,6 +95,10 @@ impl Server {
         let mut child = Command::new(BINARY)
             .args(["serve", vault.to_str().expect("utf-8 path"), "--port", "0"])
             .stdout(Stdio::piped())
+            // Inherited rather than piped: a server that refuses to start says
+            // why on stderr, and piping it into a handle nobody reads is how
+            // that reason gets thrown away.
+            .stderr(Stdio::inherit())
             .spawn()
             .expect("spawn server");
 
@@ -135,7 +139,14 @@ impl Server {
 
     /// One GET. Returns whether a response arrived at all.
     fn attempt_get(&self, path: &str, into: &mut String) -> bool {
-        let mut stream = TcpStream::connect(&self.addr).expect("connect");
+        // The child's fate, not just the socket's. `Connection refused` says the
+        // port is shut and nothing more; whether the server exited, and with
+        // what, is the question — and chasing it through two socket-level fixes
+        // before that was clear is why this reports it now.
+        let mut stream = match TcpStream::connect(&self.addr) {
+            Ok(stream) => stream,
+            Err(error) => panic!("connect {}: {error} — {}", self.addr, self.child_state()),
+        };
         stream
             .set_read_timeout(Some(PATIENCE))
             .expect("set timeout");
@@ -148,6 +159,18 @@ impl Server {
             Ok(_) => true,
             Err(_) => !into.is_empty(),
         }
+    }
+
+    /// Whether the server is still running, and how it ended if not.
+    fn child_state(&self) -> String {
+        // Safety: `try_wait` needs `&mut`, and this has `&self`. Reading
+        // `/proc/<pid>` answers the same question without one, and a test that
+        // could not ask is how this went undiagnosed for three CI rounds.
+        let pid = self.child.id();
+        if std::path::Path::new(&format!("/proc/{pid}")).exists() {
+            return format!("the server (pid {pid}) is still running");
+        }
+        format!("the server (pid {pid}) is gone")
     }
 
     fn tree(&self) -> String {
