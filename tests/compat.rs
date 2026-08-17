@@ -112,7 +112,34 @@ impl Server {
             .map(|(_, rest)| rest.trim().to_owned())
             .unwrap_or_else(|| panic!("no address in banner: {line:?}"));
 
-        Self { child, addr, vault }
+        let server = Self { child, addr, vault };
+        server.wait_until_listening();
+        server
+    }
+
+    /// Block until the port actually accepts, or say what happened instead.
+    ///
+    /// The banner is printed after the listener binds, so this ought to be
+    /// instantaneous — and on the CI runner seventeen of these were answered
+    /// with `Connection refused` in the same millisecond while the same suite
+    /// has never once failed here. Waiting for the socket rather than trusting
+    /// the banner removes the assumption from the test; if the server really is
+    /// gone, the panic below says so and says how it went.
+    fn wait_until_listening(&self) {
+        let deadline = std::time::Instant::now() + PATIENCE;
+        let mut last = String::new();
+        while std::time::Instant::now() < deadline {
+            match TcpStream::connect(&self.addr) {
+                Ok(_) => return,
+                Err(error) => last = error.to_string(),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        panic!(
+            "{} never accepted a connection: {last} — {}",
+            self.addr,
+            self.child_state()
+        );
     }
 
     /// A GET, retried once if the connection resets before anything arrives.
@@ -125,16 +152,22 @@ impl Server {
     /// keeps the failure honest: the second reset still panics, and says which
     /// path it was.
     fn get(&self, path: &str) -> String {
-        for attempt in 0..2 {
+        let deadline = std::time::Instant::now() + PATIENCE;
+        loop {
             let mut raw = String::new();
-            if self.attempt_get(path, &mut raw) || attempt == 1 {
+            if self.attempt_get(path, &mut raw) {
                 return raw
                     .split_once("\r\n\r\n")
                     .map(|(_, body)| body.to_owned())
                     .unwrap_or_default();
             }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "GET {path} never answered — {}",
+                self.child_state()
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        unreachable!("the loop returns on its last attempt")
     }
 
     /// One GET. Returns whether a response arrived at all.
@@ -145,7 +178,9 @@ impl Server {
         // before that was clear is why this reports it now.
         let mut stream = match TcpStream::connect(&self.addr) {
             Ok(stream) => stream,
-            Err(error) => panic!("connect {}: {error} — {}", self.addr, self.child_state()),
+            // Refused is retryable exactly as a reset is, and for the same
+            // reason: nothing was read, so nothing can have been half-done.
+            Err(_) => return false,
         };
         stream
             .set_read_timeout(Some(PATIENCE))
@@ -161,16 +196,30 @@ impl Server {
         }
     }
 
-    /// Whether the server is still running, and how it ended if not.
+    /// Whether the server is still running, and what state it is in if not.
+    ///
+    /// The state character, not merely whether `/proc/<pid>` exists — that
+    /// directory survives for a **zombie**, so the first version of this reported
+    /// "still running" for a process that had exited and not been reaped, which
+    /// is precisely the answer that would have ended the search a round earlier.
     fn child_state(&self) -> String {
-        // Safety: `try_wait` needs `&mut`, and this has `&self`. Reading
-        // `/proc/<pid>` answers the same question without one, and a test that
-        // could not ask is how this went undiagnosed for three CI rounds.
         let pid = self.child.id();
-        if std::path::Path::new(&format!("/proc/{pid}")).exists() {
-            return format!("the server (pid {pid}) is still running");
-        }
-        format!("the server (pid {pid}) is gone")
+        let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return format!("pid {pid}: no /proc (not Linux, or already reaped)");
+        };
+        // `pid (comm) S …` — comm can contain spaces and brackets, so the state
+        // is the field after the last ')'.
+        let state = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.split_whitespace().next())
+            .unwrap_or("?");
+        let meaning = match state {
+            "Z" => "zombie — it exited and nothing reaped it",
+            "R" | "S" | "D" => "running",
+            "T" | "t" => "stopped",
+            other => other,
+        };
+        format!("pid {pid} is {meaning}")
     }
 
     fn tree(&self) -> String {
