@@ -1613,3 +1613,281 @@ fn a_claim_is_released_even_when_the_server_never_asked() {
         "the claim outlived the guard"
     );
 }
+
+/// Write bytes that are not a note, creating parents. The media module has its
+/// own copy scoped to its fixtures; this is the one the trash and attachment
+/// tests use.
+fn put_file(tmp: &TempVault, rel: &str, bytes: &[u8]) {
+    let path = tmp.path().join(rel);
+    fs::create_dir_all(path.parent().expect("parent")).expect("create dir");
+    fs::write(path, bytes).expect("write bytes");
+}
+
+// ------------------------------------------------------------------- restore
+
+#[test]
+fn a_bucket_lists_what_it_holds_and_where_it_came_from() {
+    // §02b Screen 9. Deleting never destroyed anything and the only way back was
+    // a `mv` in Finder — which meant knowing the bucket name and having read a
+    // notice carefully at the moment you were least inclined to.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    put_file(&tmp, "notes/diagram.png", b"\x89PNG\r\n\x1a\n");
+    vault.trash_folder("notes").expect("trash the folder");
+
+    let buckets = vault.buckets().expect("buckets");
+    assert_eq!(buckets.len(), 1, "one deletion, one bucket");
+    let bucket = &buckets[0];
+    // At their original vault paths, which is what makes a restore a move.
+    assert_eq!(
+        bucket.paths,
+        vec!["notes/003-a.md".to_owned(), "notes/diagram.png".to_owned()]
+    );
+    assert_eq!(bucket.notes, 1);
+    // The image the INDEX never drew, counted separately because the confirm
+    // could not count it either.
+    assert_eq!(bucket.files, 1);
+    assert!(bucket.clear, "nothing is in the way of putting it back");
+}
+
+#[test]
+fn restoring_puts_a_deletion_back_where_it_was() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    vault.trash("notes/003-a.md").expect("trash");
+    assert!(!tmp.path().join("notes/003-a.md").exists());
+
+    let name = vault.buckets().expect("buckets")[0].name.clone();
+    let put_back = vault.restore(&name).expect("restore");
+
+    assert_eq!(put_back.restored, 1);
+    assert_eq!(put_back.kept, 0);
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("notes/003-a.md")).expect("read"),
+        NOTE
+    );
+    // The bucket is gone with it: an empty one is a row in a list that can do
+    // nothing.
+    assert!(vault.buckets().expect("buckets").is_empty());
+}
+
+#[test]
+fn restoring_grows_a_folder_back_when_its_home_is_gone() {
+    // The question the ruling named: you delete `notes/apollo/`, then delete
+    // `notes/`, and now where does it go back to? The vault grows the folder
+    // back, exactly as a write does for a note in a folder that does not exist.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault
+        .write("notes/apollo/010-launch.md", NOTE, None)
+        .expect("write");
+    vault.trash_folder("notes/apollo").expect("trash apollo");
+    vault.trash_folder("notes").expect("trash notes");
+    assert!(!tmp.path().join("notes").exists());
+
+    // The apollo bucket is the older of the two.
+    let mut buckets = vault.buckets().expect("buckets");
+    buckets.sort_by(|a, b| a.name.cmp(&b.name));
+    let apollo = buckets
+        .iter()
+        .find(|b| b.paths.iter().any(|p| p.contains("apollo")))
+        .expect("the apollo bucket");
+
+    let put_back = vault.restore(&apollo.name).expect("restore");
+    assert_eq!(put_back.restored, 1);
+    assert!(tmp.path().join("notes/apollo/010-launch.md").is_file());
+}
+
+#[test]
+fn restoring_never_overwrites_what_is_living_there_now() {
+    // §04 never destroys, and a restore that clobbered the note now at that path
+    // would be the one operation in this product that did.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    vault.trash("notes/003-a.md").expect("trash");
+    vault
+        .write("notes/003-a.md", "something else entirely\n", None)
+        .expect("write again");
+
+    let name = vault.buckets().expect("buckets")[0].name.clone();
+    let put_back = vault.restore(&name).expect("restore");
+
+    assert_eq!(put_back.restored, 0);
+    assert_eq!(put_back.kept, 1, "it should have stayed in the bucket");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("notes/003-a.md")).expect("read"),
+        "something else entirely\n"
+    );
+    // Still recoverable: nothing was thrown away to make room.
+    assert!(!vault.buckets().expect("buckets").is_empty());
+    assert!(!vault.buckets().expect("buckets")[0].clear);
+}
+
+#[test]
+fn purging_is_the_one_thing_that_really_deletes() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    vault.trash("notes/003-a.md").expect("trash");
+
+    // While it is in the trash, the ref it used is still spoken for: `next_ref`
+    // counts the trash precisely so a deleted ref is never reissued (§04 Rev F).
+    assert_eq!(vault.next_ref().expect("next"), "004");
+
+    let name = vault.buckets().expect("buckets")[0].name.clone();
+    vault.purge(&name).expect("purge");
+    assert!(vault.buckets().expect("buckets").is_empty());
+
+    // And purging is what lets a ref be handed out again. That is the one
+    // consequence of this operation which is not simply "the bytes are gone",
+    // and it is worth stating rather than being discovered by somebody whose
+    // `[[003]]` came to mean two different notes: §04 Rev F promises a ref is
+    // never *reissued*, and the trash is what keeps that promise — so emptying
+    // the trash is the act that gives the promise up, deliberately and only
+    // when asked. Here the vault is empty afterwards, so the count starts over.
+    assert_eq!(vault.next_ref().expect("next"), "000");
+}
+
+#[test]
+fn a_bucket_name_from_a_url_takes_every_path_guard() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    for hostile in ["..", "../..", "a/b", "", ".hidden", "a\\b"] {
+        assert!(
+            matches!(
+                vault.restore(hostile),
+                Err(Error::InvalidPath | Error::NotFound)
+            ),
+            "restore({hostile:?}) should be refused"
+        );
+        assert!(
+            matches!(
+                vault.purge(hostile),
+                Err(Error::InvalidPath | Error::NotFound)
+            ),
+            "purge({hostile:?}) should be refused"
+        );
+    }
+}
+
+// ---------------------------------------------------------------- attachments
+
+#[test]
+fn files_lists_what_the_index_never_draws() {
+    // §02b Screen 10. A file nothing references is invisible in the app: it
+    // exists, it takes up space, and Finder is the only way to it.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    put_file(&tmp, "notes/diagram.png", b"\x89PNG");
+    put_file(&tmp, "notes/orphan.png", b"\x89PNG");
+    put_file(&tmp, "spec.pdf", b"%PDF-");
+
+    let files = vault.files().expect("files");
+    assert_eq!(
+        files,
+        vec![
+            "notes/diagram.png".to_owned(),
+            "notes/orphan.png".to_owned(),
+            "spec.pdf".to_owned()
+        ]
+    );
+    // Notes are not attachments, and neither is anything the app owns.
+    assert!(!files.iter().any(|f| f.ends_with(".md")));
+    assert!(!files.iter().any(|f| f.starts_with(APP_DIR)));
+}
+
+// ---------------------------------------------------------------- move/rename
+
+#[test]
+fn a_note_moves_and_its_wikilinks_do_not_care() {
+    // The framing this feature carried for months — "does the app rewrite your
+    // prose" — overstated it. `[[wikilinks]]` resolve by ref or title, never by
+    // path, so moving a note breaks none of them.
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+
+    let moved = vault
+        .rename("notes/003-a.md", "archive/003-a.md")
+        .expect("move");
+    assert_eq!(moved.notes, 1);
+    assert!(tmp.path().join("archive/003-a.md").is_file());
+    assert!(!tmp.path().join("notes/003-a.md").exists());
+}
+
+#[test]
+fn a_folder_moves_whole_and_takes_its_images_with_it() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault
+        .write("notes/apollo/010-launch.md", NOTE, None)
+        .expect("write");
+    put_file(&tmp, "notes/apollo/diagram.png", b"\x89PNG");
+
+    let moved = vault
+        .rename("notes/apollo", "archive/apollo")
+        .expect("move");
+    assert_eq!(moved.notes, 1);
+    assert!(tmp.path().join("archive/apollo/010-launch.md").is_file());
+    // The relative reference inside it still resolves, because the image
+    // travelled with the note.
+    assert!(tmp.path().join("archive/apollo/diagram.png").is_file());
+}
+
+#[test]
+fn a_move_refuses_rather_than_overwriting() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+    // Seeded on disk: `write` refuses a second note taking a ref another holds,
+    // which is a different rule and would fire first. This is the vault as it
+    // would be after somebody moved a note back and forth by hand.
+    put_file(&tmp, "archive/003-a.md", b"already here\n");
+
+    assert!(matches!(
+        vault.rename("notes/003-a.md", "archive/003-a.md"),
+        Err(Error::Conflict { .. })
+    ));
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("archive/003-a.md")).expect("read"),
+        "already here\n"
+    );
+}
+
+#[test]
+fn a_folder_cannot_be_moved_inside_itself() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault
+        .write("notes/apollo/010-launch.md", NOTE, None)
+        .expect("write");
+
+    assert!(matches!(
+        vault.rename("notes/apollo", "notes/apollo/inner"),
+        Err(Error::InvalidPath)
+    ));
+    assert!(tmp.path().join("notes/apollo/010-launch.md").is_file());
+}
+
+#[test]
+fn a_move_takes_every_path_guard_both_ends() {
+    let tmp = TempVault::new();
+    let vault = tmp.open();
+    vault.write("notes/003-a.md", NOTE, None).expect("write");
+
+    for hostile in ["../outside.md", "/etc/passwd", ".register/x.md", "", ".."] {
+        assert!(
+            vault.rename("notes/003-a.md", hostile).is_err(),
+            "move to {hostile:?} should be refused"
+        );
+        assert!(
+            vault.rename(hostile, "notes/004-b.md").is_err(),
+            "move from {hostile:?} should be refused"
+        );
+    }
+    assert!(tmp.path().join("notes/003-a.md").is_file());
+}

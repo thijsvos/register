@@ -397,6 +397,45 @@ pub struct Trashed {
     pub bucket: String,
 }
 
+/// What a move moved (`POST /api/move`, §04 Rev Y).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Moved {
+    pub from: String,
+    pub to: String,
+    /// Notes carried along, for the notice. Zero for a non-note file.
+    pub notes: u32,
+}
+
+/// What a restore put back, and what it could not (§02b Screen 9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Restored {
+    pub restored: u32,
+    /// Left in the bucket because something already lives at that path. Skipped
+    /// rather than overwritten: §04 never destroys.
+    pub kept: u32,
+}
+
+/// One deletion, as `GET /api/trash` reports it (§02b Screen 9).
+///
+/// A bucket is `.register/trash/<stamp>/` holding the deleted subtree **at its
+/// original vault path**, which is what makes a restore a move rather than
+/// archaeology — and why `trash` has always claimed a stamp per deletion rather
+/// than per file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Bucket {
+    /// The `<stamp>` directory name, which is also its identity in the API.
+    pub name: String,
+    /// Where the contents will go back to, vault-relative, in tree order.
+    pub paths: Vec<String>,
+    pub notes: u32,
+    /// Everything that is not a note — images above all, which the INDEX never
+    /// drew and the confirm therefore could not count.
+    pub files: u32,
+    /// Whether every original path is free, so a restore would collide with
+    /// nothing. False does not prevent one; it is what the screen says.
+    pub clear: bool,
+}
+
 /// One row of `GET /api/tree` (§04). Everything except `path` is derived, and
 /// every derived field is optional: the tree must survive a note an agent is
 /// halfway through writing.
@@ -1036,6 +1075,194 @@ impl Vault {
         Ok(None)
     }
 
+    /// Move a note or a folder, and report what moved.
+    ///
+    /// One `rename`, which is why a folder costs the same as a note and why the
+    /// subtree arrives intact — images included. Refuses rather than overwrites:
+    /// §04 never destroys, so a destination that exists is a refusal, not a
+    /// merge.
+    ///
+    /// The **links** are not this function's business. `[[wikilinks]]` resolve by
+    /// ref or title and survive a move untouched — measured, and the reason the
+    /// original framing of this feature ("does the app rewrite your prose")
+    /// overstated it — while `![](src)` is relative to the note holding it and
+    /// is the client's to rewrite, because only the client parses markdown.
+    pub fn rename(&self, from: &str, to: &str) -> Result<Moved> {
+        let _writing = self.lock();
+        self.require_root()?;
+
+        // `resolve_within`, not `resolve`: this moves folders as well as notes,
+        // and a folder has no `.md`. Every other guard applies unchanged.
+        let source = self.resolve_within(from)?;
+        let target = self.resolve_within(to)?;
+        if !source.exists() {
+            return Err(Error::NotFound);
+        }
+        if target.exists() {
+            return Err(Error::Conflict {
+                current: to.to_owned(),
+            });
+        }
+        // A folder cannot be moved inside itself: the rename would succeed on
+        // some platforms and produce an unreachable subtree.
+        if target.starts_with(&source) {
+            return Err(Error::InvalidPath);
+        }
+
+        let moving_a_folder = source.is_dir();
+        let mut notes = Vec::new();
+        if moving_a_folder {
+            collect_notes(&source, &source, &mut notes);
+        } else if from.ends_with(&format!(".{NOTE_EXT}")) {
+            notes.push(String::new());
+        }
+
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)?;
+            self.verify_parent(parent)?;
+        }
+        fs::rename(&source, &target)?;
+        self.prune_empty_parents(&source);
+        self.forget_git();
+
+        Ok(Moved {
+            from: from.to_owned(),
+            to: to.to_owned(),
+            notes: notes.len() as u32,
+        })
+    }
+
+    /// Every deletion still in the trash, newest first (§02b Screen 9).
+    ///
+    /// Newest first because a restore is nearly always the thing that just
+    /// happened, and the stamp sorts lexically in time order — which is what
+    /// `<stamp>` being an ISO instant buys.
+    pub fn buckets(&self) -> Result<Vec<Bucket>> {
+        let root = self.root.join(APP_DIR).join(TRASH_DIR);
+        let Ok(entries) = fs::read_dir(&root) else {
+            // No trash directory is an empty trash, not an error: a vault made
+            // by hand has never had one.
+            return Ok(Vec::new());
+        };
+
+        let mut out = Vec::new();
+        for entry in entries.flatten() {
+            let base = entry.path();
+            if !base.is_dir() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let mut paths = Vec::new();
+            collect_all(&base, &base, &mut paths);
+            if paths.is_empty() {
+                continue;
+            }
+            paths.sort();
+            let notes = paths
+                .iter()
+                .filter(|rel| rel.ends_with(&format!(".{NOTE_EXT}")))
+                .count() as u32;
+            let clear = paths.iter().all(|rel| !self.root.join(rel).exists());
+            out.push(Bucket {
+                name,
+                notes,
+                files: paths.len() as u32 - notes,
+                clear,
+                paths,
+            });
+        }
+        out.sort_by(|a, b| b.name.cmp(&a.name));
+        Ok(out)
+    }
+
+    /// Put a bucket's contents back where they came from.
+    ///
+    /// A move, not a copy, and the directories are recreated on the way — the
+    /// answer to "what if its home is gone" is that the vault grows it back,
+    /// exactly as a write does for a note in a folder that does not exist yet.
+    ///
+    /// A path that is occupied is **skipped rather than overwritten**: §04 never
+    /// destroys, and a restore that clobbered the note now living at that path
+    /// would be the one operation in this product that did. The count comes
+    /// back so the screen can say what stayed behind.
+    pub fn restore(&self, bucket: &str) -> Result<Restored> {
+        let _writing = self.lock();
+        self.require_root()?;
+
+        let base = self.bucket_path(bucket)?;
+        let mut paths = Vec::new();
+        collect_all(&base, &base, &mut paths);
+        paths.sort();
+
+        let mut restored = 0u32;
+        let mut kept = 0u32;
+        for rel in &paths {
+            let target = self.root.join(rel);
+            self.verify_contained(&target)?;
+            if target.exists() {
+                kept += 1;
+                continue;
+            }
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::rename(base.join(rel), &target)?;
+            restored += 1;
+        }
+
+        // Empty now, or holding only what could not go back. `remove_dir_all` is
+        // the one call in this file that destroys, and it is reached only when
+        // there is nothing left to destroy.
+        if kept == 0 {
+            let _ = fs::remove_dir_all(&base);
+        } else {
+            prune_empty(&base);
+        }
+        self.forget_git();
+        Ok(Restored { restored, kept })
+    }
+
+    /// Destroy a bucket, permanently.
+    ///
+    /// The one operation in this product that actually deletes, which is why it
+    /// is its own verb on its own route rather than a mode on anything. §04's
+    /// promise is that the *app* never destroys your writing without being
+    /// asked; it does not say the trash is immortal.
+    pub fn purge(&self, bucket: &str) -> Result<()> {
+        let _writing = self.lock();
+        self.require_root()?;
+
+        let base = self.bucket_path(bucket)?;
+        fs::remove_dir_all(&base)?;
+        self.forget_git();
+        Ok(())
+    }
+
+    /// `.register/trash/<name>`, verified to be one bucket and to exist.
+    ///
+    /// `name` comes from a URL, so it takes the same treatment every other path
+    /// does — one component, no separators, no dot-segments — and then the same
+    /// containment walk, because a symlink in the trash is a symlink like any
+    /// other.
+    fn bucket_path(&self, name: &str) -> Result<PathBuf> {
+        if name.is_empty()
+            || name.contains('/')
+            || name.contains('\\')
+            || name.starts_with('.')
+            || name.contains('\0')
+        {
+            return Err(Error::InvalidPath);
+        }
+        let path = self.root.join(APP_DIR).join(TRASH_DIR).join(name);
+        self.verify_contained(&path)?;
+        if !path.is_dir() {
+            return Err(Error::NotFound);
+        }
+        Ok(path)
+    }
+
     /// Vault-relative paths of trashed notes, as they were before deletion.
     fn trashed_paths(&self) -> Vec<String> {
         let root = self.root.join(APP_DIR).join(TRASH_DIR);
@@ -1050,6 +1277,52 @@ impl Vault {
             }
         }
         out
+    }
+
+    /// Every file in the vault that is **not** a note, sorted by path.
+    ///
+    /// §02b Screen 10. The INDEX is a register of notes, so an image whose note
+    /// was deleted is invisible in the app — it exists, it takes up space, and
+    /// Finder is the only way to it. What references what is not answered here:
+    /// the client holds the corpus and can see every `![](src)` already, and
+    /// asking the server would mean it parsing prose to answer a question about
+    /// files.
+    ///
+    /// The app directory is skipped by the same walk that hides it everywhere
+    /// else, so the trash and the licensed face are not "attachments".
+    pub fn files(&self) -> Result<Vec<String>> {
+        let mut out = Vec::new();
+        self.walk_files(&self.root.clone(), &mut out)?;
+        out.sort();
+        Ok(out)
+    }
+
+    fn walk_files(&self, dir: &Path, out: &mut Vec<String>) -> Result<()> {
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // The same rule the note walk uses: a dot-prefixed name is hidden,
+            // which is what keeps `.register/` and `.git/` out of this.
+            if name.starts_with('.') {
+                continue;
+            }
+            let meta = entry.metadata()?;
+            if meta.is_dir() {
+                self.walk_files(&path, out)?;
+                continue;
+            }
+            if path.extension().and_then(|e| e.to_str()) == Some(NOTE_EXT) {
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(&self.root)
+                && let Some(text) = rel.to_str()
+            {
+                out.push(text.replace('\\', "/"));
+            }
+        }
+        Ok(())
     }
 
     /// Every note in the vault, sorted by path.
@@ -1780,6 +2053,45 @@ fn parse_frontmatter(yaml: &str) -> Option<Frontmatter> {
 /// §04's invariant is `filename = ref-slug`, and a filename cannot be mistyped
 /// into a different YAML scalar type the way an unquoted `ref: 003` can.
 /// Collect `.md` files under `dir`, reported relative to `base`.
+/// Every file under `dir`, vault-relative to `base`. Notes and everything else.
+///
+/// `collect_notes`' sibling, and separate rather than a flag: that one answers
+/// "which refs has this vault ever used" and must see only notes, while a bucket
+/// is reported whole because the images went with it.
+fn collect_all(base: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        if meta.is_dir() {
+            collect_all(base, &path, out);
+            continue;
+        }
+        if let Ok(rel) = path.strip_prefix(base)
+            && let Some(text) = rel.to_str()
+        {
+            out.push(text.replace('\\', "/"));
+        }
+    }
+}
+
+/// Remove every empty directory under `dir`, innermost first, and `dir` itself
+/// if it ends up empty.
+fn prune_empty(dir: &Path) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.path().is_dir() {
+            prune_empty(&entry.path());
+        }
+    }
+    // Fails when it is not empty, which is exactly the guard wanted.
+    let _ = fs::remove_dir(dir);
+}
+
 fn collect_notes(base: &Path, dir: &Path, out: &mut Vec<String>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;

@@ -376,6 +376,18 @@ pub fn router(state: AppState) -> Router {
         // than a query parameter on the one above, because they are two files
         // with two lifetimes: one travels with the vault and one does not.
         .route("/api/local", get(read_local).put(write_local))
+        // §02b Screen 9. Deleting has never destroyed anything, and until now
+        // the only way back was a `mv` in Finder — which meant knowing the
+        // bucket name and reading a notice carefully at the moment you were
+        // least inclined to.
+        .route("/api/trash", get(list_trash))
+        .route("/api/trash/{name}", post(restore_trash).delete(purge_trash))
+        // §02b Screen 10. The INDEX is a register of notes, so a file nothing
+        // references is invisible in the app.
+        .route("/api/files", get(list_files))
+        // §04 Rev Y. Deleting and creating both existed; the third of the set
+        // did not, so reorganising a vault was still Finder's job.
+        .route("/api/move", post(move_path))
         .route(
             "/api/font",
             get(read_font).put(write_font).delete(delete_font),
@@ -707,6 +719,70 @@ fn open_in_file_manager(path: &std::path::Path) -> std::io::Result<()> {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// Rename or move a note or a folder (§04 Rev Y).
+///
+/// One route for both, because on disk they are one operation: a rename *is* a
+/// move to a different name, and a folder is renamed by the same call that
+/// renames a note. Refuses an occupied destination rather than merging, since
+/// §04 never destroys.
+#[derive(serde::Deserialize)]
+struct Move {
+    from: String,
+    to: String,
+}
+
+async fn move_path(State(state): State<AppState>, Json(wanted): Json<Move>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.rename(&wanted.from, &wanted.to)).await {
+        Ok(moved) => Json(moved).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Every deletion still recoverable (§02b Screen 9).
+async fn list_trash(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.buckets()).await {
+        Ok(buckets) => Json(buckets).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Put a bucket back where it came from.
+///
+/// `POST` rather than `PUT`: it is not idempotent in the sense that matters —
+/// running it twice restores nothing the second time and the answer differs —
+/// and there is no representation the caller is supplying.
+async fn restore_trash(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.restore(&name)).await {
+        Ok(restored) => Json(restored).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Destroy a bucket. The one route in this API that really deletes.
+async fn purge_trash(State(state): State<AppState>, Path(name): Path<String>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.purge(&name)).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Every non-note file in the vault (§02b Screen 10).
+///
+/// Paths only. What references what is the client's to work out: it holds every
+/// note body already, and the server answering would mean parsing prose to
+/// answer a question about files.
+async fn list_files(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.files()).await {
+        Ok(files) => Json(files).into_response(),
+        Err(response) => response,
+    }
 }
 
 // ------------------------------------------------------------ config + fonts
