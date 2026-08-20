@@ -131,7 +131,7 @@ jobs:
       # editable < 500 ms, idle RSS ≤ 50 MB, plus the keyboard and motion audit.
       - run: pnpm e2e --project=chromium --project=firefox
         working-directory: app
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: failure()
         with: { name: playwright-traces, path: app/test-results, retention-days: 7 }
   audit:
