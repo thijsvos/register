@@ -135,6 +135,11 @@ Nothing syncs. The agent writes files, the app notices within 100 ms, and neithe
 side is a guest. The contract every vault carries is what makes this work without
 an integration — see [`docs/agents.md`](docs/agents.md).
 
+On macOS, **[Ledge](https://github.com/thijsvos/Ledge)** captures from the notch on
+the same premise: type to file a line into today's log, or prefix with `/` to hand
+the prompt to the same `claude` binary. It writes; REGISTER notices. A separate MIT
+project, not part of this repo.
+
 ## What it promises
 
 Budgets, not aspirations: each is asserted on every CI run, and a change that
