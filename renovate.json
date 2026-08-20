@@ -32,9 +32,25 @@
       "groupName": "app dependencies"
     },
     {
+      "description": "The package manager that resolves the lockfile should not change in the same commit as the seventeen packages it resolves — reverting one would revert both. Placed after the npm rule on purpose: packageRules apply in array order and the later entry wins, so above it this groupName is silently overridden back to \"app dependencies\" and the split looks applied while doing nothing. deploy/Dockerfile reads this field rather than restating it, so a pnpm bump is genuinely a one-file edit.",
+      "matchManagers": ["npm"],
+      "matchDepTypes": ["packageManager"],
+      "groupName": "pnpm"
+    },
+    {
       "description": "One pull request for the server.",
       "matchManagers": ["cargo"],
       "groupName": "server dependencies"
+    },
+    {
+      "description": "One pull request for the workflows. Left ungrouped these arrive one PR per action and saturate prConcurrentLimit on their own, starving the groups above. upload-artifact and download-artifact also ship their majors on the same day and are a matched pair — grouped so they move in one reviewable change rather than as two PRs that are each wrong without the other.",
+      "matchManagers": ["github-actions"],
+      "groupName": "workflow actions"
+    },
+    {
+      "description": "TypeScript 7 is the Go-native rewrite and ships no stable programmatic API until 7.1. svelte-check 4.x — the only line that exists — declares `typescript: ^5.0.0 || ^6.0.0`, so `pnpm check` breaks outright on 7. The tsconfig itself is already clean for it. Lift this when a svelte-check accepts 7.",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
     },
     {
       "description": "The reason this repo runs Renovate rather than Dependabot. SPEC §06 states that every version pin lives in exactly one of .nvmrc, rust-toolchain.toml or the packageManager field, and Dependabot has no manager for any of the three — so the doctrine's own files were the only ones nothing watched. Grouped so a toolchain move arrives as one reviewable change.",

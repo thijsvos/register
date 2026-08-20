@@ -602,10 +602,19 @@ fn nothing_consumes_a_tag_that_moves() {
         "register:latest",
     ];
 
+    // Every file that names an image or an action, not just the ones the rule
+    // was first written against. `Dockerfile.release` is the published image —
+    // the one a `FROM ... :latest` would actually reach users through — and it
+    // was the omission that mattered: it was caught only indirectly, by the
+    // separate test asserting both images share a base, and only for as long as
+    // the other file stayed pinned.
     for path in [
         "deploy/Dockerfile",
+        "deploy/Dockerfile.release",
         "deploy/docker-compose.yml",
+        "deploy/docker-compose.build.yml",
         ".github/workflows/ci.yml",
+        ".github/workflows/mutants.yml",
         ".github/workflows/release.yml",
     ] {
         for (nth, line) in strip_comments(&read(path)).lines().enumerate() {
@@ -879,14 +888,32 @@ fn every_release_says_what_the_image_redistributes() {
         "release.yml does not repair the notes on a re-run"
     );
 
-    // The image the notice describes is the image that ships. If a base ever
-    // changes, this fails rather than letting the notice quietly describe an
-    // older one.
+    // The image the notice describes is the image that ships. Derived from the
+    // Dockerfile rather than restated here: a base bump is an edit to the two
+    // Dockerfiles and the notice, and writing the tag into this test as well
+    // made the guard one of the files the bump had to change — so Renovate,
+    // which edits neither tests nor prose, could only ever land it red.
+    let base = last_starting(&strip_comments(&read("deploy/Dockerfile")), "FROM ");
+    let tag = base
+        .strip_prefix("FROM ")
+        .expect("a FROM line names an image");
+    let version = tag.split(':').nth(1).expect("the base is pinned to a tag");
+
     for dockerfile in ["deploy/Dockerfile", "deploy/Dockerfile.release"] {
         let text = strip_comments(&read(dockerfile));
         assert!(
-            text.contains("FROM alpine:3.24") && text.contains("apk add --no-cache git"),
+            text.contains(&format!("FROM {tag}")) && text.contains("apk add --no-cache git"),
             "{dockerfile} no longer matches what deploy/image-notice.md describes"
         );
     }
+    // What the notice says it is, and where it says the source is mirrored.
+    // Both name a version, so both go stale silently without this.
+    assert!(
+        notice.contains(tag),
+        "the notice names a base the image does not ship: expected {tag}"
+    );
+    assert!(
+        notice.contains(&format!("/alpine/v{version}/")),
+        "the notice mirrors a different Alpine release than {tag}"
+    );
 }
