@@ -65,7 +65,7 @@ jobs:
       # §06's shell budget applies to what ships, not only to what is reviewed.
       - run: pnpm size
         working-directory: app
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with: { name: ui, path: app/dist, retention-days: 1 }
 
   binaries:
@@ -112,7 +112,7 @@ jobs:
       # rust-toolchain.toml stays the only copy (rule 11).
       - name: The cross std, in the toolchain the pin selects
         run: rustup target add ${{ matrix.target }}
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with: { name: ui, path: app/dist }
       # The embed is `allow_missing = true` so a fresh clone can `cargo check`
       # before `pnpm build`. The cost lands here: if the artifact were to arrive
@@ -154,7 +154,7 @@ jobs:
           # there only if the embed actually happened.
           grep -aq 'assets/shell-' "${{ matrix.asset }}"
 
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.asset }}
           path: ${{ matrix.asset }}
@@ -167,7 +167,7 @@ jobs:
       contents: write # create the release and attach binaries
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with: { pattern: bin-*, path: dist, merge-multiple: true }
       - name: Attach every binary to the release
         env:
@@ -230,7 +230,7 @@ jobs:
       packages: write # push the image to ghcr
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with: { pattern: bin-*, path: dist, merge-multiple: true }
       # buildx names platforms `amd64`/`arm64`; the matrix names its artifacts
       # after the download people run (`-x64`). Renamed once, here, so
@@ -249,7 +249,7 @@ jobs:
       # needed while the image was `scratch` and pure `COPY`; it is the price of
       # that one package, and it applies to the package install only. The Rust
       # build stays on native runners in the `binaries` matrix above.
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
       # The default builder cannot produce a multi-platform manifest; the
       # container driver can.
       - name: A builder that can emit more than one platform
