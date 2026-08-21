@@ -1474,6 +1474,34 @@ impl Vault {
     /// `if_match` of `None` writes unconditionally and creates a missing path,
     /// per §04. Supplying it on a path that has since been deleted is a
     /// conflict, not a create: the file changed under the client either way.
+    /// Write a non-note file — an imported attachment — through the same
+    /// atomic path every other write in the product takes (hard rule 5).
+    ///
+    /// `resolve_within` rather than `resolve`, because `resolve` is `.md`-only:
+    /// it is what makes `trash()` refuse to move an image, and an attachment is
+    /// exactly the thing it would refuse. Unconditional rather than etag-guarded
+    /// because the only caller is an import into a path it has already found to
+    /// be free — there is no second writer to lose a race with.
+    pub fn write_bytes(&self, rel: &str, bytes: &[u8]) -> Result<String> {
+        let path = self.resolve_within(rel)?;
+        self.verify_contained(&path)?;
+        self.require_root()?;
+
+        let _writing = self.lock();
+
+        let parent = path.parent().ok_or(Error::InvalidPath)?;
+        fs::create_dir_all(parent)?;
+        // create_dir_all will happily build directories on the far side of a
+        // symlink, so containment is re-checked once the parents exist.
+        self.verify_parent(parent)?;
+
+        write_atomically(&path, bytes)?;
+        self.forget_git();
+
+        let meta = fs::metadata(&path)?;
+        Ok(etag_of(&meta))
+    }
+
     pub fn write(&self, rel: &str, body: &str, if_match: Option<&str>) -> Result<String> {
         let path = self.resolve(rel)?;
         self.verify_contained(&path)?;
@@ -2006,19 +2034,35 @@ fn entry_for(path: String, body: &str, meta: &Metadata) -> Entry {
 /// The closing fence must not reach the parser: YAML reads `---` as the start of
 /// a second document, and serde-saphyr rejects multi-document input outright.
 fn frontmatter_block(body: &str) -> Option<&str> {
+    split_note(body).0
+}
+
+/// The frontmatter and the body that follows its closing fence.
+///
+/// One splitter, not two. The docstring above records what it cost when this
+/// side and `frontmatter.ts` disagreed; a third copy inside the importer would
+/// be the same defect with a new file name, and the importer is the one caller
+/// that reads notes nobody in this project wrote.
+///
+/// A note with no frontmatter is all body — including its BOM, which is stepped
+/// over for the fence test but never removed from what is returned, because §04
+/// requires the bytes to survive a round trip.
+pub(crate) fn split_note(text: &str) -> (Option<&str>, &str) {
     // A BOM is preserved byte-for-byte on write, per §04's losslessness
     // invariant, so it has to be stepped over here rather than stripped there.
-    let body = body.strip_prefix('\u{feff}').unwrap_or(body);
-    let rest = after_fence(body)?;
+    let stripped = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let Some(rest) = after_fence(stripped) else {
+        return (None, text);
+    };
 
     let mut offset = 0usize;
     for line in rest.split_inclusive('\n') {
         if is_fence(line) {
-            return Some(&rest[..offset]);
+            return (Some(&rest[..offset]), &rest[offset + line.len()..]);
         }
         offset += line.len();
     }
-    None
+    (None, text)
 }
 
 /// What a fence line is — stated here because §04 has two readers.

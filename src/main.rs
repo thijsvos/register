@@ -1,4 +1,5 @@
 mod git;
+mod import;
 mod scaffold;
 mod server;
 mod vault;
@@ -115,6 +116,19 @@ enum Command {
         #[arg(long, value_name = "DIR")]
         vault: Option<PathBuf>,
     },
+    /// Convert an Obsidian vault into this format (§12).
+    ///
+    /// One way. Nothing in the source vault is opened for writing.
+    Import {
+        /// The Obsidian vault to read.
+        source: PathBuf,
+        /// The vault to write into. Scaffolded if it does not hold one yet,
+        /// and never overwritten — a path already present is left alone.
+        vault: PathBuf,
+        /// Print what would be written and write nothing.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Print health status.
     Health,
 }
@@ -162,6 +176,11 @@ async fn main() -> ExitCode {
         },
         Command::Init { path, git } => report(init(&path, git)),
         Command::New { title, vault } => report(create(&title, vault.as_deref())),
+        Command::Import {
+            source,
+            vault,
+            dry_run,
+        } => report(import_vault(&source, &vault, dry_run)),
     }
 }
 
@@ -270,6 +289,104 @@ fn init(path: &Path, git: bool) -> Result<String, String> {
     }
     lines.push(format!("next: register serve {root}"));
     Ok(lines.join("\n"))
+}
+
+/// Convert an Obsidian vault into a §04 one (§12's importers row).
+///
+/// The source is opened read-only and the destination is scaffolded if it does
+/// not hold a vault yet — the same rule `serve` applies, so importing into an
+/// empty folder works without a separate `init`.
+fn import_vault(source: &Path, root: &Path, dry_run: bool) -> Result<String, String> {
+    if !source.is_dir() {
+        return Err(format!("{} is not a folder", source.display()));
+    }
+    let read =
+        import::read(source).map_err(|error| format!("read {}: {error}", source.display()))?;
+    if read.notes.is_empty() {
+        return Err(format!("{} holds no markdown notes", source.display()));
+    }
+
+    // Refusing to import a vault into itself, because the walk and the writes
+    // would be reading and writing the same tree — and because the source is
+    // meant to still be there afterwards.
+    if same_folder(source, root) {
+        return Err("the source and the destination are the same folder".to_owned());
+    }
+
+    if !dry_run && !scaffold::holds_a_vault(root) {
+        scaffold::init(root, false).map_err(|error| format!("init {}: {error}", root.display()))?;
+    }
+
+    // A dry run still needs somewhere to start counting refs from. An absent
+    // vault starts at the same place `init` would leave it.
+    let vault = if dry_run && !scaffold::holds_a_vault(root) {
+        None
+    } else {
+        Some(
+            vault::Vault::open(root)
+                .map_err(|error| format!("open {}: {error}", root.display()))?,
+        )
+    };
+    let first = match &vault {
+        Some(vault) => vault
+            .next_ref()
+            .map_err(|error| format!("allocate a ref: {error}"))?,
+        None => "001".to_owned(),
+    };
+
+    // What the vault already holds, so a second import is not a second copy.
+    let taken = vault.as_ref().map_or_else(Default::default, |vault| {
+        vault
+            .paths()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|rel| import::identity_of_existing(rel))
+            .collect()
+    });
+    let outcome = import::plan(&read, &first, &taken);
+    let summary = import::summary(&outcome);
+
+    if dry_run {
+        say!("{}", import::report(&outcome));
+        return Ok(format!("{summary} Nothing written (--dry-run)."));
+    }
+
+    let Some(vault) = vault else {
+        return Err("the destination vault could not be opened".to_owned());
+    };
+    let written =
+        import::apply(&vault, source, &outcome).map_err(|error| format!("import: {error}"))?;
+
+    // The report is written last, so it describes an import that finished.
+    let reference = vault
+        .next_ref()
+        .map_err(|error| format!("allocate a ref: {error}"))?;
+    let rel = format!("notes/{reference}-import-report.md");
+    let body = scaffold::note(
+        &reference,
+        "Import report",
+        &["import"],
+        &import::report(&outcome),
+        std::time::SystemTime::now(),
+        std::time::SystemTime::now(),
+        None,
+    );
+    vault
+        .write(&rel, &body, None)
+        .map_err(|error| format!("write {rel}: {error}"))?;
+
+    Ok(format!("{summary} {written} files written. See {rel}"))
+}
+
+/// Whether two paths name the same directory, canonicalised so `.` and a
+/// symlink cannot smuggle one past the other.
+fn same_folder(a: &Path, b: &Path) -> bool {
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        // An unresolvable destination has not been created yet, so it cannot be
+        // the source.
+        _ => false,
+    }
 }
 
 fn create(title: &str, at: Option<&Path>) -> Result<String, String> {
