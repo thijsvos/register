@@ -206,7 +206,7 @@ pub fn init(root: &Path, git: bool) -> io::Result<Report> {
     }
 
     let now = SystemTime::now();
-    let inbox = note("000", "Inbox", &["capture"], INBOX_BODY, now, None);
+    let inbox = note("000", "Inbox", &["capture"], INBOX_BODY, now, now, None);
 
     for (rel, body) in [
         ("CLAUDE.md", VAULT_CLAUDE_MD.to_owned()),
@@ -340,7 +340,8 @@ pub fn create(vault: &Vault, title: &str) -> io::Result<String> {
         ));
     }
 
-    let body = note(&reference, title, &[], "", SystemTime::now(), None);
+    let now = SystemTime::now();
+    let body = note(&reference, title, &[], "", now, now, None);
     // Through the vault, never through `fs`: hard rule 5 routes every write in
     // the product through one atomic tmp+rename path.
     vault
@@ -351,21 +352,35 @@ pub fn create(vault: &Vault, title: &str) -> io::Result<String> {
 }
 
 /// A note with every field §04 requires.
-fn note(
+///
+/// `created` and `modified` are separate because an imported note carries dates
+/// the conversion did not invent — a file written in 2019 says 2019. A note this
+/// project creates passes the same instant twice, which is what it has always
+/// done.
+pub(crate) fn note(
     reference: &str,
     title: &str,
     tags: &[&str],
     body: &str,
-    now: SystemTime,
+    created: SystemTime,
+    modified: SystemTime,
     id: Option<&str>,
 ) -> String {
-    let stamp = unix_seconds(now);
+    // §04 gives a ref to `notes/NNN-slug.md` and to the root inbox, and gives
+    // none at all to `daily/YYYY-MM-DD.md` — `ref_from_path` declines to read
+    // one there. An empty `ref:` is not the same as no `ref:`: it puts a field
+    // in the file that §04 says that file does not have.
+    let reference = if reference.is_empty() {
+        String::new()
+    } else {
+        format!("ref: {reference}\n")
+    };
     format!(
-        "---\nid: {}\nref: {reference}\ntitle: {}\ncreated: {}\nmodified: {}\ntags: [{}]\n---\n{body}",
-        id.map_or_else(|| ulid(now), str::to_owned),
+        "---\nid: {}\n{reference}title: {}\ncreated: {}\nmodified: {}\ntags: [{}]\n---\n{body}",
+        id.map_or_else(|| ulid(created), str::to_owned),
         yaml_scalar(title),
-        iso_date(stamp),
-        iso_seconds(stamp),
+        iso_date(unix_seconds(created)),
+        iso_seconds(unix_seconds(modified)),
         tags.join(", "),
     )
 }

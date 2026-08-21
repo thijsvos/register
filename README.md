@@ -47,6 +47,20 @@ register serve ~/vault        # UI on http://127.0.0.1:7777
 Compose, building from source, and the container's internals:
 [`docs/install.md`](docs/install.md).
 
+**Coming from Obsidian?** One command, and nothing in the source vault is
+touched:
+
+```sh
+register import ~/ObsidianVault ~/vault --dry-run   # says what it would do
+register import ~/ObsidianVault ~/vault             # does it
+```
+
+Notes, daily notes, tags and attachments come across, and links are rewritten
+into the forms this app resolves. Whatever could not be carried — a note embed,
+a link to something that was not in the vault — is written into `~/vault` as a
+note listing each one, so the residue is a page you can click through rather
+than a paragraph that scrolled past.
+
 ## Using it
 
 Everything is reachable from the keyboard, and every control prints its own key —
