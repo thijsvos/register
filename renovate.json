@@ -53,8 +53,9 @@
       "allowedVersions": "<7"
     },
     {
-      "description": "The reason this repo runs Renovate rather than Dependabot. SPEC §06 states that every version pin lives in exactly one of .nvmrc, rust-toolchain.toml or the packageManager field, and Dependabot has no manager for any of the three — so the doctrine's own files were the only ones nothing watched. Grouped so a toolchain move arrives as one reviewable change.",
-      "matchManagers": ["nvm", "rust-toolchain"],
+      "description": "The reason this repo runs Renovate rather than Dependabot. SPEC §06 states that every version pin lives in exactly one of .nvmrc, rust-toolchain.toml or the packageManager field, and Dependabot has no manager for any of the three — so the doctrine's own files were the only ones nothing watched. Grouped so a toolchain move arrives as one reviewable change — which has to include deploy/Dockerfile's node and rust images, because tests/release.rs asserts they name the same minor as the pin files. Left to the dockerfile manager alone, Rust 1.98 arrived as two branches (renovate/toolchain-pins and renovate/rust-1.x), each red on its own and green only if merged together. matchDepNames keeps alpine out of it: no pin file ties the base image to anything, so it may move on its own.",
+      "matchManagers": ["nvm", "rust-toolchain", "dockerfile"],
+      "matchDepNames": ["node", "rust"],
       "groupName": "toolchain pins"
     }
   ]

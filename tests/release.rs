@@ -107,9 +107,17 @@ fn the_image_is_three_stages_over_a_pinned_alpine_and_serves_the_vault_it_is_giv
          not a floating tag"
     );
     // Nothing from the build stages comes with it: the runtime carries the
-    // binary and git, never a compiler or a package index.
+    // binary and git, never a compiler or a package index. Read off the line
+    // after the rust `FROM` rather than a literal `rust:1.97-alpine`: written
+    // as a literal, the first toolchain bump would have left this comparing
+    // against a line no longer in the file — true forever, measuring nothing.
+    let after_builder = dockerfile
+        .split_once("FROM rust:")
+        .and_then(|(_, rest)| rest.split_once('\n'))
+        .map(|(_, rest)| rest.trim_start())
+        .expect("a rust builder stage in the Dockerfile");
     assert!(
-        !dockerfile.contains("FROM rust:1.97-alpine\nRUN apk add --no-cache git"),
+        !after_builder.starts_with("RUN apk add --no-cache git"),
         "the runtime stage must be its own stage, not a layer on the builder"
     );
     assert!(dockerfile.contains("EXPOSE 7777"));
