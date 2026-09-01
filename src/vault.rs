@@ -241,11 +241,18 @@ const DAILY_DIR: &str = "daily/";
 /// Marks an unresolved conflict copy (§04).
 const CONFLICT_MARK: &str = ".conflict-";
 const NOTE_EXT: &str = "md";
-/// The largest file `GET /api/file` will serve, matching the router's own
-/// request-body limit so the two halves of the API refuse at the same size.
-/// The read is not streamed — nothing in this crate streams, and adding it
-/// means a new dependency — so this is also the allocation ceiling.
-const MAX_MEDIA_BYTES: u64 = 16 * 1024 * 1024;
+/// The largest file this vault will read whole: a note for `list` and `read`,
+/// anything else for `read_media`. The router takes its request-body limit
+/// from here, so the two halves of the API refuse at the same size. The read
+/// is not streamed — nothing in this crate streams, and adding it means a new
+/// dependency — so this is also the allocation ceiling.
+///
+/// Media has had this cap since the day it was served. Notes did not, because
+/// every note used to arrive through the capped `PUT`, and `list` — which runs
+/// on every load of the app — read each one whole on that assumption. The
+/// importer ended it: it copies whatever it is given, and an agent always
+/// could. §06 budgets the whole process at 50 MB idle.
+pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 /// §04's examples are three digits (`003-…`).
 const MIN_REF_WIDTH: usize = 3;
 /// How many same-millisecond, same-basename deletions to disambiguate before
@@ -272,7 +279,7 @@ pub enum Error {
     /// `NotFound` only so the body can say which of the two the request got
     /// wrong — "no such note" is a confusing answer to a request about a folder.
     NoSuchFolder,
-    /// Bigger than `MAX_MEDIA_BYTES`. The file is read whole to be served, so an
+    /// Bigger than `MAX_FILE_BYTES`. The file is read whole to be served, so an
     /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
     /// 50 MB for the whole process.
     TooLarge,
@@ -1370,12 +1377,22 @@ impl Vault {
             if !meta.is_file() || path.extension().and_then(|e| e.to_str()) != Some(NOTE_EXT) {
                 continue;
             }
+            let Ok(rel) = self.relative(&path) else {
+                continue;
+            };
+            // Over the cap: listed, never read. Everything the row carries but
+            // the title and the tags comes from the metadata, and `read`
+            // refuses the file at this same size — so the INDEX still shows a
+            // note the vault holds, and opening it says why it will not open.
+            // Skipping it instead would make a file the watcher reports and
+            // `paths` counts invisible in the one place a person looks.
+            if meta.len() > MAX_FILE_BYTES {
+                out.push(entry_for(rel, "", &meta));
+                continue;
+            }
             // A note we cannot read is skipped, not fatal: one unreadable file
             // must not take down the whole tree.
             let Ok(body) = fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(rel) = self.relative(&path) else {
                 continue;
             };
             out.push(entry_for(rel, &body, &meta));
@@ -1413,7 +1430,7 @@ impl Vault {
         }
         // Checked against the metadata, before the read rather than after it:
         // refusing a 2 GB file is only useful if we have not already loaded it.
-        if meta.len() > MAX_MEDIA_BYTES {
+        if meta.len() > MAX_FILE_BYTES {
             return Err(Error::TooLarge);
         }
         let bytes = fs::read(&path)?;
@@ -1428,6 +1445,11 @@ impl Vault {
         let meta = fs::metadata(&path)?;
         if !meta.is_file() {
             return Err(Error::NotFound);
+        }
+        // Before the read, for the reason `read_media` gives: refusing a file
+        // is only cheap if it has not been loaded first.
+        if meta.len() > MAX_FILE_BYTES {
+            return Err(Error::TooLarge);
         }
         // A note that is not UTF-8 is not a note. `list` already skips it, so
         // reporting it as absent keeps the tree and the reader agreeing rather

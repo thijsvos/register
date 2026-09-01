@@ -1370,7 +1370,7 @@ mod media {
     fn a_file_larger_than_the_cap_is_refused_before_it_is_read() {
         let tmp = TempVault::new();
         let mut big = PNG.to_vec();
-        big.resize((MAX_MEDIA_BYTES + 1) as usize, 0);
+        big.resize((MAX_FILE_BYTES + 1) as usize, 0);
         put_bytes(&tmp, "notes/huge.png", &big);
         let vault = tmp.open();
 
@@ -1378,6 +1378,60 @@ mod media {
             vault.read_media("notes/huge.png"),
             Err(Error::TooLarge)
         ));
+    }
+
+    /// The same cap, on a note. Media had it from the start; notes did not,
+    /// because every note used to come in through the capped `PUT`. The
+    /// importer copies whatever it is given.
+    #[test]
+    fn a_note_over_the_cap_is_listed_unread_and_refused_when_opened() {
+        let tmp = TempVault::new();
+        tmp.put("notes/003-small.md", NOTE);
+        let mut huge = b"---\ntitle: Never read\ntags: [never]\n---\n".to_vec();
+        huge.resize((MAX_FILE_BYTES + 1) as usize, b'.');
+        put_bytes(&tmp, "notes/004-huge.md", &huge);
+        let vault = tmp.open();
+
+        // Still in the tree — the INDEX must show a file the vault holds — but
+        // without the two fields that need the body. Everything else is from
+        // the stat, and exact.
+        let entries = vault.list().expect("list");
+        let listed = entries
+            .iter()
+            .find(|e| e.path == "notes/004-huge.md")
+            .expect("a note over the cap is still listed");
+        assert_eq!(
+            listed.title, None,
+            "the frontmatter must not have been read"
+        );
+        assert!(listed.tags.is_empty());
+        assert_eq!(listed.reference.as_deref(), Some("004"));
+        assert_eq!(listed.size, MAX_FILE_BYTES + 1);
+        // Its neighbour is untouched by it.
+        let small = entries
+            .iter()
+            .find(|e| e.path == "notes/003-small.md")
+            .expect("listed");
+        assert_eq!(small.title.as_deref(), Some("Terminal aesthetics"));
+
+        assert!(matches!(
+            vault.read("notes/004-huge.md"),
+            Err(Error::TooLarge)
+        ));
+
+        // One byte less is a note like any other — the cap is a ceiling, not
+        // a line a note may not stand on.
+        huge.truncate(MAX_FILE_BYTES as usize);
+        put_bytes(&tmp, "notes/004-huge.md", &huge);
+        let (body, _) = vault.read("notes/004-huge.md").expect("at the cap, served");
+        assert_eq!(body.len() as u64, MAX_FILE_BYTES);
+        let entries = vault.list().expect("list");
+        let listed = entries
+            .iter()
+            .find(|e| e.path == "notes/004-huge.md")
+            .expect("listed");
+        assert_eq!(listed.title.as_deref(), Some("Never read"));
+        assert_eq!(listed.tags, ["never"]);
     }
 
     #[test]
