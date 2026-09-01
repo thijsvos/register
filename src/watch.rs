@@ -70,15 +70,8 @@ async fn coalesce(
     events: broadcast::Sender<Event>,
 ) {
     // Which notes the vault held last time we looked. This — not the event
-    // kind — is what distinguishes a create from a change. Built with a
-    // paths-only walk off the runtime: `list()` would read and YAML-parse every
-    // note just to collect a set of names, on a thread that must stay free.
-    let mut known: HashSet<String> = {
-        let vault = vault.clone();
-        tokio::task::spawn_blocking(move || vault.paths().unwrap_or_default())
-            .await
-            .unwrap_or_default()
-    };
+    // kind — is what distinguishes a create from a change.
+    let mut known: HashSet<String> = snapshot(&vault).await;
 
     let mut pending: HashSet<PathBuf> = HashSet::new();
 
@@ -102,11 +95,23 @@ async fn coalesce(
         let vault_for_flush = vault.clone();
         let mut taken = std::mem::take(&mut pending);
         let taken_known = std::mem::take(&mut known);
-        let (batch, next_known) = tokio::task::spawn_blocking(move || {
+        let flushed = tokio::task::spawn_blocking(move || {
             flush(&vault_for_flush, &mut taken, taken_known, resync)
         })
-        .await
-        .unwrap_or_default();
+        .await;
+        let (batch, next_known) = match flushed {
+            Ok(flushed) => flushed,
+            // `flush` panicked, and `known` went with it: it was moved into the
+            // closure. This used to be `unwrap_or_default()`, which put an
+            // empty set here — and from then on every write to a note read as
+            // a create, and deleting one the watcher had once known was dropped
+            // with nothing said, for as long as the server ran. Rebuilt from
+            // the filesystem instead, the way it was built to begin with.
+            Err(error) => {
+                eprintln!("watch: flush failed: {error}");
+                (Vec::new(), snapshot(&vault).await)
+            }
+        };
         known = next_known;
 
         if !batch.is_empty() {
@@ -123,6 +128,18 @@ async fn coalesce(
             let _ = events.send(event);
         }
     }
+}
+
+/// Every note the vault holds right now, gathered off the runtime.
+///
+/// A paths-only walk on purpose: `list()` would read and YAML-parse every note
+/// just to collect a set of names, on a thread that must stay free. A vault
+/// that cannot be walked reads as empty, which the next resync corrects.
+async fn snapshot(vault: &Arc<Vault>) -> HashSet<String> {
+    let vault = vault.clone();
+    tokio::task::spawn_blocking(move || vault.paths().unwrap_or_default())
+        .await
+        .unwrap_or_default()
 }
 
 /// Record the paths a raw event touched, if they are notes the API exposes.
