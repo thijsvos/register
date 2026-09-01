@@ -34,13 +34,15 @@ use crate::watch::Event;
 #[allow_missing = true]
 struct Assets;
 
-/// Upper bound on a single note. Generous — a note is prose, and the vault is
-/// local — but bounded, so a runaway client cannot ask the server to buffer
-/// unbounded bytes.
 /// Carries remote mode's token into the WebSocket, which can send no headers.
 const TOKEN_COOKIE: &str = "register_token";
 
-const MAX_NOTE_BYTES: usize = 16 * 1024 * 1024;
+/// Upper bound on a request body. Generous — a note is prose, and the vault is
+/// local — but bounded, so a runaway client cannot ask the server to buffer
+/// unbounded bytes. The vault's own reading ceiling, so a file the API would
+/// not accept is also one it will not serve, and a note that got in some
+/// other way — an agent, an import — is refused at the same size.
+const MAX_BODY_BYTES: usize = vault::MAX_FILE_BYTES as usize;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -396,7 +398,7 @@ pub fn router(state: AppState) -> Router {
         // Chosen deliberately. axum's default is 2 MiB, sized for web forms;
         // §04 puts no cap on a note, and a 2 MiB limit would reject a large
         // note with an unexplained 413 that nothing in the codebase decided on.
-        .layer(DefaultBodyLimit::max(MAX_NOTE_BYTES))
+        .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(middleware::from_fn(hardening_headers))
         .layer(middleware::from_fn_with_state(
             state.clone(),
