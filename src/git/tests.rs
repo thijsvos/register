@@ -869,7 +869,7 @@ fn a_git_that_never_answers_is_cut_off() {
 async fn drive(tmp: &TempVault, idle: Duration) {
     let vault = Arc::new(tmp.open());
     let (events, _keep) = tokio::sync::broadcast::channel(16);
-    let _checkpointer = Checkpointer::with_idle(vault, events.subscribe(), idle);
+    let _checkpointer = Checkpointer::with_idle(vault, events.clone(), idle);
 
     let _ = events.send(crate::watch::Event {
         change: crate::watch::Change::Changed,
@@ -901,6 +901,46 @@ async fn the_driver_commits_after_the_vault_goes_quiet() {
 }
 
 #[tokio::test]
+async fn a_checkpoint_announces_itself_on_the_wire() {
+    // The watcher ignores `.git/` — a dotfile, by rule — so a commit landing is
+    // invisible to a client, and a ledger it had already read would stay stale
+    // until something unrelated moved. The checkpointer says so itself.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    tmp.open()
+        .write_config(r#"{"checkpoints":true}"#)
+        .expect("write config");
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nWritten since.\n");
+
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = tokio::sync::broadcast::channel(16);
+    let mut heard = events.subscribe();
+    let _checkpointer = Checkpointer::with_idle(vault, events.clone(), Duration::from_millis(150));
+    let _ = events.send(crate::watch::Event {
+        change: crate::watch::Change::Changed,
+        path: "notes/004-b.md".to_owned(),
+        etag: None,
+    });
+    tokio::time::sleep(Duration::from_millis(750)).await;
+
+    let mut frames = Vec::new();
+    while let Ok(event) = heard.try_recv() {
+        frames.push(event);
+    }
+    let announced = frames
+        .iter()
+        .filter(|event| event.change == crate::watch::Change::Checkpoint)
+        .count();
+    assert_eq!(announced, 1, "{frames:?}");
+    assert!(
+        frames
+            .iter()
+            .any(|event| event.change == crate::watch::Change::Checkpoint && event.path.is_empty()),
+        "a checkpoint frame names no path: {frames:?}"
+    );
+}
+
+#[tokio::test]
 async fn the_driver_does_nothing_unless_the_vault_asks() {
     // Off by default, and the default is what a vault has until it says so.
     let tmp = TempVault::new();
@@ -928,8 +968,7 @@ async fn a_busy_vault_is_not_committed_mid_sentence() {
 
     let vault = Arc::new(tmp.open());
     let (events, _keep) = tokio::sync::broadcast::channel(16);
-    let _checkpointer =
-        Checkpointer::with_idle(vault, events.subscribe(), Duration::from_millis(300));
+    let _checkpointer = Checkpointer::with_idle(vault, events.clone(), Duration::from_millis(300));
 
     for nth in 0..5 {
         tmp.put(
