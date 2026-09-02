@@ -3,7 +3,7 @@
 //! Hard rule 5: every write goes through here, atomically (tmp + rename) and
 //! guarded by an etag. Nothing else in the codebase opens a file for writing.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Write};
@@ -353,6 +353,12 @@ impl From<io::Error> for Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// What this process wrote since a checkpoint last asked (§08 P12): a
+/// vault-relative path, and the etag the write left there — or `None` when the
+/// write took the path away, as a trash or a move's source does. `git.rs` reads
+/// this to say `You:` or `Outside:` beside every path a checkpoint commits.
+pub type Written = HashMap<String, Option<String>>;
+
 /// The body of `GET /api/tree` (§04).
 ///
 /// An envelope rather than a bare array, because two things the UI needs are
@@ -490,6 +496,12 @@ pub struct Vault {
     git: Mutex<Option<(Instant, Option<git::Status>)>>,
     /// Bumped by every change this process makes or sees. See [`Tree::rev`].
     revision: AtomicU64,
+    /// Every path this process has written since a checkpoint last took a
+    /// copy. The watcher reports an agent's write and this vault's own save
+    /// the same way, so this is the only record of which was which — and it is
+    /// the whole basis of a checkpoint saying who changed what. Transient by
+    /// design: once committed, history holds the answer.
+    written: Mutex<Written>,
 }
 
 /// Where a vault's claim lives: the temp directory, named for the vault.
@@ -687,6 +699,7 @@ impl Vault {
             git_ttl: GIT_TTL,
             git: Mutex::new(None),
             revision: AtomicU64::new(0),
+            written: Mutex::new(HashMap::new()),
         })
     }
 
@@ -935,6 +948,42 @@ impl Vault {
         }
     }
 
+    /// Record that this process wrote `rel`, leaving `etag` there — or nothing,
+    /// when the write removed it.
+    fn wrote(&self, rel: &str, etag: Option<String>) {
+        if let Ok(mut written) = self.written.lock() {
+            written.insert(rel.to_owned(), etag);
+        }
+    }
+
+    /// Record a folder this process moved from `from` to `to`, file by file,
+    /// because a checkpoint reads paths and a folder is not one. `dir` is where
+    /// the folder is now.
+    fn wrote_moved(&self, from: &str, to: &str, dir: &Path) {
+        let mut files = Vec::new();
+        collect_all(dir, dir, &mut files);
+        for file in files {
+            self.wrote(&format!("{from}/{file}"), None);
+            self.wrote(&format!("{to}/{file}"), file_etag(&dir.join(&file)));
+        }
+    }
+
+    /// What this process has written since a checkpoint last took a copy.
+    pub fn written(&self) -> Written {
+        self.written
+            .lock()
+            .map(|written| written.clone())
+            .unwrap_or_default()
+    }
+
+    /// Forget the writes a checkpoint has now committed — exactly those, so a
+    /// path written again since the copy was taken keeps its newer record.
+    pub fn forget_written(&self, committed: &Written) {
+        if let Ok(mut written) = self.written.lock() {
+            written.retain(|path, etag| committed.get(path) != Some(&*etag));
+        }
+    }
+
     /// Claim this vault for this process, or say who already has it.
     ///
     /// `vault.rs` serialises writes with an in-process `Mutex`, which is exactly
@@ -1148,6 +1197,12 @@ impl Vault {
         fs::rename(&source, &target)?;
         self.prune_empty_parents(&source);
         self.forget_git();
+        if moving_a_folder {
+            self.wrote_moved(from, to, &target);
+        } else {
+            self.wrote(from, None);
+            self.wrote(to, file_etag(&target));
+        }
 
         Ok(Moved {
             from: from.to_owned(),
@@ -1235,6 +1290,8 @@ impl Vault {
             }
             fs::rename(base.join(rel), &target)?;
             restored += 1;
+            self.wrote(rel, file_etag(&target));
+            self.wrote(&format!("{APP_DIR}/{TRASH_DIR}/{bucket}/{rel}"), None);
         }
 
         // Empty now, or holding only what could not go back. `remove_dir_all` is
@@ -1260,8 +1317,13 @@ impl Vault {
         self.require_root()?;
 
         let base = self.bucket_path(bucket)?;
+        let mut gone = Vec::new();
+        collect_all(&base, &base, &mut gone);
         fs::remove_dir_all(&base)?;
         self.forget_git();
+        for file in gone {
+            self.wrote(&format!("{APP_DIR}/{TRASH_DIR}/{bucket}/{file}"), None);
+        }
         Ok(())
     }
 
@@ -1520,8 +1582,9 @@ impl Vault {
         write_atomically(&path, bytes)?;
         self.forget_git();
 
-        let meta = fs::metadata(&path)?;
-        Ok(etag_of(&meta))
+        let etag = etag_of(&fs::metadata(&path)?);
+        self.wrote(rel, Some(etag.clone()));
+        Ok(etag)
     }
 
     pub fn write(&self, rel: &str, body: &str, if_match: Option<&str>) -> Result<String> {
@@ -1601,7 +1664,9 @@ impl Vault {
         // not bumped here; see `changed`.
         self.forget_git();
 
-        Ok(etag_of(&fs::metadata(&path)?))
+        let etag = etag_of(&fs::metadata(&path)?);
+        self.wrote(rel, Some(etag.clone()));
+        Ok(etag)
     }
 
     // ------------------------------------------------------- app-owned files
@@ -1671,6 +1736,7 @@ impl Vault {
         // `.gitignore` only reaches vaults made after this, so a clearing here is
         // the honest answer for one that predates it.
         self.forget_git();
+        self.wrote(&format!("{APP_DIR}/{name}"), file_etag(&path));
         Ok(())
     }
 
@@ -1755,12 +1821,12 @@ impl Vault {
         // exists(): probing then renaming is a check-then-act race, and rename
         // silently replaces its destination.
         for nth in 0..MAX_TRASH_COLLISIONS {
-            let bucket = if nth == 0 {
-                dir.join(stamp.to_string())
+            let name = if nth == 0 {
+                stamp.to_string()
             } else {
-                dir.join(format!("{stamp}-{nth}"))
+                format!("{stamp}-{nth}")
             };
-            let target = bucket.join(rel);
+            let target = dir.join(&name).join(rel);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -1770,6 +1836,11 @@ impl Vault {
                     fs::rename(&path, &target)?;
                     self.prune_empty_parents(&path);
                     self.forget_git();
+                    self.wrote(rel, None);
+                    self.wrote(
+                        &format!("{APP_DIR}/{TRASH_DIR}/{name}/{rel}"),
+                        file_etag(&target),
+                    );
                     return Ok(());
                 }
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
@@ -1851,6 +1922,7 @@ impl Vault {
                     fs::rename(&path, &target)?;
                     self.prune_empty_parents(&path);
                     self.forget_git();
+                    self.wrote_moved(rel, &format!("{APP_DIR}/{TRASH_DIR}/{name}/{rel}"), &target);
                     return Ok(Trashed {
                         notes,
                         files,
@@ -1898,9 +1970,7 @@ impl Vault {
 
     /// The etag of a vault-relative path, if it exists.
     pub fn etag(&self, rel: &str) -> Option<String> {
-        let path = self.resolve(rel).ok()?;
-        let meta = fs::metadata(path).ok()?;
-        meta.is_file().then(|| etag_of(&meta))
+        file_etag(&self.resolve(rel).ok()?)
     }
 
     /// Whether an absolute path is a note the API would expose. Used by the
@@ -1940,6 +2010,12 @@ impl Vault {
 
 /// Etag derived from mtime and length (§04). Opaque to the client, which only
 /// ever echoes it back in `If-Match`.
+/// The etag of whatever is at `path`, or `None` when it is not a file now.
+pub(crate) fn file_etag(path: &Path) -> Option<String> {
+    let meta = fs::metadata(path).ok()?;
+    meta.is_file().then(|| etag_of(&meta))
+}
+
 fn etag_of(meta: &Metadata) -> String {
     let nanos = meta
         .modified()

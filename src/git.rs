@@ -19,7 +19,7 @@ use serde::Serialize;
 use tokio::sync::broadcast;
 use tokio::time::{Instant, timeout_at};
 
-use crate::vault::Vault;
+use crate::vault::{Vault, Written, file_etag};
 use crate::watch::Event;
 
 /// How long the vault must be still before a checkpoint is taken.
@@ -312,6 +312,141 @@ pub fn status(root: &Path) -> Option<Status> {
     })
 }
 
+/// Who changed a path, as far as this process can tell (§08 P12).
+///
+/// Not "human" and "agent": the server cannot see who is at the keyboard. What
+/// it can see is whether a write came *through* it — a save in the app, a move,
+/// a deletion — or arrived on disk from anywhere else: an agent, an editor, a
+/// sync client. `Both` is one path written through the app and then changed
+/// from outside before the checkpoint caught up. A checkpoint carries this as
+/// one trailer per path, so history can answer the question later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Who {
+    You,
+    Outside,
+    Both,
+}
+
+impl Who {
+    /// The trailer key: `You: notes/014-x.md`.
+    fn key(self) -> &'static str {
+        match self {
+            Self::You => "You",
+            Self::Outside => "Outside",
+            Self::Both => "Both",
+        }
+    }
+
+    /// The word in the subject: `checkpoint: 14:07Z · 2 outside`.
+    fn word(self) -> &'static str {
+        match self {
+            Self::You => "you",
+            Self::Outside => "outside",
+            Self::Both => "both",
+        }
+    }
+}
+
+/// The order the message lists them in — what you did, then what you and
+/// somebody else did, then what arrived from outside.
+const WHO: [Who; 3] = [Who::You, Who::Both, Who::Outside];
+
+/// Who changed `path`, given what this process remembers writing.
+///
+/// A recorded etag that still matches is the app's own write, untouched since.
+/// One that does not match — or a path the app removed that is back — has been
+/// changed from outside as well, in either order.
+fn attribute(root: &Path, path: &str, written: &Written) -> Who {
+    match written.get(path) {
+        None => Who::Outside,
+        Some(None) => {
+            if root.join(path).is_file() {
+                Who::Both
+            } else {
+                Who::You
+            }
+        }
+        Some(Some(left)) => match file_etag(&root.join(path)) {
+            Some(now) if &now == left => Who::You,
+            _ => Who::Both,
+        },
+    }
+}
+
+/// One entry of `git status --porcelain -z`: the two status columns, and the
+/// path. `-z` rather than the line format so a path comes back byte-exact —
+/// the line format quotes anything unusual, and a quoted path is not the path.
+struct Entry {
+    status: String,
+    path: String,
+}
+
+/// Every path `git status --porcelain -z` reports as changed.
+///
+/// A rename or copy carries its source in the field after the entry; both
+/// ends changed, so both are kept.
+fn entries(porcelain: &str) -> Vec<Entry> {
+    let mut out = Vec::new();
+    let mut fields = porcelain.split('\0');
+    while let Some(field) = fields.next() {
+        // `XY path`: two columns, a space, then at least one byte of path.
+        if field.len() < 4 || !field.is_char_boundary(3) {
+            continue;
+        }
+        let (status, path) = field.split_at(3);
+        let status = status[..2].to_owned();
+        let moved = status.contains(['R', 'C']);
+        out.push(Entry {
+            status: status.clone(),
+            path: path.to_owned(),
+        });
+        if moved && let Some(source) = fields.next() {
+            out.push(Entry {
+                status,
+                path: source.to_owned(),
+            });
+        }
+    }
+    out
+}
+
+/// The commit message: when, how many of each, then one trailer per path.
+///
+/// `You: notes/014-x.md` is a git trailer, so `git log --format=%(trailers)`
+/// and `git interpret-trailers` both read it back. A path that cannot sit on
+/// one line — a newline in a filename is legal — is counted in the subject and
+/// left out of the trailers, which is the honest shape of "this one cannot be
+/// named here".
+fn message(stamp: &str, changes: &[(String, Who)]) -> String {
+    let mut subject = format!("checkpoint: {stamp}");
+    for who in WHO {
+        let count = changes.iter().filter(|(_, by)| *by == who).count();
+        if count > 0 {
+            subject.push_str(&format!(" · {count} {}", who.word()));
+        }
+    }
+
+    let mut trailers = String::new();
+    for who in WHO {
+        let mut paths: Vec<&str> = changes
+            .iter()
+            .filter(|(path, by)| *by == who && !path.contains(['\n', '\r']))
+            .map(|(path, _)| path.as_str())
+            .collect();
+        paths.sort_unstable();
+        for path in paths {
+            trailers.push_str(&format!("{}: {path}\n", who.key()));
+        }
+    }
+
+    if trailers.is_empty() {
+        format!("{subject}\n")
+    } else {
+        format!("{subject}\n\n{trailers}")
+    }
+}
+
 /// What a checkpoint attempt did.
 ///
 /// Three answers, not two, and the third is the whole reason this type exists.
@@ -331,17 +466,29 @@ pub enum Checkpoint {
     Refused(String),
 }
 
-/// Commit everything in the vault as `checkpoint: HH:MMZ`.
-pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
+/// Commit everything in the vault as `checkpoint: HH:MMZ`, saying beside each
+/// path whether it was written through the app or from outside it — `written`
+/// being what the app remembers writing since the last checkpoint.
+pub fn checkpoint(root: &Path, stamp: &str, written: &Written) -> Checkpoint {
     if !is_repo(root) {
         return Checkpoint::Nothing;
     }
     // Cheaper than staging and finding out: `add -A` on a large vault is real
     // work, and the common case at idle is that nothing changed.
-    let porcelain = match git(root, &["status", "--porcelain"]) {
-        Some(dirty) if !dirty.trim().is_empty() => dirty,
-        _ => return Checkpoint::Nothing,
+    //
+    // `--untracked-files=all`, because the default reports a new folder as one
+    // entry (`?? areas/`) and the trailers name files: a folder an agent just
+    // created would otherwise be one line saying nothing about what is in it.
+    let changed = match git(
+        root,
+        &["status", "--porcelain", "-z", "--untracked-files=all"],
+    ) {
+        Some(dirty) => entries(&dirty),
+        None => return Checkpoint::Nothing,
     };
+    if changed.is_empty() {
+        return Checkpoint::Nothing;
+    }
 
     // Your index is yours. `add -A` sweeps whatever you staged with `git add -p`
     // into the app's commit, which quietly destroys work you were composing —
@@ -352,7 +499,7 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
     // Read from the porcelain already in hand rather than by asking again: the
     // first column is the index, and anything but a space or `?` there is
     // something staged.
-    if porcelain.lines().any(staged) {
+    if changed.iter().any(|entry| staged(&entry.status)) {
         return Checkpoint::Refused(
             "something is staged, and a checkpoint would commit it. Nothing was written; \
              checkpoints resume once your index is clear."
@@ -360,11 +507,22 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
         );
     }
 
+    // Attributed before `add -A` moves anything, against the tree as it is.
+    let changes: Vec<(String, Who)> = changed
+        .into_iter()
+        .map(|entry| {
+            let who = attribute(root, &entry.path, written);
+            (entry.path, who)
+        })
+        .collect();
+
     if let Err(why) = try_git(root, &["add", "-A"]) {
         return Checkpoint::Refused(why);
     }
     // `--no-verify`: a checkpoint is the app's bookkeeping, and someone else's
     // pre-commit hook should not get a vote on whether your notes are saved.
+    // `--cleanup=verbatim`: the trailers are read back by path, and git's
+    // default cleanup trims trailing whitespace — a filename may end in one.
     //
     // A refusal here leaves the tree staged. That is the existing behaviour of
     // `add -A` and not made worse by reporting it — and the roadmap already
@@ -374,14 +532,25 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
         &[
             "commit",
             "--no-verify",
+            "--cleanup=verbatim",
             "-m",
-            &format!("checkpoint: {stamp}"),
+            &message(stamp, &changes),
         ],
     );
     match committed {
         Ok(_) => Checkpoint::Committed,
         Err(why) => Checkpoint::Refused(why),
     }
+}
+
+/// Is this porcelain entry something the user put in the index?
+///
+/// `XY`, where X is the index and Y the working tree. A space means unchanged
+/// there and `?` is the untracked marker — `??` is a new file nobody has
+/// staged, which is the ordinary state of a vault being written in and must
+/// not stand a checkpoint down.
+fn staged(status: &str) -> bool {
+    !matches!(status.as_bytes().first(), None | Some(b' ') | Some(b'?'))
 }
 
 /// Whether the vault has asked for checkpoints.
@@ -391,16 +560,6 @@ pub fn checkpoint(root: &Path, stamp: &str) -> Checkpoint {
 /// the server. Off unless the file says otherwise — §08 P12 is explicit that
 /// this is "behind config flags, OFF by default", and silently rewriting
 /// somebody's git history is not a default.
-/// Is this porcelain line something the user put in the index?
-///
-/// `XY path`, where X is the index and Y the working tree. A space means
-/// unchanged there and `?` is the untracked marker — `??` is a new file nobody
-/// has staged, which is the ordinary state of a vault being written in and must
-/// not stand a checkpoint down.
-fn staged(line: &str) -> bool {
-    !matches!(line.as_bytes().first(), None | Some(b' ') | Some(b'?'))
-}
-
 pub fn checkpoints_enabled(config: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(config)
         .ok()
@@ -475,14 +634,22 @@ impl Checkpointer {
                         .duration_since(UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
                         .unwrap_or(0);
-                    match checkpoint(vault.root(), &stamp(now)) {
+                    // A copy, and forgotten only once it is history: a write
+                    // that lands while git is busy stays remembered for the
+                    // next checkpoint, and a refusal leaves everything
+                    // remembered, since nothing was committed.
+                    let written = vault.written();
+                    match checkpoint(vault.root(), &stamp(now), &written) {
                         Checkpoint::Committed => {
+                            vault.forget_written(&written);
                             println!("register · checkpoint: {}", stamp(now));
                         }
                         // The ordinary idle tick. History accrues silently and
                         // usefully, and saying "nothing to do" every ninety
-                        // seconds would be neither.
-                        Checkpoint::Nothing => {}
+                        // seconds would be neither. A clean tree means what the
+                        // app wrote is already committed — by hand — so the
+                        // record is spent either way.
+                        Checkpoint::Nothing => vault.forget_written(&written),
                         // stderr, because this is the one outcome the operator
                         // has to act on, and `docker logs` is where they will
                         // be looking when they wonder where their history went.

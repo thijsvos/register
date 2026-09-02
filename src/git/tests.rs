@@ -89,7 +89,10 @@ fn a_folder_that_is_not_a_repository_is_left_alone() {
 
     assert!(!is_repo(tmp.path()));
     assert_eq!(status(tmp.path()), None);
-    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Nothing);
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Nothing
+    );
 }
 
 #[test]
@@ -102,7 +105,10 @@ fn a_vault_inside_someone_elses_repository_is_not_its_own() {
     fs::create_dir_all(inner.join("notes")).expect("create nested vault");
 
     assert!(!is_repo(&inner), "a nested folder claimed the outer repo");
-    assert_eq!(checkpoint(&inner, "14:07Z"), Checkpoint::Nothing);
+    assert_eq!(
+        checkpoint(&inner, "14:07Z", &Written::new()),
+        Checkpoint::Nothing
+    );
 }
 
 #[test]
@@ -112,7 +118,10 @@ fn a_checkpoint_commits_everything_and_says_when() {
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nWritten since.\n");
 
     assert!(!status(tmp.path()).expect("status").clean);
-    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Committed
+    );
 
     assert!(log(&tmp).contains("checkpoint: 14:07Z"), "{}", log(&tmp));
     assert!(status(tmp.path()).expect("status").clean);
@@ -126,7 +135,10 @@ fn an_idle_vault_with_nothing_to_say_writes_no_history() {
     repo(&tmp);
     let before = log(&tmp);
 
-    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Nothing);
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Nothing
+    );
     assert_eq!(log(&tmp), before);
 }
 
@@ -249,7 +261,7 @@ fn a_vault_that_cannot_commit_says_why_rather_than_nothing() {
     let before = log(&tmp);
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nWritten since.\n");
 
-    match checkpoint(tmp.path(), "14:07Z") {
+    match checkpoint(tmp.path(), "14:07Z", &Written::new()) {
         Checkpoint::Refused(why) => {
             // Not asserted against git's exact wording, which moves between
             // versions — asserted as "there is something to read", because the
@@ -271,7 +283,10 @@ fn a_checkpoint_never_pushes() {
     repo(&tmp);
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
 
-    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Committed
+    );
     // No upstream, so nothing to be ahead of, and the status still reads.
     let state = status(tmp.path()).expect("status");
     assert!(state.clean);
@@ -305,7 +320,10 @@ fn ahead_counts_commits_the_upstream_has_not_seen() {
     assert_eq!(status(tmp.path()).expect("status").ahead, Some(0));
 
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nx\n");
-    assert_eq!(checkpoint(tmp.path(), "14:07Z"), Checkpoint::Committed);
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Committed
+    );
 
     let state = status(tmp.path()).expect("status");
     assert!(state.clean, "the checkpoint left the tree dirty");
@@ -346,6 +364,191 @@ fn checkpoints_are_off_unless_the_vault_asks() {
     assert!(checkpoints_enabled(
         r#"{"scheme":"dark","checkpoints":true}"#
     ));
+}
+
+// ------------------------------------------------------ who changed what
+
+/// The whole message of the newest commit, trailers included.
+fn last_message(tmp: &TempVault) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(tmp.path())
+        .args(["log", "-1", "--format=%B"])
+        .output()
+        .expect("git log");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn a_checkpoint_says_who_changed_what() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    // Through the app.
+    vault
+        .write(
+            "notes/004-b.md",
+            "---\nref: 004\n---\nSaved in the app.\n",
+            None,
+        )
+        .expect("write");
+    // From outside — an agent, an editor, anything that is not this process.
+    tmp.put(
+        "notes/005-c.md",
+        "---\nref: 005\n---\nWritten by an agent.\n",
+    );
+    // Through the app, then rewritten from outside before the checkpoint. A
+    // different length, so the etag cannot collide inside one mtime tick.
+    vault
+        .write("notes/006-d.md", "---\nref: 006\n---\nFirst.\n", None)
+        .expect("write");
+    tmp.put(
+        "notes/006-d.md",
+        "---\nref: 006\n---\nThen an agent changed it.\n",
+    );
+
+    let written = vault.written();
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &written),
+        Checkpoint::Committed
+    );
+
+    let message = last_message(&tmp);
+    assert!(
+        message.starts_with("checkpoint: 14:07Z · 1 you · 1 both · 1 outside\n"),
+        "{message}"
+    );
+    assert!(message.contains("\nYou: notes/004-b.md\n"), "{message}");
+    assert!(message.contains("\nBoth: notes/006-d.md\n"), "{message}");
+    assert!(message.contains("\nOutside: notes/005-c.md\n"), "{message}");
+}
+
+#[test]
+fn with_nothing_remembered_everything_is_from_outside() {
+    // The bare call — what a checkpoint knows when the app wrote nothing.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\none\n");
+    tmp.put("notes/005-c.md", "---\nref: 005\n---\ntwo\n");
+
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Committed
+    );
+    let message = last_message(&tmp);
+    assert!(
+        message.starts_with("checkpoint: 14:07Z · 2 outside\n"),
+        "{message}"
+    );
+    assert!(message.contains("\nOutside: notes/004-b.md\n"), "{message}");
+    assert!(message.contains("\nOutside: notes/005-c.md\n"), "{message}");
+    assert!(!message.contains("You:"), "{message}");
+}
+
+#[test]
+fn a_new_folder_is_named_file_by_file() {
+    // `git status` reports an untracked folder as one entry, `?? areas/`, and
+    // a trailer naming a folder says nothing about which notes arrived in it.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    tmp.put("areas/x/010-a.md", "---\nref: 010\n---\na\n");
+    tmp.put("areas/x/011-b.md", "---\nref: 011\n---\nb\n");
+
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &Written::new()),
+        Checkpoint::Committed
+    );
+    let message = last_message(&tmp);
+    assert!(
+        message.contains("\nOutside: areas/x/010-a.md\n"),
+        "{message}"
+    );
+    assert!(
+        message.contains("\nOutside: areas/x/011-b.md\n"),
+        "{message}"
+    );
+    assert!(!message.contains("Outside: areas/\n"), "{message}");
+}
+
+#[test]
+fn a_committed_write_is_forgotten_and_a_later_one_is_not() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    vault
+        .write("notes/004-b.md", "---\nref: 004\n---\nfirst\n", None)
+        .expect("write");
+    let copy = vault.written();
+    // Written again after the copy was taken — a different length, so the
+    // record is a different etag — and once more on a path the copy never saw.
+    vault
+        .write(
+            "notes/004-b.md",
+            "---\nref: 004\n---\nfirst, then more\n",
+            None,
+        )
+        .expect("write");
+    vault
+        .write("notes/005-c.md", "---\nref: 005\n---\nlater\n", None)
+        .expect("write");
+
+    vault.forget_written(&copy);
+    let left = vault.written();
+    assert!(
+        left.contains_key("notes/004-b.md"),
+        "the newer write was forgotten with the older one"
+    );
+    assert_ne!(left["notes/004-b.md"], copy["notes/004-b.md"]);
+    assert!(left.contains_key("notes/005-c.md"));
+
+    // And forgetting what is now remembered empties it.
+    vault.forget_written(&left);
+    assert!(vault.written().is_empty());
+}
+
+#[test]
+fn what_the_app_moved_trashed_and_restored_is_its_own() {
+    // Every write the product makes goes through `vault.rs` (hard rule 5), so
+    // every one of them has to leave a record — a move, a trash and a restore
+    // included, or the checkpoint calls the app's own housekeeping an outside
+    // edit. `repo()` committed `notes/003-a.md`; this moves it about.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    vault
+        .rename("notes/003-a.md", "notes/003-moved.md")
+        .expect("rename");
+    vault.trash("notes/003-moved.md").expect("trash");
+    let bucket = vault.buckets().expect("buckets")[0].name.clone();
+    vault.restore(&bucket).expect("restore");
+    vault
+        .write_config(r#"{"checkpoints":true}"#)
+        .expect("config");
+
+    let written = vault.written();
+    assert_eq!(
+        checkpoint(tmp.path(), "14:07Z", &written),
+        Checkpoint::Committed
+    );
+    let message = last_message(&tmp);
+    assert!(
+        !message.contains("Outside:") && !message.contains("Both:"),
+        "the app's own housekeeping was attributed to somebody else:\n{message}"
+    );
+    assert!(message.contains("\nYou: notes/003-a.md\n"), "{message}");
+    assert!(message.contains("\nYou: notes/003-moved.md\n"), "{message}");
+    assert!(
+        message.contains("\nYou: .register/config.json\n"),
+        "{message}"
+    );
 }
 
 // ------------------------------------------------------------- the driver
@@ -491,7 +694,7 @@ fn a_hostile_repository_config_does_not_execute() {
     let _ = is_repo(tmp.path());
     let _ = status(tmp.path());
     tmp.put("notes/004-b.md", "---\nref: 004\n---\nMore.\n");
-    let _ = checkpoint(tmp.path(), "00:00Z");
+    let _ = checkpoint(tmp.path(), "00:00Z", &Written::new());
 
     for name in ["fsmonitor", "filter", "pager", "hook"] {
         assert!(
@@ -614,7 +817,7 @@ fn a_checkpoint_stands_aside_when_something_is_staged() {
         .expect("git add");
     assert!(staged.success());
 
-    match checkpoint(tmp.path(), "2026-08-17T10:00:00Z") {
+    match checkpoint(tmp.path(), "2026-08-17T10:00:00Z", &Written::new()) {
         Checkpoint::Refused(why) => {
             assert!(
                 why.contains("staged"),
@@ -650,7 +853,7 @@ fn an_untracked_note_is_not_a_staged_one() {
     );
 
     assert_eq!(
-        checkpoint(tmp.path(), "2026-08-17T10:00:00Z"),
+        checkpoint(tmp.path(), "2026-08-17T10:00:00Z", &Written::new()),
         Checkpoint::Committed,
         "an untracked note should still be checkpointed"
     );
