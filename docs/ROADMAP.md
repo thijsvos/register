@@ -390,6 +390,23 @@ puts notes nobody here wrote into a vault.
 | **A note had no size cap, and `GET /api/tree` read every note whole** | Fixed, at the 16 MiB media has had since it was served. Every note used to arrive through the capped `PUT`, so the tree could assume a note was bounded; the importer copies whatever it is given, and an agent always could. A note over the cap is still listed — the INDEX must show a file the vault holds — with its title and tags left empty, and opening it answers 413 rather than loading it. The number lives in `vault.rs` now and the router reads it, so the two halves of the API cannot drift apart. | **Parked with it:** the walk still reads every note *under* the cap on every load. An entry cache keyed on the etag would make a repeat load a walk of stats — in-process and derived, the same standing as the git-status cache — and is the next step if a real vault measures slow. |
 | **The watcher could forget every note it knew** | Fixed. `known` — the set that tells a create from a change — was moved into the flush task, and a panic there was answered with `unwrap_or_default()`: an empty set, held until restart, after which every write reported as a create and every deletion of a note it had once known was dropped unsaid. Rebuilt from the filesystem instead, the way it is built at start. No panic path in `flush` is known; this is for the one nobody has found yet. | — |
 
+## Built after v0.7.0 (the ledger, §04 Rev Z)
+
+Found by asking what the product had no answer for: what did an agent do to
+your notes while nobody was watching, and how do you put it back. The honest
+answer was "I discover it later, by accident." Checkpoints had held the answer
+since P12 and wrote it anonymously; nothing could read it; the flag that turned
+them on could only be hand-edited into `.register/`. Rev Z: a checkpoint says
+who changed what, three routes read it, Screen 11 shows it, Screen 6 switches
+it on. Two decisions and two parkings came with it.
+
+| Item | The decision, and why | What would reopen it |
+|---|---|---|
+| **"Outside" means not through this app** | Decided. The server cannot see who is at the keyboard; it can see whether a write came through it. So a commit made by hand — by you in a terminal, or by an agent obeying the contract's "commit in small units" — is reported as itself, author and subject verbatim, attributed to nobody, and it counts as outside until you save through the app, because the app did not see it happen. Honest beats magical, and a guess about who typed `git commit` would be the magical kind. | — |
+| **The count clears on a save, not on a look** | Decided. `N outside` is counted from the ledger down to your newest save; opening the ledger does not clear it, because having looked is not a fact the vault can express and a save is. It is a latch, like `N unresolved`. | A reader who reviews without saving and finds the number nagging. |
+| **One note, you and an agent, one window** | Parked. Attribution is per path per checkpoint: a note the app wrote and an agent then changed inside the same ninety seconds is `Both`, and the diff shows the sum. Per-hunk attribution would mean the app keeping each of its own writes as a blob until the checkpoint — more state than the question is worth today. | A mixed window that mattered: somebody reading `Both` and needing to know which lines were theirs. |
+| **A vault inside a larger repository has no history** | Parked. `is_repo` demands the vault be the toplevel, for the reason checkpoints do — committing there would commit whatever else the repository holds — so history is empty and the screen says why. | Somebody keeping notes inside a project repo, wanting the project's log read for the notes' paths alone. |
+
 ## Decided after v0.3.2 (a week of real use)
 
 | Item | The decision, and why | What would reopen it |
