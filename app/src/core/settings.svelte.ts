@@ -62,6 +62,15 @@ export interface Config {
    * drawn at all, so that one starts shut and this remembers it was opened.
    */
   expanded: string[]
+  /**
+   * Whether the server commits the vault after 90 s of quiet (§08 P12).
+   *
+   * The one flag only the server acts on, and until Screen 6 drew it the only
+   * way to set it was to hand-edit `.register/config.json` — a directory the
+   * vault's own agent contract says never to touch. Off by default: rewriting
+   * somebody's git history is not a default.
+   */
+  checkpoints: boolean
 }
 
 const DEFAULTS: Config = {
@@ -70,6 +79,7 @@ const DEFAULTS: Config = {
   scale: 'auto',
   collapsed: [],
   expanded: [],
+  checkpoints: false,
 }
 
 /**
@@ -98,6 +108,7 @@ class Settings {
   scheme = $state<Scheme>(DEFAULTS.scheme)
   bodyFace = $state<BodyFace>(DEFAULTS.bodyFace)
   scale = $state<Scale>(DEFAULTS.scale)
+  checkpoints = $state<boolean>(DEFAULTS.checkpoints)
   collapsed = $state<string[]>([])
   expanded = $state<string[]>([])
   font = $state<FontState>('none')
@@ -113,13 +124,13 @@ class Settings {
   /**
    * Keys in `.register/config.json` that are not this screen's to hold.
    *
-   * §04 gives the file to "theme, fonts, flags" and §02b Screen 6 draws three of
-   * those; `"checkpoints": true` is a flag only the server reads, set by hand or
-   * by an agent, and nothing on this screen can show it. PUT replaces the whole
-   * file — §05's table says so, and making it merge server-side would turn a PUT
-   * into a PATCH, which is a §04 surface change — so the client has to carry
-   * back what it does not understand. Without this, folding a folder in the
-   * INDEX silently turned somebody's checkpoints off.
+   * §04 gives the file to "theme, fonts, flags" and §02b Screen 6 draws the
+   * ones it knows; anything else — a key a later version adds, one an agent
+   * invents — it cannot show. PUT replaces the whole file — §05's table says
+   * so, and making it merge server-side would turn a PUT into a PATCH, which
+   * is a §04 surface change — so the client has to carry back what it does not
+   * understand. Without this, folding a folder in the INDEX silently turned
+   * somebody's checkpoints off, back when that flag was one of these.
    */
   #foreign: Record<string, unknown> = {}
   /** Whether the file has actually been read. A save before it has must not
@@ -142,6 +153,7 @@ class Settings {
       const stored = asConfig(raw)
       this.collapsed = stored.collapsed
       this.expanded = stored.expanded
+      this.checkpoints = stored.checkpoints
       this.#foreign = foreign(raw)
       this.#foreignKnown = true
 
@@ -235,6 +247,18 @@ class Settings {
   async setScale(scale: Scale): Promise<void> {
     this.scale = scale
     this.apply()
+    await this.#save()
+  }
+
+  /**
+   * Switch the server's checkpoints on or off (§08 P12).
+   *
+   * Nothing to apply here: the server reads the flag at the moment it would
+   * commit, so the next quiet period after this save is the first one it
+   * counts, with no restart.
+   */
+  async setCheckpoints(on: boolean): Promise<void> {
+    this.checkpoints = on
     await this.#save()
   }
 
@@ -341,6 +365,7 @@ class Settings {
         scale: this.scale,
         collapsed: this.collapsed,
         expanded: this.expanded,
+        checkpoints: this.checkpoints,
       })
       // The foreign keys go first so ours always win.
       await putConfig({ ...this.#foreign, ...tracked })
@@ -378,6 +403,7 @@ const OURS = new Set<string>([
   'scale',
   'collapsed',
   'expanded',
+  'checkpoints',
 ] satisfies (keyof Config)[])
 
 /**
@@ -426,6 +452,9 @@ export function asConfig(value: unknown): Config {
     scale: isScale(record.scale) ? record.scale : DEFAULTS.scale,
     collapsed: asFolders(record.collapsed),
     expanded: asFolders(record.expanded),
+    // `true` and nothing else, the same reading `git.rs` gives it: `"yes"`,
+    // `1` and `"true"` are all off there, so they are all off here.
+    checkpoints: record.checkpoints === true,
   }
 }
 
