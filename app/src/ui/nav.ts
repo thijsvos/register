@@ -221,6 +221,16 @@ export const go = {
     chrome.showAttachments()
   },
 
+  /** §02b Screen 11, over one note's versions. */
+  history(path: string): void {
+    chrome.showHistory(path)
+  },
+
+  /** §02b Screen 11, over the whole vault. */
+  ledger(): void {
+    chrome.showHistory(null)
+  },
+
   today(): void {
     chrome.showToday()
   },

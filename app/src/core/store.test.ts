@@ -53,6 +53,8 @@ class FakeVault {
 
   /** What §08 P12's git field reports, or null for a vault that is not a repo. */
   git: Record<string, unknown> | null = null
+  /** What `GET /api/ledger` answers (§02b Screen 11). */
+  ledger: unknown[] = []
   /**
    * The vault's revision (§04 Rev X), and what a deletion is guarded by.
    *
@@ -163,6 +165,9 @@ class FakeVault {
       for (const one of held) this.files.delete(one)
       return json({ notes: held.length, files: 1, bucket: '.register/trash/1700' })
     }
+
+    if (path === '/api/ledger') return json(this.ledger)
+    if (path.startsWith('/api/history/')) return json([])
 
     const notePath = decodeURIComponent(path.replace('/api/note/', ''))
     const held = this.files.get(notePath)
@@ -1378,5 +1383,87 @@ describe('a deletion is guarded by the tree’s revision (§04 Rev X)', () => {
     server.seed('notes/003-a.md', NOTE)
     await vault.refresh()
     expect(await vault.trashNote('notes/003-a.md', undefined)).toBe(true)
+  })
+})
+
+describe('history', () => {
+  const row = (who: 'you' | 'outside' | 'both' | null, path = 'notes/003-a.md') => ({
+    sha: 'a'.repeat(40),
+    at: 1_785_921_400,
+    path,
+    who,
+    author: 'T',
+    subject: 'checkpoint: 10:00Z',
+  })
+
+  it('reads the ledger at boot and again when a checkpoint says history moved', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    server.ledger = [row('outside'), row('you')]
+    await vault.start()
+    await settle()
+    expect(vault.outside).toHaveLength(1)
+
+    server.ledger = [row('outside', 'notes/004-b.md'), row('outside'), row('you')]
+    server.emit({ type: 'checkpoint', path: '', etag: null })
+    await settle()
+    expect(vault.outside).toHaveLength(2)
+    expect(server.requests.filter((one) => one === 'GET /api/ledger')).toHaveLength(2)
+    // And a checkpoint is not an edit: nothing latched, nothing reloaded.
+    expect(vault.externalEdit).toBe(false)
+  })
+
+  it('a save through the app is the newest word, and clears the count', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    server.ledger = [row('outside')]
+    await vault.start()
+    await settle()
+    expect(vault.outside).toHaveLength(1)
+
+    await vault.open('notes/003-a.md')
+    vault.edit(`${NOTE}More.\n`)
+    expect(await vault.save()).toBe(true)
+    expect(vault.outside).toEqual([])
+  })
+
+  it('restores an earlier version through the guarded PUT and stamps modified', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+
+    const earlier = NOTE.replace('Body.', 'Earlier body.')
+    expect(await vault.restore('notes/003-a.md', earlier)).toBe(true)
+
+    const stored = server.files.get('notes/003-a.md')?.body ?? ''
+    expect(stored).toContain('Earlier body.')
+    // The one field the app may rewrite, and it did: the app wrote the file now.
+    expect(fields(stored).get('modified')).not.toBe('2026-08-04T13:47:00Z')
+    expect(server.requests).toContain('PUT /api/note/notes/003-a.md')
+    // The open note shows it, clean.
+    expect(vault.buffer).toBe(stored)
+    expect(vault.dirty).toBe(false)
+    expect(vault.notice).toMatch(/restored/i)
+  })
+
+  it('refuses to restore over unsaved text', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    vault.edit(`${NOTE}Typed, not saved.\n`)
+
+    expect(await vault.restore('notes/003-a.md', 'x')).toBe(false)
+    expect(vault.notice).toMatch(/unsaved/i)
+    expect(server.files.get('notes/003-a.md')?.body).toBe(NOTE)
+  })
+
+  it('refuses to restore a note that moved on since it was read', async () => {
+    server.seed('notes/003-a.md', NOTE)
+    await vault.refresh()
+    await vault.open('notes/003-a.md')
+    // An agent wrote it after we read it, so the etag we hold is stale.
+    server.seed('notes/003-a.md', `${NOTE}An agent was here.\n`)
+
+    expect(await vault.restore('notes/003-a.md', 'earlier')).toBe(false)
+    expect(vault.notice).toMatch(/changed again/i)
+    expect(server.files.get('notes/003-a.md')?.body).toBe(`${NOTE}An agent was here.\n`)
   })
 })

@@ -96,6 +96,23 @@ export function allCommands(): Command[] {
       keys: '',
       run: () => go.attachments(),
     },
+    // §02b Screen 11. Hidden rather than inert without a note, as the frame's
+    // rule for a command that cannot do anything.
+    {
+      id: 'history',
+      label: 'HISTORY · NOTE',
+      keys: 'G H',
+      enabled: () => vault.openPath !== null,
+      run: () => {
+        if (vault.openPath !== null) go.history(vault.openPath)
+      },
+    },
+    {
+      id: 'ledger',
+      label: 'GO · LEDGER',
+      keys: '',
+      run: () => go.ledger(),
+    },
     {
       id: 'inbox',
       label: 'GO · INBOX',

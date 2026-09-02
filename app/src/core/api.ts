@@ -1,10 +1,11 @@
 /**
- * The whole server surface (§04). Ten endpoints, nothing else — refs, links,
- * tasks, tags and search are all client-side derivations of plain text.
+ * The whole server surface (§04). Thirteen endpoints, nothing else — refs,
+ * links, tasks, tags and search are all client-side derivations of plain text.
  *
- * Eight until Rev O added `GET /api/file` and Rev P `DELETE /api/folder`; this
- * count went stale at the first of those, which is the argument for it being
- * here at all rather than left to the reader to take on trust.
+ * Eight until Rev O added `GET /api/file` and Rev P `DELETE /api/folder`, ten
+ * until Rev Z added history, a version and the ledger; this count went stale
+ * at the first of those, which is the argument for it being here at all rather
+ * than left to the reader to take on trust.
  */
 
 /**
@@ -60,7 +61,11 @@ export interface Entry {
   etag: string
 }
 
-export type ChangeKind = 'created' | 'changed' | 'removed'
+/**
+ * What a frame reports. `checkpoint` is the odd one: not the vault moving but
+ * its record of itself — a commit landed (§08 P12) — and it carries no path.
+ */
+export type ChangeKind = 'created' | 'changed' | 'removed' | 'checkpoint'
 
 /** One frame of `WS /api/events`. */
 export interface VaultEvent {
@@ -448,7 +453,14 @@ function asEntry(value: unknown): Entry | null {
 function asEvent(value: unknown): VaultEvent | null {
   if (!isRecord(value) || typeof value.path !== 'string') return null
   const kind = value.type
-  if (kind !== 'created' && kind !== 'changed' && kind !== 'removed') return null
+  if (
+    kind !== 'created' &&
+    kind !== 'changed' &&
+    kind !== 'removed' &&
+    kind !== 'checkpoint'
+  ) {
+    return null
+  }
   return {
     type: kind,
     path: value.path,
@@ -514,6 +526,56 @@ export async function purgeBucket(name: string): Promise<void> {
     method: 'DELETE',
   })
   if (!response.ok) await refuse(response)
+}
+
+/**
+ * Who a checkpoint said changed a note (§08 P12): through this app, from
+ * outside it — an agent, an editor, a sync client — or both inside one
+ * checkpoint. Never "human" or "agent": the server reports what it can see.
+ */
+export type Who = 'you' | 'outside' | 'both'
+
+/** One commit's word on one note: a version of it, or a row of the ledger. */
+export interface Version {
+  sha: string
+  /** Committed at, in seconds since the epoch, UTC. */
+  at: number
+  /** The note's path at that commit — a moved note is followed back under the name it had. */
+  path: string
+  /** What the checkpoint said, or null for a commit made by hand, reported as itself. */
+  who: Who | null
+  author: string
+  subject: string
+}
+
+/** Every commit that touched a note, newest first. `[]` for a vault that keeps no history. */
+export async function getHistory(path: string): Promise<Version[]> {
+  const response = await fetch(`/api/history/${urlPath(path)}`)
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Version[]
+}
+
+/**
+ * A note as one commit held it.
+ *
+ * Line endings take the road `getNote` takes: a uniformly-CRLF body is read as
+ * LF, so it can be diffed against the buffer and written back through
+ * `putNote`, which restores the file's own convention. Nothing is recorded
+ * about it here — the current file, not an old one, decides how the note is
+ * encoded.
+ */
+export async function getVersion(sha: string, path: string): Promise<string> {
+  const response = await fetch(`/api/version/${encodeURIComponent(sha)}/${urlPath(path)}`)
+  if (!response.ok) await refuse(response)
+  const raw = await response.text()
+  return usesCrlf(raw) ? raw.replaceAll('\r\n', '\n') : raw
+}
+
+/** The vault's recent history, one row per note per commit, newest first. */
+export async function getLedger(): Promise<Version[]> {
+  const response = await fetch('/api/ledger')
+  if (!response.ok) await refuse(response)
+  return (await response.json()) as Version[]
 }
 
 /** Every non-note file in the vault (§02b Screen 10). */

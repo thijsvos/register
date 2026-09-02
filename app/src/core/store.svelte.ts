@@ -6,6 +6,7 @@ import {
   deleteNote,
   type Entry,
   type GitStatus,
+  getLedger,
   getNote,
   getTree,
   type Loaded,
@@ -16,9 +17,11 @@ import {
   type Trashed,
   type VaultEvent,
   VaultMoved,
+  type Version,
 } from './api'
 import { type Conflict, conflicts, originalOf } from './conflict'
 import { charCount, setField, touchModified, wordCount } from './frontmatter'
+import { outsideSince } from './ledger'
 import { NoteLookup } from './links'
 import { apply, moved as movedPath, rewrites } from './move'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
@@ -119,6 +122,16 @@ class VaultStore {
   rev = $state<number | null>(null)
   /** The vault's git state, or null when it is not a repository (§08 P12). */
   git = $state<GitStatus | null>(null)
+
+  /**
+   * What landed outside the app since you last wrote to it (§02b Screen 11).
+   *
+   * Read from the ledger at boot and whenever a checkpoint says history moved;
+   * emptied by a save through the app, because that save is then the newest
+   * word and the next checkpoint will say so. Derived, never stored — see
+   * `outsideSince` for what "outside" means.
+   */
+  outside = $state<Version[]>([])
 
   /**
    * The note changed on disk while the buffer was dirty (P4).
@@ -306,6 +319,9 @@ class VaultStore {
   async start(): Promise<void> {
     this.#stopped = false
     await this.refresh()
+    // Behind the tree, not before it: the ledger is a `git log` on the server,
+    // and the first paint must not wait for one.
+    void this.refreshLedger()
     // A stop() arriving during that first fetch would have found #disconnect
     // still undefined and left the socket running for the process's lifetime.
     if (this.#stopped) return
@@ -463,6 +479,9 @@ class VaultStore {
       this.corpus[path] = { body: outgoing, etag: result.etag }
       // Only clean if nothing was typed while the request was in flight.
       if (this.buffer === outgoing) this.dirty = false
+      // A save through the app is the newest word: everything the ledger
+      // counted as "since your last save" is now before it.
+      this.outside = []
       this.notice = null
       return true
     }
@@ -650,6 +669,13 @@ class VaultStore {
 
   /** Fold one vault event into the open note and the tree. */
   apply(event: VaultEvent): void {
+    // History moved, not the vault: a checkpoint committed. Nothing on disk
+    // changed, so nothing here does — except what the ledger says.
+    if (event.type === 'checkpoint') {
+      void this.refreshLedger()
+      return
+    }
+
     // Our own write echoing back: the server reports an etag we already hold.
     // Tested before the clock starts, because §02b Screen 7's readout is about
     // somebody *else* writing to the vault — timing our own PUT round trip and
@@ -1026,6 +1052,70 @@ class VaultStore {
       this.externalEdit = false
     }
     this.notice = `Merged into ${basename(path)}.`
+    await this.refresh()
+    return true
+  }
+
+  /**
+   * Ask the ledger what landed outside the app since the last save.
+   *
+   * Quiet on failure: a vault without history answers `[]`, and a vault whose
+   * git cannot answer is a line in the server's log, not a notice over the
+   * note somebody is reading.
+   */
+  async refreshLedger(): Promise<void> {
+    try {
+      this.outside = outsideSince(await getLedger())
+    } catch {
+      // Nothing true to say; the count stays what it was.
+    }
+  }
+
+  /**
+   * Put an earlier version of a note back (§02b Screen 11).
+   *
+   * Through the same guarded PUT as any save: a note that moved since the
+   * version was read is a 409 and nothing is overwritten. `modified` is
+   * stamped, because the app wrote the file now; everything else goes back
+   * byte for byte. Refused while the note is open with unsaved text — a
+   * restore is not what should decide what happens to an hour of typing.
+   *
+   * Returns whether the vault now holds the version.
+   */
+  async restore(path: string, body: string): Promise<boolean> {
+    if (this.openPath === path && this.dirty) {
+      this.notice = `${basename(path)} has unsaved text. Save or reload it first.`
+      return false
+    }
+    // Same rule as #writeOnce: without If-Match, §04's PUT writes
+    // unconditionally, so a note we never read must not be written over. A
+    // note that is not in the tree is the exception — it was removed, and the
+    // restore is a create.
+    const etag = this.corpus[path]?.etag
+    if (etag === undefined && this.tree.some((entry) => entry.path === path)) {
+      this.notice = `${basename(path)} is not loaded. Refusing to overwrite it.`
+      return false
+    }
+
+    const outgoing = touchModified(body, isoStamp())
+    let result: Awaited<ReturnType<typeof putNote>>
+    try {
+      result = await putNote(path, outgoing, etag)
+    } catch (error) {
+      this.notice = describe(error)
+      return false
+    }
+    if (!result.ok) {
+      this.notice = `${basename(path)} changed again. Nothing restored.`
+      await this.refresh()
+      return false
+    }
+
+    const written: Loaded = { body: outgoing, etag: result.etag }
+    this.corpus[path] = written
+    if (this.openPath === path) this.#adopt(path, written)
+    this.outside = []
+    this.notice = `Restored ${basename(path)}.`
     await this.refresh()
     return true
   }
