@@ -1,3 +1,4 @@
+import { vault } from '../core/store.svelte'
 import { enterIndex, focusedFolder, go } from './nav'
 import { UNTITLED } from './Palette/commands'
 import { chrome } from './view.svelte'
@@ -233,6 +234,12 @@ export function installKeymap(): () => void {
       } else if (second === 't') {
         event.preventDefault()
         go.today()
+      } else if (second === 'h') {
+        // The open note's history; with no note open, the vault's ledger —
+        // the same screen asked the wider question.
+        event.preventDefault()
+        if (vault.openPath === null) go.ledger()
+        else go.history(vault.openPath)
       }
       return
     }

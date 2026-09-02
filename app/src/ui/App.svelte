@@ -14,6 +14,7 @@ import Header from './Frame/Header.svelte'
 import Inspector from './Frame/Inspector.svelte'
 import Sidebar from './Frame/Sidebar.svelte'
 import StatusBar from './Frame/StatusBar.svelte'
+import History from './History.svelte'
 import { installKeymap } from './keymap'
 import Media from './Media.svelte'
 import { go } from './nav'
@@ -42,6 +43,12 @@ let crumb = $derived.by(() => {
   if (chrome.today) return ['Aggregate', 'Today']
   if (chrome.trash) return ['Recoverable', 'Trash']
   if (chrome.attachments) return ['Derived', 'Attachments']
+  if (chrome.history !== null) {
+    const about = chrome.history.path
+    return about === null
+      ? ['History', 'Ledger']
+      : ['History', ...folders(about), basename(about)]
+  }
   if (chrome.conflict !== null) return ['Conflict', 'Unresolved']
   // The file's own trail, so the crumb answers where it is exactly as it does
   // for a note — `MEDIA / NOTES / DIAGRAM.PNG`.
@@ -134,6 +141,8 @@ $effect(() => {
         <Trash />
       {:else if chrome.attachments}
         <Attachments />
+      {:else if chrome.history !== null}
+        <History path={chrome.history.path} />
       {:else if chrome.conflict !== null}
         <Conflict copy={chrome.conflict} />
       {:else if chrome.media !== null}
@@ -177,6 +186,8 @@ $effect(() => {
     externalEdit={vault.externalEdit}
     unresolved={unresolved.length}
     onresolve={() => go.newestConflict()}
+    outside={vault.outside.length}
+    onoutside={() => go.ledger()}
   />
 </div>
 

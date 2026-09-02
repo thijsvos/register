@@ -22,6 +22,8 @@ let {
   externalEdit = false,
   unresolved = 0,
   onresolve,
+  outside = 0,
+  onoutside,
 }: {
   renderMs?: number | null
   /**
@@ -50,6 +52,9 @@ let {
   /** Unresolved `*.conflict-<ts>.md` copies in the vault (§02b Screen 4). */
   unresolved?: number
   onresolve?: () => void
+  /** Notes changed outside the app since the last save (§02b Screen 11). */
+  outside?: number
+  onoutside?: () => void
 } = $props()
 
 const dash = '—'
@@ -106,6 +111,16 @@ let renderValue = $derived.by(() => {
     <div class="cell"><b>{chars}</b> <span class="lab">chars</span></div>
   {/if}
   <div class="cell"><b>{files ?? dash}</b> <span class="lab">files</span></div>
+  {#if outside > 0}
+    <!-- What changed under you while nothing was watching: the accent's own
+         job (§02). Vault-wide and latched like `unresolved`, cleared by the
+         next save through the app — which is the moment it stops being news. -->
+    <div class="cell">
+      <button class="resolve" onclick={() => onoutside?.()}>
+        <b class="alert">{outside} outside</b>
+      </button>
+    </div>
+  {/if}
   {#if unresolved > 0}
     <!-- Vault-wide and latched, so it sits with FILES and GIT rather than in the
          status cell above — that one is about the open note and is cleared by

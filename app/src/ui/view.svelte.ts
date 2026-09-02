@@ -100,10 +100,24 @@ class ChromeState {
    */
   media = $state<string | null>(null)
 
-  /** Whether a main view is showing instead of the note (§02b Screens 5, 6, 8). */
+  /**
+   * §02b Screen 11 is showing instead of the note: a note's history when it
+   * names one, the vault's ledger when it names none.
+   *
+   * An object rather than a path, because "no path" is a real question here —
+   * the ledger — and `null` is already taken to mean the screen is down.
+   */
+  history = $state<{ path: string | null } | null>(null)
+
+  /** Whether a main view is showing instead of the note (§02b Screens 5, 6, 8, 11). */
   get raised(): boolean {
     return (
-      this.settings || this.today || this.trash || this.attachments || this.media !== null
+      this.settings ||
+      this.today ||
+      this.trash ||
+      this.attachments ||
+      this.media !== null ||
+      this.history !== null
     )
   }
 
@@ -283,6 +297,12 @@ class ChromeState {
     this.media = path
   }
 
+  /** Raise §02b Screen 11 — a note's versions, or the whole vault's ledger. */
+  showHistory(path: string | null): void {
+    this.#only('history')
+    this.history = { path }
+  }
+
   showNotes(): void {
     this.#only(null)
   }
@@ -296,7 +316,15 @@ class ChromeState {
    * fourth, so the exclusion lives in one place instead of in every setter.
    */
   #only(
-    view: 'settings' | 'today' | 'conflict' | 'media' | 'trash' | 'attachments' | null,
+    view:
+      | 'settings'
+      | 'today'
+      | 'conflict'
+      | 'media'
+      | 'trash'
+      | 'attachments'
+      | 'history'
+      | null,
   ): void {
     this.settings = view === 'settings'
     this.today = view === 'today'
@@ -304,6 +332,7 @@ class ChromeState {
     this.attachments = view === 'attachments'
     if (view !== 'conflict') this.conflict = null
     if (view !== 'media') this.media = null
+    if (view !== 'history') this.history = null
   }
 
   toggleInspector(): void {
