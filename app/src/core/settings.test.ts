@@ -25,6 +25,7 @@ describe('asConfig', () => {
         scale: 2,
         collapsed: ['notes/archive'],
         expanded: [],
+        checkpoints: true,
       }),
     ).toEqual({
       scheme: 'dark',
@@ -32,6 +33,7 @@ describe('asConfig', () => {
       scale: 2,
       collapsed: ['notes/archive'],
       expanded: [],
+      checkpoints: true,
     })
   })
 
@@ -43,6 +45,7 @@ describe('asConfig', () => {
       scale: 'auto',
       collapsed: [],
       expanded: [],
+      checkpoints: false,
     })
   })
 
@@ -58,6 +61,7 @@ describe('asConfig', () => {
       scale: 'auto',
       collapsed: [],
       expanded: [],
+      checkpoints: false,
     })
   })
 
@@ -70,6 +74,7 @@ describe('asConfig', () => {
       scale: 'auto',
       collapsed: [],
       expanded: [],
+      checkpoints: false,
     })
   })
 
@@ -80,6 +85,7 @@ describe('asConfig', () => {
       scale: 'auto',
       collapsed: [],
       expanded: [],
+      checkpoints: false,
     })
   })
 
@@ -90,8 +96,26 @@ describe('asConfig', () => {
       scale: 'auto',
       collapsed: [],
       expanded: [],
+      checkpoints: false,
     })
   })
+  describe('checkpoints (§08 P12)', () => {
+    // The same reading `git.rs` gives the flag, so the switch and the server
+    // cannot disagree about what the file says.
+    it.each([
+      ['a string', 'yes'],
+      ['a number', 1],
+      ['a stringly-typed boolean', 'true'],
+      ['null', null],
+    ])('is off for %s', (_label, value) => {
+      expect(asConfig({ checkpoints: value }).checkpoints).toBe(false)
+    })
+
+    it('is on only for true', () => {
+      expect(asConfig({ checkpoints: true }).checkpoints).toBe(true)
+    })
+  })
+
   describe('scale (§02 "Plate")', () => {
     it.each([['auto', 'auto'] as const, ['1', 1] as const, ['2', 2] as const])(
       'round-trips %s',
@@ -133,6 +157,7 @@ describe('asConfig', () => {
         scale: 'auto',
         collapsed: [],
         expanded: [],
+        checkpoints: false,
       })
     })
   })
@@ -168,6 +193,7 @@ describe('asConfig', () => {
         scale: 2,
         collapsed: [],
         expanded: [],
+        checkpoints: false,
       })
     })
   })
@@ -182,8 +208,10 @@ describe('asConfig', () => {
  * folding a folder in the INDEX turned off a vault's checkpoints.
  */
 describe('foreign', () => {
-  it('keeps a flag only the server reads', () => {
-    expect(foreign({ scheme: 'dark', checkpoints: true })).toEqual({ checkpoints: true })
+  it('keeps a key it has never heard of', () => {
+    // `checkpoints` was the example here — a flag only the server read —
+    // until Screen 6 drew it. The rule is the same for whatever comes next.
+    expect(foreign({ scheme: 'dark', agent: 'claude' })).toEqual({ agent: 'claude' })
   })
 
   it('keeps nothing the settings screen owns', () => {
@@ -194,6 +222,7 @@ describe('foreign', () => {
         scale: 2,
         collapsed: ['notes/archive'],
         expanded: ['daily'],
+        checkpoints: true,
       }),
     ).toEqual({})
   })
@@ -231,6 +260,7 @@ describe('halves — which file a setting belongs in (§04 Rev W)', () => {
     scale: 2,
     collapsed: ['notes/archive'],
     expanded: ['daily'],
+    checkpoints: true,
   } as const
 
   it('puts the machine’s settings in the local file', () => {
@@ -242,9 +272,12 @@ describe('halves — which file a setting belongs in (§04 Rev W)', () => {
   })
 
   it('keeps what describes the content in the tracked file', () => {
+    // Checkpoints too: whether a vault keeps history is a fact about the
+    // vault, and it travels with it.
     expect(halves(all as never).tracked).toEqual({
       collapsed: ['notes/archive'],
       expanded: ['daily'],
+      checkpoints: true,
     })
   })
 

@@ -246,8 +246,11 @@ test('choosing a scale does not discard the other settings', async ({ page }) =>
     bodyFace: 'teletype',
     scale: 1,
   })
+  // `checkpoints` is the third field this gate has caught: it landed in
+  // `#save` and here on the same day, which is the order this comment asks for.
   expect(config).toEqual({
     collapsed: [],
     expanded: [],
+    checkpoints: false,
   })
 })

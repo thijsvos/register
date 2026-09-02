@@ -24,6 +24,10 @@ function chooseScale(wanted: Scale) {
   void settings.setScale(wanted)
 }
 
+function chooseCheckpoints(on: boolean) {
+  void settings.setCheckpoints(on)
+}
+
 function pick(event: Event) {
   const chosen = (event.currentTarget as HTMLInputElement).files?.[0]
   if (chosen !== undefined) void settings.useFont(chosen)
@@ -81,6 +85,27 @@ function pick(event: Event) {
           : settings.scale === 1
             ? 'Pinned — never scales'
             : '2× wherever the frame fits'}
+      </span>
+    </div>
+  </div>
+
+  <div class="row">
+    <div class="key">Checkpoints</div>
+    <div class="controls">
+      <button class="opt" aria-pressed={settings.checkpoints}
+        onclick={() => chooseCheckpoints(true)}>On</button>
+      <button class="opt" aria-pressed={!settings.checkpoints}
+        onclick={() => chooseCheckpoints(false)}>Off</button>
+      <!-- Three truths, told apart: recording, not recording, and nowhere to
+           record — a vault that is not a repository of its own commits to
+           nothing however the switch is set, and the switch says so rather
+           than looking on. -->
+      <span class="note">
+        {vault.git === null
+          ? 'Not a git repository of its own — nothing to commit to.'
+          : settings.checkpoints
+            ? 'Commits the vault after 90 s of quiet. Never pushes.'
+            : 'Off. On writes the history the ledger reads.'}
       </span>
     </div>
   </div>
