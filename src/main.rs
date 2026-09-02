@@ -562,7 +562,7 @@ published to loopback, a firewall — then say so explicitly:
     // Checkpoints run off the same event stream the UI does, so they see
     // exactly what the watcher saw — and they are off unless the vault's own
     // config asks for them (§08 P12).
-    let _checkpoints = git::Checkpointer::start(vault.clone(), events.subscribe());
+    let _checkpoints = git::Checkpointer::start(vault.clone(), events.clone());
 
     let state = server::AppState::new(vault, events)
         .bound_to(addr)

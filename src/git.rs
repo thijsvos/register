@@ -22,7 +22,7 @@ use tokio::sync::broadcast;
 use tokio::time::{Instant, timeout_at};
 
 use crate::vault::{Vault, Written, file_etag};
-use crate::watch::Event;
+use crate::watch::{Change, Event};
 
 /// How long the vault must be still before a checkpoint is taken.
 ///
@@ -880,29 +880,35 @@ pub fn stamp(seconds_since_epoch: i64) -> String {
 /// Commits the vault after it has been quiet for a while (§08 P12).
 ///
 /// Driven by the same event stream the UI reads, so it sees exactly what the
-/// watcher saw — an agent's write and a human's save alike. Dropping the handle
-/// stops it, which is what ties its life to the server's.
+/// watcher saw — an agent's write and a human's save alike — and speaking on
+/// it once, when a commit lands, so the UI can ask the ledger. Dropping the
+/// handle stops it, which is what ties its life to the server's.
 pub struct Checkpointer {
     _task: tokio::task::JoinHandle<()>,
 }
 
 impl Checkpointer {
-    pub fn start(vault: Arc<Vault>, events: broadcast::Receiver<Event>) -> Self {
+    pub fn start(vault: Arc<Vault>, events: broadcast::Sender<Event>) -> Self {
         Self::with_idle(vault, events, IDLE)
     }
 
     /// The same thing with the quiet period named, so a test does not have to
     /// wait ninety seconds to find out whether this works.
-    pub fn with_idle(
-        vault: Arc<Vault>,
-        mut events: broadcast::Receiver<Event>,
-        idle: Duration,
-    ) -> Self {
+    pub fn with_idle(vault: Arc<Vault>, events: broadcast::Sender<Event>, idle: Duration) -> Self {
+        let announce = events.clone();
+        let mut events = events.subscribe();
         let task = tokio::spawn(async move {
             loop {
                 // Nothing to checkpoint until something changes. A lagging
-                // receiver has still missed changes, so it counts as one.
+                // receiver has still missed changes, so it counts as one. Its
+                // own announcement does not: history moving is not the vault
+                // moving, and hearing it would arm this for a second look at a
+                // tree it just committed.
                 match events.recv().await {
+                    Ok(Event {
+                        change: Change::Checkpoint,
+                        ..
+                    }) => continue,
                     Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                     Err(broadcast::error::RecvError::Closed) => return,
                 }
@@ -910,17 +916,24 @@ impl Checkpointer {
                 // Wait out the quiet. Every further event pushes the deadline,
                 // so a writing session commits once at the end of it rather
                 // than once per keystroke that reached disk.
+                let mut deadline = Instant::now() + idle;
                 loop {
-                    let deadline = Instant::now() + idle;
                     match timeout_at(deadline, events.recv()).await {
+                        Ok(Ok(Event {
+                            change: Change::Checkpoint,
+                            ..
+                        })) => continue,
                         // Still busy: start the wait again.
-                        Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => continue,
+                        Ok(Ok(_)) | Ok(Err(broadcast::error::RecvError::Lagged(_))) => {
+                            deadline = Instant::now() + idle;
+                        }
                         Ok(Err(broadcast::error::RecvError::Closed)) => return,
                         Err(_) => break,
                     }
                 }
 
                 let vault = vault.clone();
+                let announce = announce.clone();
                 // Off the runtime: `git add -A` on a large vault is real work,
                 // and this thread is the one serving the UI.
                 let _ = tokio::task::spawn_blocking(move || {
@@ -943,6 +956,12 @@ impl Checkpointer {
                         Checkpoint::Committed => {
                             vault.forget_written(&written);
                             println!("register · checkpoint: {}", stamp(now));
+                            // Nobody listening is the ordinary case at idle.
+                            let _ = announce.send(Event {
+                                change: Change::Checkpoint,
+                                path: String::new(),
+                                etag: None,
+                            });
                         }
                         // The ordinary idle tick. History accrues silently and
                         // usefully, and saying "nothing to do" every ninety

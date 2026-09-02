@@ -26,6 +26,11 @@ pub enum Change {
     Created,
     Changed,
     Removed,
+    /// History moved: a checkpoint committed (§08 P12). Carries no path — the
+    /// vault did not change, its record of itself did, and the ledger is the
+    /// thing to ask. This frame is what says to ask it: the watcher never sees
+    /// `.git/`, a dotfile by rule, so nothing else could.
+    Checkpoint,
 }
 
 /// One coalesced change, as sent over `WS /api/events` (§04).
