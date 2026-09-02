@@ -551,6 +551,318 @@ fn what_the_app_moved_trashed_and_restored_is_its_own() {
     );
 }
 
+// ------------------------------------------------------------- the ledger
+
+/// Commit by hand, the way an agent following the vault contract does.
+fn commit_by_hand(tmp: &TempVault, subject: &str) {
+    for args in [vec!["add", "-A"], vec!["commit", "--quiet", "-m", subject]] {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(&args)
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+#[test]
+fn history_lists_what_touched_a_note_newest_first() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+
+    vault
+        .write(
+            "notes/003-a.md",
+            "---\nref: 003\n---\nSaved in the app.\n",
+            None,
+        )
+        .expect("write");
+    assert_eq!(
+        checkpoint(tmp.path(), "10:00Z", &vault.written()),
+        Checkpoint::Committed
+    );
+    // A checkpoint that never touched this note.
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nElsewhere.\n");
+    assert_eq!(
+        checkpoint(tmp.path(), "10:01Z", &Written::new()),
+        Checkpoint::Committed
+    );
+    // Then an agent rewrote it.
+    tmp.put(
+        "notes/003-a.md",
+        "---\nref: 003\n---\nRewritten by an agent, at some length.\n",
+    );
+    assert_eq!(
+        checkpoint(tmp.path(), "10:02Z", &Written::new()),
+        Checkpoint::Committed
+    );
+
+    let versions = history(tmp.path(), "notes/003-a.md").expect("history");
+    let seen: Vec<(Option<Who>, &str)> = versions
+        .iter()
+        .map(|v| (v.who, v.subject.as_str()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (Some(Who::Outside), "checkpoint: 10:02Z · 1 outside"),
+            (Some(Who::You), "checkpoint: 10:00Z · 1 you"),
+            // `repo()` made this one by hand: reported as itself, guessed at
+            // by nobody.
+            (None, "first"),
+        ],
+        "{versions:#?}"
+    );
+    assert!(versions.iter().all(|v| v.path == "notes/003-a.md"));
+    // Whoever it was — `scaffold/tests.rs` sets `GIT_AUTHOR_NAME` for the
+    // whole process, and that outranks the fixture's config — it is named.
+    assert!(!versions[2].author.is_empty());
+    assert!(versions[0].at >= versions[2].at);
+    assert!(versions.iter().all(|v| v.sha.len() >= 40), "abbreviated");
+}
+
+#[test]
+fn a_version_is_the_bytes_as_they_were() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+    vault
+        .write(
+            "notes/003-a.md",
+            "---\nref: 003\n---\nSaved in the app.\n",
+            None,
+        )
+        .expect("write");
+    assert_eq!(
+        checkpoint(tmp.path(), "10:00Z", &vault.written()),
+        Checkpoint::Committed
+    );
+
+    let versions = history(tmp.path(), "notes/003-a.md").expect("history");
+    assert_eq!(versions.len(), 2);
+    let then = version(tmp.path(), &versions[1].sha, "notes/003-a.md").expect("version");
+    assert_eq!(then.as_deref(), Some(&b"---\nref: 003\n---\nBody.\n"[..]));
+    let now = version(tmp.path(), &versions[0].sha, "notes/003-a.md").expect("version");
+    assert_eq!(
+        now.as_deref(),
+        Some(&b"---\nref: 003\n---\nSaved in the app.\n"[..])
+    );
+
+    // A path that commit did not hold, and a name that is no commit's: both
+    // are "nothing there", and neither is a failure.
+    assert_eq!(
+        version(tmp.path(), &versions[1].sha, "notes/nope.md").expect("asked"),
+        None
+    );
+    assert_eq!(
+        version(tmp.path(), "0000000", "notes/003-a.md").expect("asked"),
+        None
+    );
+}
+
+#[test]
+fn history_follows_a_note_the_app_moved() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+    vault
+        .rename("notes/003-a.md", "notes/003-moved.md")
+        .expect("rename");
+    assert_eq!(
+        checkpoint(tmp.path(), "10:00Z", &vault.written()),
+        Checkpoint::Committed
+    );
+
+    let versions = history(tmp.path(), "notes/003-moved.md").expect("history");
+    let seen: Vec<(&str, Option<Who>)> =
+        versions.iter().map(|v| (v.path.as_str(), v.who)).collect();
+    assert_eq!(
+        seen,
+        [
+            ("notes/003-moved.md", Some(Who::You)),
+            ("notes/003-a.md", None)
+        ],
+        "{versions:#?}"
+    );
+    // And the older version is readable under the name it had.
+    let then = version(tmp.path(), &versions[1].sha, &versions[1].path).expect("version");
+    assert_eq!(then.as_deref(), Some(&b"---\nref: 003\n---\nBody.\n"[..]));
+}
+
+#[test]
+fn the_ledger_is_one_row_per_note_newest_first() {
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let vault = opened(&tmp);
+    // Not a note, and changed in the same checkpoint as two that are.
+    vault
+        .write_config(r#"{"checkpoints":true}"#)
+        .expect("config");
+    tmp.put("notes/004-b.md", "---\nref: 004\n---\nb\n");
+    tmp.put("notes/005-c.md", "---\nref: 005\n---\nc\n");
+    assert_eq!(
+        checkpoint(tmp.path(), "10:00Z", &vault.written()),
+        Checkpoint::Committed
+    );
+
+    let rows = ledger(tmp.path(), |path| {
+        path.ends_with(".md") && !path.starts_with('.')
+    })
+    .expect("ledger");
+    let seen: Vec<(&str, Option<Who>, &str)> = rows
+        .iter()
+        .map(|r| (r.path.as_str(), r.who, r.subject.as_str()))
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (
+                "notes/004-b.md",
+                Some(Who::Outside),
+                "checkpoint: 10:00Z · 1 you · 2 outside"
+            ),
+            (
+                "notes/005-c.md",
+                Some(Who::Outside),
+                "checkpoint: 10:00Z · 1 you · 2 outside"
+            ),
+            ("notes/003-a.md", None, "first"),
+        ],
+        "{rows:#?}"
+    );
+}
+
+#[test]
+fn no_history_is_an_empty_answer_and_not_an_error() {
+    // Three ways of having none: not a repository, a repository with no
+    // commit yet, and a note the repository never held.
+    let plain = TempVault::new();
+    plain.put("notes/003-a.md", "x");
+    assert_eq!(
+        history(plain.path(), "notes/003-a.md").expect("history"),
+        []
+    );
+    assert_eq!(ledger(plain.path(), |_| true).expect("ledger"), []);
+    assert_eq!(
+        version(plain.path(), "0000000", "notes/003-a.md").expect("version"),
+        None
+    );
+
+    let unborn = TempVault::new();
+    let init = Command::new("git")
+        .arg("-C")
+        .arg(unborn.path())
+        .args(["init", "--quiet"])
+        .output()
+        .expect("git init");
+    assert!(init.status.success());
+    unborn.put("notes/003-a.md", "x");
+    assert_eq!(
+        history(unborn.path(), "notes/003-a.md").expect("history"),
+        []
+    );
+    assert_eq!(ledger(unborn.path(), |_| true).expect("ledger"), []);
+
+    let committed = TempVault::new();
+    repo(&committed);
+    assert_eq!(
+        history(committed.path(), "notes/never.md").expect("history"),
+        []
+    );
+}
+
+#[test]
+fn a_hostile_diff_driver_does_not_execute() {
+    // `a_hostile_repository_config_does_not_execute` covers what `status`,
+    // `add` and `commit` can run. Reading history reaches a family of keys
+    // those never touch: `diff.<driver>.textconv` and `.command`, pointed at a
+    // path by one line of `.gitattributes`.
+    let tmp = TempVault::new();
+    repo(&tmp);
+    let spoil = tmp.path().join("spoil");
+    fs::create_dir_all(&spoil).expect("mkdir");
+    let marker = spoil.join("driver");
+    let set = |key: &str, value: &str| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(["config", key, value])
+            .output()
+            .expect("git config");
+        assert!(out.status.success());
+    };
+    set(
+        "diff.evil.textconv",
+        &format!("touch {}; cat", marker.display()),
+    );
+    set(
+        "diff.evil.command",
+        &format!("touch {}; cat", marker.display()),
+    );
+    fs::write(tmp.path().join(".gitattributes"), "*.md diff=evil\n").expect("attributes");
+    tmp.put("notes/003-a.md", "---\nref: 003\n---\nChanged.\n");
+    commit_by_hand(&tmp, "arm the driver");
+
+    // The fixture is armed: plain `git log -p` runs it. Without this control
+    // the assertions below would pass against a driver nobody wired up.
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(tmp.path())
+        .args(["--no-pager", "log", "-p", "-1", "--", "notes/003-a.md"])
+        .output()
+        .expect("git log");
+    assert!(
+        marker.exists(),
+        "the control did not fire; the fixture proves nothing"
+    );
+    fs::remove_file(&marker).expect("reset the control");
+
+    let versions = history(tmp.path(), "notes/003-a.md").expect("history");
+    assert!(
+        !versions.is_empty(),
+        "hardening broke the history it was protecting"
+    );
+    let _ = ledger(tmp.path(), |_| true).expect("ledger");
+    let _ = version(tmp.path(), &versions[0].sha, "notes/003-a.md").expect("version");
+    assert!(
+        !marker.exists(),
+        "reading history executed the repository's diff driver"
+    );
+
+    // Those three never ask for a diff, so the line above holds even with the
+    // driver armed — measured. The disarm is for the call site nobody has
+    // written yet, and this is what proves it: the same `log -p` that fired
+    // the control, through the hardened path.
+    let _ = try_git(tmp.path(), &["log", "-p", "-1", "--", "notes/003-a.md"]);
+    assert!(
+        !marker.exists(),
+        "a diff-producing call through the hardened path ran the driver"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_git_that_never_answers_is_cut_off() {
+    // `sleep` stands in for a git that hangs; the mechanism cannot tell them
+    // apart, which is the point of it.
+    let mut command = Command::new("sleep");
+    command.arg("30");
+    let started = std::time::Instant::now();
+    let answer = run_within(command, Duration::from_millis(200));
+    let why = answer.expect_err("a hung command was waited for");
+    assert!(why.contains("stopped"), "{why}");
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "the deadline was not a deadline"
+    );
+}
+
 // ------------------------------------------------------------- the driver
 
 /// Push one event through the checkpointer and wait for the quiet to expire.

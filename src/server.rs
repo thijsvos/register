@@ -361,6 +361,12 @@ pub fn router(state: AppState) -> Router {
         // GET only. Nothing writes a non-note through the API, so the vault
         // cannot acquire a file its own tree will never show.
         .route("/api/file/{*path}", get(read_file))
+        // §08 P12, read side. What the checkpoints have been writing all along,
+        // finally readable from the product: a note's versions, one of them
+        // whole, and the vault's recent history with who did what.
+        .route("/api/history/{*path}", get(history))
+        .route("/api/version/{sha}/{*path}", get(version))
+        .route("/api/ledger", get(ledger))
         // DELETE only, and deliberately its own route rather than a recursive
         // mode on `/api/note`: teaching that one to accept a directory would
         // mean weakening `resolve`'s `.md` gate, which is the single definition
@@ -491,6 +497,47 @@ async fn read_note(State(state): State<AppState>, Path(path): Path<String>) -> R
             body,
         )
             .into_response(),
+        Err(response) => response,
+    }
+}
+
+/// Every commit that touched a note, newest first. `[]` for a vault that keeps
+/// no history — the same measured absence the GIT field draws as a dash.
+async fn history(State(state): State<AppState>, Path(path): Path<String>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.history(&path)).await {
+        Ok(versions) => Json(versions).into_response(),
+        Err(response) => response,
+    }
+}
+
+/// A note as one commit held it — the bytes, so a restore writes back exactly
+/// what was there. No `ETag`: a version never changes, and the client writes it
+/// back guarded by the *current* note's tag, not this one's.
+async fn version(
+    State(state): State<AppState>,
+    Path((sha, path)): Path<(String, String)>,
+) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.version(&sha, &path)).await {
+        Ok(body) => (
+            StatusCode::OK,
+            [(
+                header::CONTENT_TYPE,
+                "text/markdown; charset=utf-8".to_owned(),
+            )],
+            body,
+        )
+            .into_response(),
+        Err(response) => response,
+    }
+}
+
+/// The vault's recent history, one row per note per commit, newest first.
+async fn ledger(State(state): State<AppState>) -> Response {
+    let vault = state.vault.clone();
+    match blocking(move || vault.ledger()).await {
+        Ok(rows) => Json(rows).into_response(),
         Err(response) => response,
     }
 }
@@ -1395,6 +1442,7 @@ fn error_response(error: vault::Error) -> Response {
             "file is larger than this app will serve\n",
         )
             .into_response(),
+        vault::Error::NoSuchVersion => (StatusCode::NOT_FOUND, "no such version\n").into_response(),
         vault::Error::Io(error) => {
             eprintln!("vault: {error}");
             (StatusCode::INTERNAL_SERVER_ERROR, "vault io failed\n").into_response()
