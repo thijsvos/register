@@ -337,6 +337,129 @@ async fn reading_a_missing_note_is_404() {
     assert_eq!(reply.status, 404);
 }
 
+// ---------------------------------------------------------------- history
+
+/// The vault as its own repository, with whatever it holds committed by hand.
+fn repository(tmp: &TempVault) {
+    let run = |args: &[&str]| {
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(tmp.path())
+            .args(args)
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    run(&["init", "--quiet"]);
+    run(&["config", "user.email", "t@e"]);
+    run(&["config", "user.name", "T"]);
+    run(&["add", "-A"]);
+    run(&["commit", "--quiet", "-m", "first"]);
+}
+
+#[tokio::test]
+async fn a_vault_without_history_answers_an_empty_list_rather_than_an_error() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
+    let addr = start(&tmp).await;
+
+    let reply = request(addr, "GET", "/api/history/notes/003-a.md", &[], "").await;
+    assert_eq!((reply.status, reply.body.as_str()), (200, "[]"));
+    let reply = request(addr, "GET", "/api/ledger", &[], "").await;
+    assert_eq!((reply.status, reply.body.as_str()), (200, "[]"));
+}
+
+#[tokio::test]
+async fn history_takes_only_a_note_path_and_a_version_only_a_commit() {
+    let tmp = TempVault::new();
+    // A repository, so that `HEAD` below would resolve if it were let through.
+    tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
+    repository(&tmp);
+    let addr = start(&tmp).await;
+
+    for hostile in [
+        "/api/history/.register/config.json",
+        "/api/history/notes/image.png",
+        "/api/history/../x.md",
+        "/api/version/abc1234/.register/config.json",
+    ] {
+        let reply = request(addr, "GET", hostile, &[], "").await;
+        assert_eq!(reply.status, 400, "{hostile} was answered {}", reply.status);
+    }
+    // `HEAD:notes/003-a.md` is a revision git would read happily. A version is
+    // named by a commit's hex or it is not named at all.
+    let reply = request(addr, "GET", "/api/version/HEAD/notes/003-a.md", &[], "").await;
+    assert_eq!(reply.status, 404);
+}
+
+#[tokio::test]
+async fn a_note_has_versions_and_each_is_served_whole() {
+    let tmp = TempVault::new();
+    tmp.put("notes/003-a.md", "---\nref: 003\n---\nBody.\n");
+    repository(&tmp);
+    let (addr, vault) = start_holding(&tmp).await;
+    // A second version, through the app, checkpointed.
+    vault
+        .write(
+            "notes/003-a.md",
+            "---\nref: 003\n---\nSaved in the app.\n",
+            None,
+        )
+        .expect("write");
+    assert_eq!(
+        crate::git::checkpoint(tmp.path(), "10:00Z", &vault.written()),
+        crate::git::Checkpoint::Committed
+    );
+
+    let reply = request(addr, "GET", "/api/history/notes/003-a.md", &[], "").await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    let versions: Vec<serde_json::Value> = serde_json::from_str(&reply.body).expect("json");
+    assert_eq!(versions.len(), 2, "{}", reply.body);
+    assert_eq!(versions[0]["who"], "you");
+    assert_eq!(versions[0]["path"], "notes/003-a.md");
+    assert_eq!(versions[1]["who"], serde_json::Value::Null);
+    assert_eq!(versions[1]["subject"], "first");
+    // Named, whoever it was: another suite sets `GIT_AUTHOR_NAME` process-wide.
+    assert!(
+        versions[1]["author"]
+            .as_str()
+            .is_some_and(|author| !author.is_empty()),
+        "{}",
+        reply.body
+    );
+
+    let sha = versions[1]["sha"].as_str().expect("sha");
+    let reply = request(
+        addr,
+        "GET",
+        &format!("/api/version/{sha}/notes/003-a.md"),
+        &[],
+        "",
+    )
+    .await;
+    assert_eq!(reply.status, 200);
+    assert_eq!(reply.body, "---\nref: 003\n---\nBody.\n");
+    assert!(
+        reply
+            .headers
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("content-type")
+                && value.starts_with("text/markdown")),
+        "{:?}",
+        reply.headers
+    );
+
+    let reply = request(addr, "GET", "/api/ledger", &[], "").await;
+    let rows: Vec<serde_json::Value> = serde_json::from_str(&reply.body).expect("json");
+    assert_eq!(rows.len(), 2, "{}", reply.body);
+    assert_eq!(rows[0]["who"], "you");
+    assert_eq!(rows[1]["subject"], "first");
+}
+
 // ----------------------------------------------------------- etag conflict
 
 #[tokio::test]

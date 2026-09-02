@@ -279,6 +279,10 @@ pub enum Error {
     /// `NotFound` only so the body can say which of the two the request got
     /// wrong — "no such note" is a confusing answer to a request about a folder.
     NoSuchFolder,
+    /// No commit by that name holds this note (`GET /api/version`). Also what
+    /// a name that is not a commit's gets: the two are one answer to a reader,
+    /// and telling them apart would mean handing an unchecked string to git.
+    NoSuchVersion,
     /// Bigger than `MAX_FILE_BYTES`. The file is read whole to be served, so an
     /// unbounded read is an unbounded allocation — and §06 budgets idle RAM at
     /// 50 MB for the whole process.
@@ -304,6 +308,7 @@ impl fmt::Display for Error {
         match self {
             Self::InvalidPath => write!(f, "path is outside the vault"),
             Self::NotFound => write!(f, "no such note"),
+            Self::NoSuchVersion => write!(f, "no such version"),
             Self::Conflict { current } => write!(f, "etag is stale; current is {current}"),
             Self::UnsupportedFont => write!(f, "not a woff2, woff, otf or ttf font"),
             Self::UnsupportedMedia => write!(f, "not an image or pdf this app will serve"),
@@ -982,6 +987,51 @@ impl Vault {
         if let Ok(mut written) = self.written.lock() {
             written.retain(|path, etag| committed.get(path) != Some(&*etag));
         }
+    }
+
+    // ------------------------------------------------------------- history
+
+    /// Every commit that touched a note, newest first (§08 P12) — empty when
+    /// the vault keeps no history of its own.
+    pub fn history(&self, rel: &str) -> Result<Vec<git::Version>> {
+        let rel = self.note_path(rel)?;
+        git::history(&self.root, &rel).map_err(git_failed)
+    }
+
+    /// The vault's recent history, one row per note per commit, newest first.
+    pub fn ledger(&self) -> Result<Vec<git::Version>> {
+        // `resolve` is the one definition of a note the API has; it is lexical,
+        // so asking it about a path git reported costs nothing.
+        git::ledger(&self.root, |path| self.resolve(path).is_ok()).map_err(git_failed)
+    }
+
+    /// A note's bytes as one commit held them.
+    pub fn version(&self, sha: &str, rel: &str) -> Result<Vec<u8>> {
+        let rel = self.note_path(rel)?;
+        // Lowercase hex and nothing else, before it goes anywhere near an argv:
+        // `<sha>:<path>` is a revision expression, and git reads `HEAD`, `@{u}`
+        // and `:/text` there just as happily.
+        let hex = sha.len() >= 7
+            && sha.len() <= 64
+            && sha
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if !hex {
+            return Err(Error::NoSuchVersion);
+        }
+        git::version(&self.root, sha, &rel)
+            .map_err(git_failed)?
+            .ok_or(Error::NoSuchVersion)
+    }
+
+    /// A note path as the API spells it, or the refusal `read` would give.
+    ///
+    /// For the callers that hand a path to something outside this type — git —
+    /// and must not pass it unchecked. Lexical only: a note that no longer
+    /// exists still has a history, and asking the filesystem would deny it one.
+    fn note_path(&self, rel: &str) -> Result<String> {
+        let path = self.resolve(rel)?;
+        self.relative(&path)
     }
 
     /// Claim this vault for this process, or say who already has it.
@@ -2010,6 +2060,12 @@ impl Vault {
 
 /// Etag derived from mtime and length (§04). Opaque to the client, which only
 /// ever echoes it back in `If-Match`.
+/// A history question git could not answer. Logged whole by `error_response`,
+/// the way any other I/O failure is, because git's own wording carries the fix.
+fn git_failed(why: String) -> Error {
+    Error::Io(io::Error::other(why))
+}
+
 /// The etag of whatever is at `path`, or `None` when it is not a file now.
 pub(crate) fn file_etag(path: &Path) -> Option<String> {
     let meta = fs::metadata(path).ok()?;

@@ -7,11 +7,13 @@
 //! or not at all.
 //!
 //! `std::process::Command`, not a git library: this needs `add`, `commit`,
-//! `status` and `rev-list`, and rule 6 prices a libgit2 binding well above four
-//! subprocess calls that the user can run by hand to see what happened.
+//! `status`, `rev-list`, `log` and `cat-file`, and rule 6 prices a libgit2
+//! binding well above six subprocess calls that the user can run by hand to
+//! see what happened.
 
+use std::io::Read;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +30,19 @@ use crate::watch::Event;
 /// that a writing session is one commit rather than forty, and short enough
 /// that closing the laptop mid-thought still leaves the thought in history.
 const IDLE: Duration = Duration::from_secs(90);
+
+/// How long a question about history may take before it is cut off.
+///
+/// `try_git` waits as long as git does, which was fine while every call was a
+/// `status` on a vault. `log` walks history, a repository can be made as slow
+/// as somebody likes — a vault handed over with a pathological `.git` — and
+/// the call holds a blocking thread the server needs back.
+const READ_LIMIT: Duration = Duration::from_secs(5);
+
+/// The most versions one note's history reports, and the most rows the ledger
+/// does. Enough to cover weeks of checkpoints; the number is a page, not an
+/// archive, and `git log` remains for the archive.
+const HISTORY_LIMIT: usize = 200;
 
 /// What the status bar shows (§02b Screen 1's GIT field).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,16 +220,26 @@ fn disarm_filters(root: &Path) -> Vec<String> {
         .lines()
         .map(str::trim)
         .filter(|key| {
-            key.starts_with("filter.")
+            let filter = key.starts_with("filter.")
                 && (key.ends_with(".clean")
                     || key.ends_with(".smudge")
-                    || key.ends_with(".process"))
+                    || key.ends_with(".process"));
+            // `diff.<driver>.textconv` and `.command` are named by the attacker
+            // exactly as `filter.<name>` is, and a `.gitattributes` line points
+            // any path at them. Nothing here produces a diff — `log --name-only`
+            // and `cat-file` were both measured not to run one — but that is a
+            // claim about today's call sites, and `DISARM` already sets the
+            // unnamed keys of the same family for the same reason.
+            let diff = key.starts_with("diff.")
+                && (key.ends_with(".textconv") || key.ends_with(".command"));
+            filter || diff
         })
         // `cat` for clean/smudge is the identity filter, so a repository that
         // legitimately uses one still reports honest status rather than errors.
-        // `.process` has no inert value, so it is emptied and git falls back.
+        // `.process` has no inert value, so it is emptied and git falls back —
+        // and an emptied diff driver is no driver, measured under `log -p`.
         .map(|key| {
-            if key.ends_with(".process") {
+            if key.ends_with(".process") || key.starts_with("diff.") {
                 format!("{key}=")
             } else {
                 format!("{key}=cat")
@@ -223,9 +248,12 @@ fn disarm_filters(root: &Path) -> Vec<String> {
         .collect()
 }
 
-/// Whether this subcommand puts worktree content through a clean/smudge filter.
+/// Whether this subcommand puts content through a filter or a diff driver.
 fn runs_filters(args: &[&str]) -> bool {
-    matches!(args.first(), Some(&"status" | &"add" | &"commit" | &"diff"))
+    matches!(
+        args.first(),
+        Some(&"status" | &"add" | &"commit" | &"diff" | &"log" | &"show")
+    )
 }
 
 /// `git`, keeping what it said when it fails.
@@ -240,8 +268,73 @@ fn try_git(root: &Path, args: &[&str]) -> Result<String, String> {
         .args(args)
         .output()
         .map_err(|why| format!("could not run git: {why}"))?;
+    answered(args, out).map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// `try_git`, cut off at [`READ_LIMIT`] and answering in bytes: for the calls
+/// that read history, whose length the repository decides and whose answer
+/// may be a note's exact contents.
+fn try_git_within(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
+    let mut command = hardened_for(root, runs_filters(args));
+    command.args(args);
+    answered(args, run_within(command, READ_LIMIT)?)
+}
+
+/// Run to completion within `limit`, or stop it and say so.
+///
+/// Both pipes are drained on their own threads: a pipe holds a few dozen
+/// kilobytes, and a child that fills one blocks until somebody reads — which
+/// is a hang this exists to prevent, not one it should cause.
+fn run_within(mut command: Command, limit: Duration) -> Result<Output, String> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|why| format!("could not run git: {why}"))?;
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+
+    let deadline = std::time::Instant::now() + limit;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "git took longer than {}s to answer and was stopped",
+                    limit.as_secs()
+                ));
+            }
+            Err(why) => return Err(format!("could not wait for git: {why}")),
+        }
+    };
+    Ok(Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    })
+}
+
+/// Read one pipe to its end on its own thread.
+fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe.read_to_end(&mut bytes);
+        }
+        bytes
+    })
+}
+
+/// What git said, or why it would not.
+fn answered(args: &[&str], out: Output) -> Result<Vec<u8>, String> {
     if out.status.success() {
-        return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
+        return Ok(out.stdout);
     }
 
     let said = String::from_utf8_lossy(&out.stderr).trim().to_owned();
@@ -444,6 +537,213 @@ fn message(stamp: &str, changes: &[(String, Who)]) -> String {
         format!("{subject}\n")
     } else {
         format!("{subject}\n\n{trailers}")
+    }
+}
+
+/// One commit's word on one path: a version of a note, or a row of the ledger
+/// (§08 P12, `GET /api/history` and `GET /api/ledger`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Version {
+    pub sha: String,
+    /// When it was committed, in seconds since the epoch, UTC.
+    pub at: i64,
+    /// The note's path *at that commit* — a note the app has moved is followed
+    /// back under the name it had.
+    pub path: String,
+    /// What the checkpoint said about this path, or `None` for a commit that
+    /// was not a checkpoint: one made by hand, whose author and subject are
+    /// reported exactly as they are rather than guessed at.
+    pub who: Option<Who>,
+    pub author: String,
+    pub subject: String,
+}
+
+/// `git log`, framed for parsing: a record separator before each commit, unit
+/// separators between its fields, then — from `--name-only -z` — the paths it
+/// touched, NUL-terminated and unquoted. Measured rather than read off the
+/// manual: after the format's final separator git emits `NUL LF`, then each
+/// path with its own NUL.
+const LOG_FORMAT: &str = "--format=%x1e%H%x1f%ct%x1f%an%x1f%s%x1f%B%x1f";
+
+/// The subject every checkpoint carries, and the only reason to trust the
+/// trailers under it: a hand-written message may say `You:` and mean anything.
+const CHECKPOINT: &str = "checkpoint: ";
+
+/// One commit as `git log` reported it.
+struct Commit {
+    sha: String,
+    at: i64,
+    author: String,
+    subject: String,
+    /// The trailers, when this is a checkpoint. Empty otherwise.
+    trailers: Vec<(String, Who)>,
+    /// What it touched, as `--name-only` listed them.
+    paths: Vec<String>,
+}
+
+impl Commit {
+    fn who(&self, path: &str) -> Option<Who> {
+        self.trailers
+            .iter()
+            .find(|(named, _)| named == path)
+            .map(|(_, who)| *who)
+    }
+
+    fn version(&self, path: &str) -> Version {
+        Version {
+            sha: self.sha.clone(),
+            at: self.at,
+            path: path.to_owned(),
+            who: self.who(path),
+            author: self.author.clone(),
+            subject: self.subject.clone(),
+        }
+    }
+}
+
+/// Read [`LOG_FORMAT`] output back. A record that does not parse is skipped
+/// rather than fatal: one odd commit must not take the whole history down.
+fn parse_log(raw: &[u8]) -> Vec<Commit> {
+    let raw = String::from_utf8_lossy(raw);
+    raw.split('\x1e')
+        .filter(|record| !record.is_empty())
+        .filter_map(|record| {
+            let mut fields = record.splitn(6, '\x1f');
+            let sha = fields.next()?.to_owned();
+            let at = fields.next()?.trim().parse().ok()?;
+            let author = fields.next()?.to_owned();
+            let subject = fields.next()?.to_owned();
+            let body = fields.next()?;
+            let paths = fields
+                .next()
+                .unwrap_or("")
+                .split('\0')
+                .map(|path| path.trim_matches('\n'))
+                .filter(|path| !path.is_empty())
+                .map(str::to_owned)
+                .collect();
+            let trailers = if subject.starts_with(CHECKPOINT) {
+                trailers_of(body)
+            } else {
+                Vec::new()
+            };
+            Some(Commit {
+                sha,
+                at,
+                author,
+                subject,
+                trailers,
+                paths,
+            })
+        })
+        .collect()
+}
+
+/// The `You:` / `Both:` / `Outside:` lines a checkpoint wrote, as [`message`]
+/// wrote them.
+fn trailers_of(body: &str) -> Vec<(String, Who)> {
+    body.lines()
+        .filter_map(|line| {
+            let (key, path) = line.split_once(": ")?;
+            let who = WHO.into_iter().find(|who| who.key() == key)?;
+            Some((path.to_owned(), who))
+        })
+        .collect()
+}
+
+/// `git log`'s one legitimate way of answering nothing.
+fn unborn(why: &str) -> bool {
+    why.contains("does not have any commits")
+}
+
+/// Every commit that touched a note, newest first — followed across the
+/// app's own moves, so a note keeps its history under the name it had.
+///
+/// Empty when the vault is not a repository of its own, or has no commits
+/// yet, or the path never existed: all three are "no history", and none is an
+/// error worth a 500.
+pub fn history(root: &Path, rel: &str) -> Result<Vec<Version>, String> {
+    if !is_repo(root) {
+        return Ok(Vec::new());
+    }
+    let limit = format!("-n{HISTORY_LIMIT}");
+    let raw = match try_git_within(
+        root,
+        &[
+            "log",
+            "-z",
+            "--follow",
+            "--name-only",
+            &limit,
+            LOG_FORMAT,
+            "--",
+            rel,
+        ],
+    ) {
+        Ok(raw) => raw,
+        Err(why) if unborn(&why) => return Ok(Vec::new()),
+        Err(why) => return Err(why),
+    };
+    Ok(parse_log(&raw)
+        .into_iter()
+        .filter_map(|commit| {
+            // With `--follow` and one pathspec, the one path listed is the
+            // note's name at that commit.
+            let path = commit.paths.first()?;
+            Some(commit.version(path))
+        })
+        .collect())
+}
+
+/// The vault's recent history, one row per note per commit, newest first.
+/// `keep` decides which paths are notes — the vault's rule, not this file's.
+pub fn ledger(root: &Path, keep: impl Fn(&str) -> bool) -> Result<Vec<Version>, String> {
+    if !is_repo(root) {
+        return Ok(Vec::new());
+    }
+    let limit = format!("-n{HISTORY_LIMIT}");
+    let raw = match try_git_within(root, &["log", "-z", "--name-only", &limit, LOG_FORMAT]) {
+        Ok(raw) => raw,
+        Err(why) if unborn(&why) => return Ok(Vec::new()),
+        Err(why) => return Err(why),
+    };
+    let mut rows = Vec::new();
+    for commit in parse_log(&raw) {
+        for path in commit.paths.iter().filter(|path| keep(path)) {
+            rows.push(commit.version(path));
+            if rows.len() == HISTORY_LIMIT {
+                return Ok(rows);
+            }
+        }
+    }
+    Ok(rows)
+}
+
+/// A note's bytes as one commit held them, or `None` when that commit did not
+/// hold it — or is no commit at all.
+///
+/// `cat-file blob`, never `show`: it reads the object and nothing else, so no
+/// diff driver, filter or textconv is anywhere near it. Bytes, not text: this
+/// is what a restore writes back, and §04 promises the bytes.
+pub fn version(root: &Path, sha: &str, rel: &str) -> Result<Option<Vec<u8>>, String> {
+    if !is_repo(root) {
+        return Ok(None);
+    }
+    let spec = format!("{sha}:{rel}");
+    match try_git_within(root, &["cat-file", "blob", &spec]) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(why) => {
+            // The ways git says "no such thing here": an unknown revision —
+            // "Not a valid object name" or, since 2.4x, "invalid object name"
+            // — and a path the revision does not contain.
+            let said = why.to_ascii_lowercase();
+            if said.contains("valid object name") || said.contains("does not exist") {
+                Ok(None)
+            } else {
+                Err(why)
+            }
+        }
     }
 }
 
