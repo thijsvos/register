@@ -40,10 +40,10 @@ function pick(event: Event) {
 
 <div class="settings">
   <div class="stamp">
-    <!-- An extract (§12) keeps the three controls that describe this screen
+    <!-- An export (§12) keeps the three controls that describe this screen
          and this machine, and writes none of them anywhere: the page is theirs
          until it is closed. The stamp says so where the file's name was. -->
-    <span>{offline ? 'Extract · held for this page, not saved' : 'Config · .register/config.json'}</span>
+    <span>{offline ? 'Export · held for this page, not saved' : 'Config · .register/config.json'}</span>
     <!-- §01: "every control shows its key". Escape leaves any raised view. -->
     <button class="back" onclick={() => chrome.showNotes()}>[Esc] back</button>
   </div>

@@ -65,7 +65,7 @@ register serve ~/vault        # UI on http://127.0.0.1:7777
 
 `register serve` binds to loopback unless told otherwise. `register new "Title"`
 creates a conforming note and prints its path — from inside a vault, or from
-anywhere with `--vault ~/vault`. `register extract ~/vault` writes the vault and
+anywhere with `--vault ~/vault`. `register export ~/vault` writes the vault and
 its reader as one HTML file that opens from disk (see the README). `register
 health` reports the toolchain.
 

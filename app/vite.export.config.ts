@@ -4,11 +4,11 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import { defineConfig } from 'vite'
 
 /**
- * The extract's bundle — the same app, as one file (§12, ADR-008).
+ * The export's bundle — the same app, as one file (§12, ADR-008).
  *
  * `vite.config.ts` splits the UI on purpose: a shell that paints first, a lazy
  * editor that arrives when a note opens, and a `core` chunk kept on the shell
- * side so §06's two JS budgets stay separately measurable. `register extract`
+ * side so §06's two JS budgets stay separately measurable. `register export`
  * writes a vault and its reader into a single HTML file that opens from disk,
  * and a single file cannot dynamic-`import()` — there is nothing to fetch from.
  * So this build folds every chunk into one script and every stylesheet into one
@@ -20,14 +20,14 @@ import { defineConfig } from 'vite'
  * lazy is about the served app, not this one.
  *
  * `publicDir` is off. The fonts and the boot script are already embedded in the
- * binary for the served app, and `src/extract.rs` reads them from there — a
+ * binary for the served app, and `src/export.rs` reads them from there — a
  * second copy here would put 200 kB of the same bytes in the binary twice.
  */
 export default defineConfig({
   plugins: [svelte()],
   publicDir: false,
   build: {
-    outDir: 'dist/extract',
+    outDir: 'dist/export',
     emptyOutDir: true,
     cssCodeSplit: false,
     // Nothing to preload when there is nothing to fetch.
@@ -36,8 +36,8 @@ export default defineConfig({
       input: resolve(import.meta.dirname, 'src/main.ts'),
       output: {
         inlineDynamicImports: true,
-        entryFileNames: 'extract.js',
-        assetFileNames: 'extract.[ext]',
+        entryFileNames: 'export.js',
+        assetFileNames: 'export.[ext]',
       },
     },
   },

@@ -1,12 +1,12 @@
 import { readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, type Page, test } from '@playwright/test'
-import { extract, note, vaultWith } from './harness'
+import { exportVault, note, serve, vaultWith } from './harness'
 
 /**
- * The extract (§12, ADR-008): a vault and its reader as one file, opened from
+ * The export (§12, ADR-008): a vault and its reader as one file, opened from
  * disk with no server behind it.
  *
  * Every claim the README makes for it is asserted here against the real
@@ -52,11 +52,11 @@ test.beforeAll(() => {
     }),
     'notes/diagram.png': PNG,
   })
-  file = extract(vault)
+  file = exportVault(vault)
   url = pathToFileURL(file).href
 })
 
-/** Open the extract and wait for the frame. */
+/** Open the export and wait for the frame. */
 async function open(page: Page): Promise<void> {
   await page.goto(url)
   await expect(page.getByRole('complementary', { name: 'Index' })).toBeVisible()
@@ -90,16 +90,16 @@ test('opens from disk, asks nothing of anyone, and says what it is', async ({ pa
   // Long enough for a corpus fill, a font swap or a stray beacon to show.
   await page.waitForTimeout(600)
 
-  expect(reached, `the extract reached the network:\n${reached.join('\n')}`).toEqual([])
+  expect(reached, `the export reached the network:\n${reached.join('\n')}`).toEqual([])
   expect(
     violations,
-    `the extract violates its own policy:\n${violations.join('\n')}`,
+    `the export violates its own policy:\n${violations.join('\n')}`,
   ).toEqual([])
-  expect(thrown, `uncaught in the extract:\n${thrown.join('\n')}`).toEqual([])
+  expect(thrown, `uncaught in the export:\n${thrown.join('\n')}`).toEqual([])
 
   // The status bar says what this is — and not what it is not.
   const bar = page.locator('footer')
-  await expect(bar).toContainText(/Extract/i)
+  await expect(bar).toContainText(/Export/i)
   await expect(bar).toContainText(/\d{4}-\d\d-\d\d \d\d:\d\dZ/)
   await expect(bar).not.toContainText(/Watcher/i)
   await expect(bar).not.toContainText(/Git/i)
@@ -134,7 +134,7 @@ test('a wikilink navigates, and the backlinks pane answers', async ({ page }) =>
   await expect(inspector).toContainText('Alpha')
 })
 
-test('a link to a note the extract does not hold says so rather than creating it', async ({
+test('a link to a note the export does not hold says so rather than creating it', async ({
   page,
 }) => {
   await open(page)
@@ -169,7 +169,7 @@ test('the image travelled, as data', async ({ page }) => {
 })
 
 test('--media none leaves the reference drawn as missing', async ({ page }) => {
-  const lean = extract(
+  const lean = exportVault(
     vaultWith({
       'notes/003-alpha.md': note({
         ref: '003',
@@ -233,7 +233,7 @@ test('both schemes paint, and the choice holds for the page', async ({ page }) =
   expect(
     await page.evaluate(() => document.documentElement.classList.contains('dark')),
   ).toBe(true)
-  // INV flips it in memory; an extract holds that for the page and writes it
+  // INV flips it in memory; an export holds that for the page and writes it
   // nowhere, which is what Screen 6 says of itself here.
   await page.keyboard.press('i')
   await expect
@@ -262,8 +262,8 @@ test('open → readable in under 500 ms', async ({ page, browserName }) => {
 })
 
 test('the chrome alone is under 800 kB, and a 1k-note vault under 8 MB', () => {
-  // The chrome: the UI and its faces, no notes. What a one-line extract costs.
-  const chrome = extract(vaultWith({}))
+  // The chrome: the UI and its faces, no notes. What a one-line export costs.
+  const chrome = exportVault(vaultWith({}))
   const chromeBytes = statSync(chrome).size
   expect(
     chromeBytes,
@@ -280,10 +280,70 @@ test('the chrome alone is under 800 kB, and a 1k-note vault under 8 MB', () => {
       body: `# Note ${ref}\n\nParagraph one of note ${ref}.\n\n- [ ] task ${ref}\n`,
     })
   }
-  const big = extract(vaultWith(notes), '--media', 'none')
+  const big = exportVault(vaultWith(notes), '--media', 'none')
   const bigBytes = statSync(big).size
   expect(
     bigBytes,
-    `a 1k-note extract is ${bigBytes} bytes — §06 allows 8 MB`,
+    `a 1k-note export is ${bigBytes} bytes — §06 allows 8 MB`,
   ).toBeLessThan(8_000_000)
+})
+
+// -------------------------------------------------------- from the page (§12)
+
+test('⌘K exports the vault from a served page, and the file is the same export', async ({
+  page,
+  browserName,
+}) => {
+  // The route is `GET /api/export` with `Content-Disposition: attachment`, and
+  // the palette follows it with a `download` anchor — so the page stays, and
+  // the browser's own download is the proof. Chromium only: Firefox and WebKit
+  // under automation each need their own download-directory plumbing, and the
+  // route's headers are asserted by `src/server/tests.rs` on every engine's
+  // behalf.
+  test.skip(browserName !== 'chromium', 'download capture is set up for one engine')
+
+  const server = await serve(
+    vaultWith({
+      'notes/003-alpha.md': note({
+        ref: '003',
+        title: 'Alpha',
+        body: 'A paragraph with the word zebrafish in it.\n',
+      }),
+    }),
+  )
+  try {
+    await page.goto(server.url)
+    await expect(page.getByRole('complementary', { name: 'Index' })).toBeVisible()
+
+    const waiting = page.waitForEvent('download')
+    await page.keyboard.press('ControlOrMeta+k')
+    await page.getByRole('combobox').fill('export')
+    await expect(
+      page
+        .getByRole('dialog', { name: 'Command and search' })
+        .getByRole('option')
+        .first(),
+    ).toContainText('EXPORT · VAULT AS HTML')
+    await page.keyboard.press('Enter')
+
+    const download = await waiting
+    // Named by the server: the vault's folder and the date, never its path.
+    expect(download.suggestedFilename()).toMatch(
+      /^register-e2e-[^/]+-\d{4}-\d\d-\d\d\.html$/,
+    )
+    await expect(page.getByRole('status')).toContainText(/Exporting/i)
+    // And the page is still the page: the socket was not torn down.
+    await expect(page.locator('footer')).toContainText(/Watcher\s+Live/i)
+
+    // What came down opens as an export does.
+    const saved = join(dirname(file), download.suggestedFilename())
+    await download.saveAs(saved)
+    await page.goto(pathToFileURL(saved).href)
+    await expect(page.getByRole('complementary', { name: 'Index' })).toBeVisible()
+    await expect(page.locator('footer')).toContainText(/Export/i)
+    await openNote(page, 'Alpha')
+    await expect(page.locator('.cm-content')).toContainText('zebrafish')
+  } finally {
+    server.stop()
+  }
 })

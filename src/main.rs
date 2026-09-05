@@ -1,4 +1,4 @@
-mod extract;
+mod export;
 mod git;
 mod import;
 mod scaffold;
@@ -136,7 +136,7 @@ enum Command {
     /// search, links, backlinks, tags and tasks, and asks nothing of any
     /// server — its own policy forbids it. Nothing in the vault is touched
     /// and nothing under `.register/` is carried.
-    Extract {
+    Export {
         /// The vault to read.
         vault: PathBuf,
         /// Where to write it. Defaults to `<vault>-<date>.html` in the current
@@ -145,10 +145,10 @@ enum Command {
         out: Option<PathBuf>,
         /// Whether to carry the vault's images and PDFs.
         #[arg(long, value_enum, default_value = "inline")]
-        media: extract::Media,
+        media: export::Media,
         /// Whether to carry the bundled OFL faces, or read in the system's own.
         #[arg(long, value_enum, default_value = "all")]
-        faces: extract::Faces,
+        faces: export::Faces,
     },
     /// Print health status.
     Health,
@@ -202,29 +202,29 @@ async fn main() -> ExitCode {
             vault,
             dry_run,
         } => report(import_vault(&source, &vault, dry_run)),
-        Command::Extract {
+        Command::Export {
             vault,
             out,
             media,
             faces,
-        } => report(extract_vault(&vault, out.as_deref(), media, faces)),
+        } => report(export_vault(&vault, out.as_deref(), media, faces)),
     }
 }
 
-/// `register extract`, as one line saying what was written and what was not.
-fn extract_vault(
+/// `register export`, as one line saying what was written and what was not.
+fn export_vault(
     vault: &Path,
     out: Option<&Path>,
-    media: extract::Media,
-    faces: extract::Faces,
+    media: export::Media,
+    faces: export::Faces,
 ) -> Result<String, String> {
-    let written = extract::extract(vault, out, media, faces, std::time::SystemTime::now())?;
+    let written = export::export(vault, out, media, faces, std::time::SystemTime::now())?;
     let mut said = format!(
         "wrote {} · {} · {} · {}",
         written.out.display(),
         plural(written.notes, "note"),
         plural(written.files, "file"),
-        extract::human(written.bytes),
+        export::human(written.bytes),
     );
     // Each thing left out, on its own line, the way `init` reports a note.
     for line in &written.skipped {

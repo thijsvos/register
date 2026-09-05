@@ -217,10 +217,10 @@ class VaultStore {
     await this.refresh()
 
     if (!this.tree.some((entry) => entry.path === path)) {
-      // Said in the extract's own terms rather than left to the write to refuse:
+      // Said in the export's own terms rather than left to the write to refuse:
       // the reader asked for a day, and the answer is about the day.
       if (offline) {
-        this.notice = `No log for ${path.slice(6, 16)} in this extract.`
+        this.notice = `No log for ${path.slice(6, 16)} in this export.`
         return
       }
       // Anything but `free` means do not write: taken is today's log, already
@@ -282,10 +282,10 @@ class VaultStore {
       return
     }
     // The link's other half of the promise — a missing target is created — is
-    // a write, and an extract makes none. The dotted mark already says the note
+    // a write, and an export makes none. The dotted mark already says the note
     // is not here; this says it in words when the mark is followed anyway.
     if (offline) {
-      this.notice = `No note called ${target.trim()} in this extract.`
+      this.notice = `No note called ${target.trim()} in this export.`
       return
     }
     await this.create(target.trim())
@@ -408,7 +408,7 @@ class VaultStore {
   /** Record an edit and arm the debounced save. */
   edit(text: string): void {
     if (this.openPath === null) return
-    // The editor is read-only in an extract, so this is never reached from a
+    // The editor is read-only in an export, so this is never reached from a
     // keystroke. It is still the one door every edit comes through — the
     // PROPERTIES pane included — and the store, not the surface, is what
     // promises the buffer never diverges from the file it was cut from.

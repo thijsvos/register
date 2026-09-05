@@ -167,9 +167,9 @@ breaks one gets smaller — the budget does not.
 | Stylesheet | ≤ 10 kB gz | 4.8 kB |
 | Agent edit → visible | ≤ 100 ms | asserted, real file write |
 | Server start → editable | < 500 ms | asserted |
-| Extract chrome (UI + faces, no notes) | ≤ 800 kB | 743 kB |
-| Extract of a 1k-note vault | ≤ 8 MB | asserted |
-| Extract open → readable, from `file://` | < 500 ms | asserted |
+| Export chrome (UI + faces, no notes) | ≤ 800 kB | 743 kB |
+| Export of a 1k-note vault | ≤ 8 MB | asserted |
+| Export open → readable, from `file://` | < 500 ms | asserted |
 
 Idle RAM on a 1k-note vault, document-switch time and repository size are held
 the same way. The full table and the reasoning are in `SPEC.html` §06.
@@ -184,9 +184,12 @@ behind a token — Tailscale is the intended shape. Both in
 ## Take it with you
 
 ```sh
-register extract ~/vault                      # → vault-2026-09-05.html
-register extract ~/vault -o handoff.html --media none
+register export ~/vault                      # → vault-2026-09-05.html
+register export ~/vault -o handoff.html --media none
 ```
+
+Or `EXPORT · VAULT AS HTML` in ⌘K, which hands the same file to the browser to
+save — the server writes nothing.
 
 One HTML file that **is** the vault and its reader. Open it from disk, on a
 plane, on a phone, in twenty years: the same instrument — ⌘K full-text search
@@ -197,12 +200,12 @@ server, no account, and no network: the file's own policy says
 The e2e suite records every request the page makes and fails on anything that
 is not the file itself.
 
-It is a *reading*, and it says so. The watcher's cell reads `EXTRACT · <stamp>Z`,
+It is a *reading*, and it says so. The watcher's cell reads `EXPORT · <stamp>Z`,
 every command that writes is absent from ⌘K, and `N` answers with why. Nothing
 under `.register/` travels — not the trash, not the config, and never a licensed
 font — and neither does the vault's path: the file names the folder, not where
 it lived. It is written beside the vault and refused inside it, and it never
-overwrites a file that is not already an extract.
+overwrites a file that is not already an export.
 
 `--media none` leaves the images and PDFs out and draws each reference the way
 a missing one is drawn. `--faces none` drops the bundled fonts and reads in the

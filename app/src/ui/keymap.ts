@@ -282,7 +282,7 @@ export function installKeymap(): () => void {
       }
       case 'n':
         event.preventDefault()
-        // The key is kept and answered rather than unbound in an extract: a
+        // The key is kept and answered rather than unbound in an export: a
         // reader who knows it will press it, and a key that does nothing says
         // nothing about why.
         if (offline) {

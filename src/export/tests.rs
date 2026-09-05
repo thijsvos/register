@@ -15,7 +15,7 @@ const NOTE: &str = "---\nid: 01J2ZK7Q8W3E5R9T\nref: 003\ntitle: Terminal aesthet
 
 /// A reader made of a few lines, so every assertion about the vault half runs
 /// without `pnpm build` — which CI's server job never does.
-fn stand_in() -> Reader {
+pub(crate) fn stand_in() -> Reader {
     Reader {
         boot: "/* boot */".to_owned(),
         css: concat!(
@@ -176,7 +176,7 @@ fn media_none_carries_no_file() {
 #[test]
 fn a_file_the_vault_would_refuse_is_left_out_and_said() {
     // A `.png` holding text is refused by `read_media`'s magic-number check on
-    // a served page. The extract refuses it too, and says which one.
+    // a served page. The export refuses it too, and says which one.
     let tmp = seeded();
     tmp.put("notes/not-really.png", "just text");
     let rendered = render_stand_in(&tmp.open(), Media::Inline, Faces::All);
@@ -282,7 +282,7 @@ fn faces_none_strips_every_font_face() {
 fn an_output_inside_the_vault_is_refused() {
     let tmp = seeded();
     let inside = tmp.path().join("notes/reading.html");
-    let error = extract(tmp.path(), Some(&inside), Media::None, Faces::None, at(0))
+    let error = export(tmp.path(), Some(&inside), Media::None, Faces::None, at(0))
         .err()
         .expect("refused");
 
@@ -291,23 +291,23 @@ fn an_output_inside_the_vault_is_refused() {
 }
 
 #[test]
-fn a_file_that_is_not_an_extract_is_not_overwritten() {
+fn a_file_that_is_not_an_export_is_not_overwritten() {
     let tmp = seeded();
     let beside = TempVault::new();
     let out = beside.path().join("theirs.html");
     fs::write(&out, "somebody's page").expect("seed");
 
-    let error = extract(tmp.path(), Some(&out), Media::None, Faces::None, at(0))
+    let error = export(tmp.path(), Some(&out), Media::None, Faces::None, at(0))
         .err()
         .expect("refused");
-    assert!(error.contains("not an extract"), "{error}");
+    assert!(error.contains("not an export"), "{error}");
     assert_eq!(fs::read_to_string(&out).expect("read"), "somebody's page");
 }
 
 #[test]
 fn a_folder_holding_no_vault_is_refused() {
     let tmp = TempVault::new();
-    let error = extract(tmp.path(), None, Media::None, Faces::None, at(0))
+    let error = export(tmp.path(), None, Media::None, Faces::None, at(0))
         .err()
         .expect("refused");
     assert!(error.contains("holds no vault"), "{error}");
@@ -322,7 +322,7 @@ fn the_default_name_is_the_vault_and_the_date() {
 }
 
 #[test]
-fn two_extracts_of_one_vault_differ_only_by_the_stamp() {
+fn two_exports_of_one_vault_differ_only_by_the_stamp() {
     let tmp = seeded();
     let vault = tmp.open();
     let one = render(&vault, &stand_in(), Media::None, Faces::All, at(1_000)).expect("one");
@@ -364,12 +364,64 @@ fn sizes_read_as_the_report_says_them() {
     assert_eq!(human(3_140_000), "3.1 MB");
 }
 
+// ------------------------------------------------------------------ the route
+
+#[test]
+fn the_route_reads_the_flags_the_cli_reads() {
+    assert_eq!(options("").expect("empty"), (Media::Inline, Faces::All));
+    assert_eq!(
+        options("media=none").expect("media"),
+        (Media::None, Faces::All)
+    );
+    assert_eq!(
+        options("faces=none&media=inline").expect("both"),
+        (Media::Inline, Faces::None)
+    );
+    assert!(
+        options("MEDIA=None").is_err(),
+        "names are exact; values are not"
+    );
+    assert_eq!(
+        options("media=None").expect("case"),
+        (Media::None, Faces::All)
+    );
+
+    let bad = options("media=bogus").expect_err("refused");
+    assert!(bad.contains("inline or none"), "{bad}");
+    let unknown = options("wat=1").expect_err("refused");
+    assert!(unknown.contains("no option \"wat\""), "{unknown}");
+}
+
+#[test]
+fn the_download_is_named_however_the_vault_is() {
+    assert_eq!(
+        attachment("vault-2026-09-05.html"),
+        "attachment; filename=\"vault-2026-09-05.html\""
+    );
+    assert_eq!(
+        attachment("a\"b\\c.html"),
+        "attachment; filename=\"a\\\"b\\\\c.html\"",
+        "the quote and the backslash are escaped, not dropped"
+    );
+    assert_eq!(
+        attachment("Notes — 2026.html"),
+        "attachment; filename=\"Notes___2026.html\"; filename*=UTF-8''Notes%20%E2%80%94%202026.html"
+    );
+    // A control character cannot end the header line.
+    let hostile = attachment("x\r\nSet-Cookie: a=b.html");
+    assert!(
+        !hostile.contains('\r') && !hostile.contains('\n'),
+        "{hostile}"
+    );
+    assert!(hostile.contains("%0D%0A"), "{hostile}");
+}
+
 // ---------------------------------------------------------------- the two ends
 
 #[test]
 fn the_payload_id_is_the_one_the_client_reads() {
     // One id, spelled on both sides of the wire. `offline.ts` finds the block by
-    // it; a rename on either side would produce an extract that opens empty.
+    // it; a rename on either side would produce an export that opens empty.
     let client = fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/app/src/core/offline.ts"
@@ -383,7 +435,7 @@ fn the_payload_id_is_the_one_the_client_reads() {
 
 #[test]
 fn the_template_forbids_every_connection() {
-    // The claim the README makes for an extract — it cannot phone home — is a
+    // The claim the README makes for an export — it cannot phone home — is a
     // line in the template, and this holds it there.
     assert!(TEMPLATE.contains("connect-src 'none'"));
     assert!(TEMPLATE.contains("default-src 'none'"));
@@ -403,8 +455,8 @@ fn the_template_forbids_every_connection() {
 
 #[test]
 fn the_chrome_alone_fits_the_budget() {
-    // §06: the extract's chrome — the UI and its faces, no notes — is budgeted
-    // so a one-note extract is not a megabyte. Needs the built bundle, which
+    // §06: the export's chrome — the UI and its faces, no notes — is budgeted
+    // so a one-note export is not a megabyte. Needs the built bundle, which
     // CI's server job does not have; the e2e job holds the same line against
     // the real binary, and this one says so rather than passing quietly.
     let Ok(reader) = Reader::embedded() else {

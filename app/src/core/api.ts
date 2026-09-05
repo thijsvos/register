@@ -1,5 +1,5 @@
 /**
- * The whole server surface (§04). Sixteen endpoints, nothing else — refs,
+ * The whole server surface (§04). Seventeen endpoints, nothing else — refs,
  * links, tasks, tags and search are all client-side derivations of plain text.
  *
  * Eight until Rev O added `GET /api/file` and Rev P `DELETE /api/folder`, ten
@@ -10,10 +10,10 @@
  * reads this sentence against `src/server.rs` and fails the build when the two
  * disagree.
  *
- * Every read here has a second answer (§12, ADR-008): an extract is this same
+ * Every read here has a second answer (§12, ADR-008): an export is this same
  * app opened from disk with the vault's answers inlined, and `payload` is where
  * they are. A served page has no payload and never takes those branches; an
- * extract has no server and never takes the others. A write asked of an extract
+ * export has no server and never takes the others. A write asked of an export
  * refuses with `READ_ONLY`, which every caller already reports as a notice.
  */
 import { offline, payload, READ_ONLY } from './offline'
@@ -136,7 +136,7 @@ function urlPath(path: string): string {
  * better than this module could, and none of which shows up in the bundle.
  */
 export function fileUrl(path: string): string {
-  // A `data:` URL the extract carried, or the empty string for one it did not:
+  // A `data:` URL the export carried, or the empty string for one it did not:
   // an `<img src="">` fetches nothing and reports an error, which is the path
   // by which a target the vault never had becomes a dotted, inert reference.
   if (payload) return payload.files[path] ?? ''
@@ -144,11 +144,11 @@ export function fileUrl(path: string): string {
 }
 
 /**
- * Whether the extract left this file out.
+ * Whether the export left this file out.
  *
- * Only an extract can answer before the browser tries: the served app learns a
+ * Only an export can answer before the browser tries: the served app learns a
  * target is missing when its `<img>` fails, and `media.svelte.ts` records that.
- * An extract knows at load, because the binary either carried the bytes or did
+ * An export knows at load, because the binary either carried the bytes or did
  * not, and there is nothing to try.
  */
 export function fileLeftOut(path: string): boolean {
@@ -162,7 +162,7 @@ async function refuse(response: Response): Promise<never> {
   )
 }
 
-/** What a write is told in an extract. Never reached on a served page. */
+/** What a write is told in an export. Never reached on a served page. */
 function readOnly(): Promise<never> {
   return Promise.reject(new ApiError(405, READ_ONLY))
 }
@@ -175,17 +175,17 @@ export async function getTree(): Promise<Tree> {
 }
 
 /**
- * The extract's etag for a note: the tree's, so the corpus fill and the echo
+ * The export's etag for a note: the tree's, so the corpus fill and the echo
  * check compare like with like. Built once, since every note asks.
  */
-let extractEtags: Map<string, string> | null = null
-function extractEtag(path: string): string {
-  if (extractEtags === null) {
-    extractEtags = new Map(
+let exportEtags: Map<string, string> | null = null
+function exportEtag(path: string): string {
+  if (exportEtags === null) {
+    exportEtags = new Map(
       asTree(payload?.tree).notes.map((entry) => [entry.path, entry.etag]),
     )
   }
-  return extractEtags.get(path) ?? 'extract'
+  return exportEtags.get(path) ?? 'export'
 }
 
 /**
@@ -228,8 +228,8 @@ export function forgetLineEndings(): void {
 export async function getNote(path: string): Promise<Loaded> {
   if (payload) {
     const raw = payload.notes[path]
-    if (raw === undefined) throw new ApiError(404, `${path} is not in this extract`)
-    return loaded(path, raw, extractEtag(path))
+    if (raw === undefined) throw new ApiError(404, `${path} is not in this export`)
+    return loaded(path, raw, exportEtag(path))
   }
   const response = await fetch(noteUrl(path))
   if (!response.ok) await refuse(response)
@@ -358,7 +358,7 @@ export function openEvents(handlers: {
   onResync: () => void
   onConnected: (connected: boolean) => void
 }): () => void {
-  // An extract has no watcher and nothing to watch: the vault it was cut from
+  // An export has no watcher and nothing to watch: the vault it was cut from
   // is wherever it was, and this file is a reading of it. Not even a first
   // attempt — its own policy says `connect-src 'none'`, and a socket that was
   // never opened is the only kind that policy has nothing to report about.
@@ -536,7 +536,7 @@ function asEvent(value: unknown): VaultEvent | null {
 
 /** `.register/config.json` (§02b Screen 6). `{}` when the vault has no config. */
 export async function getConfig(): Promise<unknown> {
-  // An extract carries no config: what it looks like on this machine is this
+  // An export carries no config: what it looks like on this machine is this
   // machine's to decide, and nothing decided elsewhere should travel in a file
   // meant to be handed on.
   if (offline) return {}
@@ -546,7 +546,7 @@ export async function getConfig(): Promise<unknown> {
 }
 
 /**
- * Settings in an extract are held for the session and written nowhere.
+ * Settings in an export are held for the session and written nowhere.
  *
  * Accepted rather than refused: the scheme, the face and the scale are all
  * applied to `<html>` before this is called, and the page is theirs until it is
@@ -584,7 +584,7 @@ export interface Restored {
 }
 
 export async function getTrash(): Promise<Bucket[]> {
-  // The trash lives under `.register/`, which an extract never reads.
+  // The trash lives under `.register/`, which an export never reads.
   if (offline) return []
   const response = await fetch('/api/trash')
   if (!response.ok) await refuse(response)
@@ -631,7 +631,7 @@ export interface Version {
 
 /** Every commit that touched a note, newest first. `[]` for a vault that keeps no history. */
 export async function getHistory(path: string): Promise<Version[]> {
-  // An extract carries the vault as it was, not how it got there: `[]`, the
+  // An export carries the vault as it was, not how it got there: `[]`, the
   // same measured absence a vault that keeps no history answers.
   if (offline) return []
   const response = await fetch(`/api/history/${urlPath(path)}`)
@@ -649,7 +649,7 @@ export async function getHistory(path: string): Promise<Version[]> {
  * encoded.
  */
 export async function getVersion(sha: string, path: string): Promise<string> {
-  if (offline) throw new ApiError(404, 'an extract carries no history')
+  if (offline) throw new ApiError(404, 'an export carries no history')
   const response = await fetch(`/api/version/${encodeURIComponent(sha)}/${urlPath(path)}`)
   if (!response.ok) await refuse(response)
   const raw = await response.text()
@@ -662,6 +662,20 @@ export async function getLedger(): Promise<Version[]> {
   const response = await fetch('/api/ledger')
   if (!response.ok) await refuse(response)
   return (await response.json()) as Version[]
+}
+
+/**
+ * Where the browser fetches the vault as one file (§12, ADR-008).
+ *
+ * A URL rather than a fetch, for `fileUrl`'s reason: the bytes are for the
+ * browser's download, not for this page. Followed with a `download` attribute
+ * the server's `Content-Disposition` already implies, so the page stays and
+ * the file lands wherever downloads do — the server writes nothing anywhere.
+ * `media` mirrors the CLI's flag; the faces always travel from here, because a
+ * file made from the browser is a file made to be opened somewhere else.
+ */
+export function exportUrl(media: 'inline' | 'none' = 'inline'): string {
+  return media === 'none' ? '/api/export?media=none' : '/api/export'
 }
 
 /** Every non-note file in the vault (§02b Screen 10). */
@@ -735,7 +749,7 @@ export async function putLocal(value: unknown): Promise<void> {
  * in from the user's own disk.
  */
 export async function getFont(): Promise<ArrayBuffer | null> {
-  // Never in an extract, by rule 7 before anything else: the licensed face is
+  // Never in an export, by rule 7 before anything else: the licensed face is
   // the user's, and a file made to be handed on must not carry it. The binary
   // does not read it; this side does not ask.
   if (offline) return null

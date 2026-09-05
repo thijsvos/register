@@ -24,7 +24,7 @@ let {
   onresolve,
   outside = 0,
   onoutside,
-  extract = null,
+  exportStamp = null,
 }: {
   renderMs?: number | null
   /**
@@ -57,14 +57,14 @@ let {
   outside?: number
   onoutside?: () => void
   /**
-   * When this page is an extract (§12): the stamp the binary wrote it at.
+   * When this page is an export (§12): the stamp the binary wrote it at.
    *
    * It takes the watcher's cell, because it answers the watcher's question —
    * how current is what you are reading — for a page nothing will ever update.
-   * GIT goes with it: there is no repository behind an extract to report on,
+   * GIT goes with it: there is no repository behind an export to report on,
    * and a dash there would claim a measurement nothing made.
    */
-  extract?: string | null
+  exportStamp?: string | null
 } = $props()
 
 const dash = '—'
@@ -86,8 +86,8 @@ let renderValue = $derived.by(() => {
 </script>
 
 <footer>
-  {#if extract !== null}
-    <div class="cell"><span class="lab">Extract</span> <b>{extract}</b></div>
+  {#if exportStamp !== null}
+    <div class="cell"><span class="lab">Export</span> <b>{exportStamp}</b></div>
   {:else}
     <div class="cell">
       <span class="led" class:live={watcherLive} aria-hidden="true">●</span>
@@ -145,7 +145,7 @@ let renderValue = $derived.by(() => {
       </button>
     </div>
   {/if}
-  {#if extract === null}
+  {#if exportStamp === null}
     <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
   {/if}
 </footer>

@@ -38,8 +38,8 @@ const tree = {
 }
 
 vi.mock('./offline', () => ({
-  PAYLOAD_ID: 'register-extract',
-  READ_ONLY: 'An extract is read-only. Open the vault in REGISTER to write.',
+  PAYLOAD_ID: 'register-export',
+  READ_ONLY: 'An export is read-only. Open the vault in REGISTER to write.',
   offline: true,
   payload: {
     tree,
@@ -59,11 +59,11 @@ const realSocket = globalThis.WebSocket
 
 beforeEach(() => {
   globalThis.fetch = (() => {
-    throw new Error('an extract reached fetch')
+    throw new Error('an export reached fetch')
   }) as typeof fetch
   globalThis.WebSocket = class {
     constructor() {
-      throw new Error('an extract opened a socket')
+      throw new Error('an export opened a socket')
     }
   } as unknown as typeof WebSocket
 })
@@ -94,7 +94,7 @@ describe('reads answer from the payload', () => {
     expect(loaded.etag).toBe('bbb-2')
   })
 
-  it('answers 404 for a note the extract does not hold', async () => {
+  it('answers 404 for a note the export does not hold', async () => {
     await expect(api.getNote('notes/999-nope.md')).rejects.toMatchObject({
       status: 404,
     })
@@ -133,7 +133,7 @@ describe('reads answer from the payload', () => {
 })
 
 describe('writes refuse with the one sentence', () => {
-  const READ_ONLY = 'An extract is read-only. Open the vault in REGISTER to write.'
+  const READ_ONLY = 'An export is read-only. Open the vault in REGISTER to write.'
 
   it.each([
     ['putNote', () => api.putNote('notes/003-a.md', 'x', 'aaa-1')],

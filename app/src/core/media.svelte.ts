@@ -28,7 +28,7 @@ class Misses {
 
   /**
    * Has this vault path already failed to load in this session — or, in an
-   * extract, was it never carried at all (§12)? The second is known before
+   * export, was it never carried at all (§12)? The second is known before
    * anything is tried, and it is the same fact drawn the same way.
    */
   missing(path: string): boolean {

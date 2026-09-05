@@ -42,7 +42,7 @@ $effect(() => {
       host: wikiHost(),
       onEdit: (doc) => vault.edit(doc),
       onRender: setRenderMs,
-      // An extract is the same surface, reading (§12). Nothing else in this
+      // An export is the same surface, reading (§12). Nothing else in this
       // component changes: the caret memory, the outline's reveal and the
       // wikilink host all work on a document that cannot be typed into.
       readOnly: offline,
@@ -143,7 +143,7 @@ function wikiHost() {
     fileUrl: (src: string) => {
       if (from === null) return null
       const path = resolveSrc(from, src)
-      // Passed through as is, the empty string included. That is an extract
+      // Passed through as is, the empty string included. That is an export
       // saying it did not carry the file, and an `<img src="">` fetches nothing
       // and reports an error — so the reference is demoted by the same path a
       // served page's missing target takes, rather than by a second one.

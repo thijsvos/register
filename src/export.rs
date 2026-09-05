@@ -1,6 +1,6 @@
-//! `register extract` — a vault and its reader as one file (§12, ADR-008).
+//! `register export` — a vault and its reader as one file (§12, ADR-008).
 //!
-//! The served app is a folder of markdown behind a binary. An extract is the
+//! The served app is a folder of markdown behind a binary. An export is the
 //! same reader with the folder's answers written inline: one HTML file that
 //! opens from disk, carrying the tree, every note's bytes, the images and PDFs
 //! the vault holds as `data:` URLs — and the UI itself, the bundle the binary
@@ -39,9 +39,9 @@ use crate::vault::{self, Vault};
 
 /// The element the payload is written into. `app/src/core/offline.ts` reads it
 /// by this id; a test holds the two spellings together.
-pub const PAYLOAD_ID: &str = "register-extract";
+pub const PAYLOAD_ID: &str = "register-export";
 
-const TEMPLATE: &str = include_str!("extract/template.html");
+const TEMPLATE: &str = include_str!("export/template.html");
 
 /// Whether the vault's images and PDFs travel with the notes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
@@ -61,7 +61,7 @@ pub enum Faces {
     None,
 }
 
-/// The reader half of an extract: the UI, gathered before any vault is read.
+/// The reader half of an export: the UI, gathered before any vault is read.
 ///
 /// Its own type so `render` can be handed a stand-in. The tests build one from
 /// a few lines of text and prove the vault half without `pnpm build` — which
@@ -92,12 +92,12 @@ impl Reader {
             .collect();
         Ok(Self {
             boot: text(Assets::get("boot.js")).ok_or_else(|| missing("boot script"))?,
-            // The single-file build (`app/vite.extract.config.ts`), which
+            // The single-file build (`app/vite.export.config.ts`), which
             // `pnpm build` writes beside the served one and the server never
             // serves.
-            css: text(Assets::get("extract/extract.css"))
-                .ok_or_else(|| missing("extract stylesheet"))?,
-            js: text(Assets::get("extract/extract.js")).ok_or_else(|| missing("extract script"))?,
+            css: text(Assets::get("export/export.css"))
+                .ok_or_else(|| missing("export stylesheet"))?,
+            js: text(Assets::get("export/export.js")).ok_or_else(|| missing("export script"))?,
             fonts,
         })
     }
@@ -113,7 +113,7 @@ struct Payload {
     stamp: String,
 }
 
-/// What an extract came to.
+/// What an export came to.
 pub struct Written {
     pub out: PathBuf,
     pub notes: usize,
@@ -124,7 +124,7 @@ pub struct Written {
     pub bytes: usize,
 }
 
-/// One rendered extract, before it is written anywhere.
+/// One rendered export, before it is written anywhere.
 pub struct Rendered {
     pub html: String,
     pub notes: usize,
@@ -133,7 +133,7 @@ pub struct Rendered {
 }
 
 /// Write `root` and its reader to `out`, or to a dated file beside the caller.
-pub fn extract(
+pub fn export(
     root: &Path,
     out: Option<&Path>,
     media: Media,
@@ -141,24 +141,27 @@ pub fn extract(
     now: SystemTime,
 ) -> Result<Written, String> {
     // The same refusal `new` makes: a folder holding no vault is not read, so a
-    // mistyped path yields a message rather than an extract of somebody's
+    // mistyped path yields a message rather than an export of somebody's
     // Documents folder.
     if !scaffold::holds_a_vault(root) {
         return Err(format!(
-            "{} holds no vault; nothing to extract",
+            "{} holds no vault; nothing to export",
             root.display()
         ));
     }
     let vault = Vault::open(root).map_err(|e| format!("{}: {e}", root.display()))?;
-    let reader = Reader::embedded()?;
 
     let out = match out {
         Some(path) => path.to_path_buf(),
         None => PathBuf::from(default_name(&name_of(&vault), now)),
     };
+    // Before the reader is looked for, not after: a refusal is about the
+    // paths, and has to read the same whether or not a UI was built into
+    // this binary. CI's server job runs these with none, and found out.
     refuse_inside(&vault, &out)?;
     refuse_clobber(&out)?;
 
+    let reader = Reader::embedded()?;
     let rendered = render(&vault, &reader, media, faces, now)?;
     // A plain write, and deliberately not `vault.rs`'s: the file is outside the
     // vault — refused inside it two lines up — and rule 5 governs what goes
@@ -251,8 +254,8 @@ pub fn render(
     })
 }
 
-/// The vault's folder name, for the title and the status bar.
-fn name_of(vault: &Vault) -> String {
+/// The vault's folder name, for the title, the status bar and the download.
+pub(crate) fn name_of(vault: &Vault) -> String {
     vault
         .root()
         .file_name()
@@ -261,7 +264,7 @@ fn name_of(vault: &Vault) -> String {
         .unwrap_or_else(|| "vault".to_owned())
 }
 
-/// `<name>-<date>.html`: what an extract is called when nobody names it.
+/// `<name>-<date>.html`: what an export is called when nobody names it.
 pub fn default_name(name: &str, now: SystemTime) -> String {
     format!(
         "{name}-{}.html",
@@ -269,10 +272,10 @@ pub fn default_name(name: &str, now: SystemTime) -> String {
     )
 }
 
-/// An extract is written beside a vault, never into it.
+/// An export is written beside a vault, never into it.
 ///
 /// Into it would put a file the tree never shows under the watcher, the
-/// importer's walk and `git add -A` — and the next extract would then carry
+/// importer's walk and `git add -A` — and the next export would then carry
 /// the last one. The parent is canonicalised so a symlinked temp directory
 /// and a `../` in the argument both answer honestly.
 fn refuse_inside(vault: &Vault, out: &Path) -> Result<(), String> {
@@ -285,17 +288,17 @@ fn refuse_inside(vault: &Vault, out: &Path) -> Result<(), String> {
         .map_err(|e| format!("{}: {e}", parent.display()))?;
     if parent.starts_with(vault.root()) {
         return Err(format!(
-            "{} is inside the vault; an extract is written beside a vault, never into it",
+            "{} is inside the vault; an export is written beside a vault, never into it",
             out.display()
         ));
     }
     Ok(())
 }
 
-/// Replace an extract, and nothing else.
+/// Replace an export, and nothing else.
 ///
 /// The dated default name makes a second run of the day land on the first,
-/// which is what anyone running it twice means. A file that is not an extract
+/// which is what anyone running it twice means. A file that is not an export
 /// is somebody's, and `-o` naming it by mistake must not cost them it.
 fn refuse_clobber(out: &Path) -> Result<(), String> {
     let Ok(existing) = fs::read_to_string(out) else {
@@ -305,9 +308,76 @@ fn refuse_clobber(out: &Path) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "{} exists and is not an extract; name another file with --out",
+        "{} exists and is not an export; name another file with --out",
         out.display()
     ))
+}
+
+// ------------------------------------------------------------------ the route
+
+/// `?media=none&faces=none`, read the way the CLI reads its flags.
+///
+/// The two names and their values are clap's, so the browser route and the
+/// terminal cannot drift: `ValueEnum::from_str` is what parses `--media` too.
+/// An unknown name or value is refused rather than defaulted, because a URL a
+/// reader typed by hand deserves to be told it was misread.
+pub(crate) fn options(query: &str) -> Result<(Media, Faces), String> {
+    let mut media = Media::Inline;
+    let mut faces = Faces::All;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let (name, value) = pair.split_once('=').unwrap_or((pair, ""));
+        match name {
+            "media" => {
+                media = ValueEnum::from_str(value, true)
+                    .map_err(|_| format!("media is inline or none, not {value:?}"))?;
+            }
+            "faces" => {
+                faces = ValueEnum::from_str(value, true)
+                    .map_err(|_| format!("faces is all or none, not {value:?}"))?;
+            }
+            other => {
+                return Err(format!(
+                    "no option {other:?}; the route takes media and faces"
+                ));
+            }
+        }
+    }
+    Ok((media, faces))
+}
+
+/// A `Content-Disposition` that names the file, however the vault is named.
+///
+/// RFC 6266: a plain `filename="…"` when the name is printable ASCII, with the
+/// quote and the backslash escaped; otherwise an ASCII stand-in beside a
+/// `filename*=UTF-8''…` the browser prefers, percent-encoded per RFC 5987, so
+/// a vault called `Notes — 2026` downloads under that name rather than as
+/// underscores. A control character takes the second road too, encoded: a
+/// header is one line, and a name is not allowed to end it early.
+pub(crate) fn attachment(name: &str) -> String {
+    let plain = name.is_ascii() && !name.bytes().any(|byte| byte.is_ascii_control());
+    if plain {
+        let escaped = name.replace('\\', "\\\\").replace('"', "\\\"");
+        return format!("attachment; filename=\"{escaped}\"");
+    }
+    let stand_in: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || "-._".contains(c) {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut encoded = String::with_capacity(name.len() * 3);
+    for byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() || b"-._~".contains(&byte) {
+            encoded.push(byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    format!("attachment; filename=\"{stand_in}\"; filename*=UTF-8''{encoded}")
 }
 
 // ------------------------------------------------------------------ the sheet

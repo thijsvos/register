@@ -34,13 +34,13 @@ import { chrome } from './view.svelte'
 let gitField = $derived(gitLabel(vault.git))
 
 /**
- * The extract's stamp for the status bar (§12), or null on a served page.
+ * The export's stamp for the status bar (§12), or null on a served page.
  *
  * `2026-09-05 11:32Z` — the chrome's own form for a time, UTC to the minute,
  * cut from the ISO the binary wrote. Not the vault's mtime and not "today": it
  * is the moment this file was made, which is the only date it can be sure of.
  */
-let extract = $derived(
+let exportStamp = $derived(
   payload === null ? null : `${payload.stamp.slice(0, 16).replace('T', ' ')}Z`,
 )
 
@@ -200,7 +200,7 @@ $effect(() => {
     onresolve={() => go.newestConflict()}
     outside={vault.outside.length}
     onoutside={() => go.ledger()}
-    {extract}
+    {exportStamp}
   />
 </div>
 

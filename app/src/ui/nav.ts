@@ -131,7 +131,7 @@ function armFromRow(event: KeyboardEvent): void {
 
   event.preventDefault()
   // Answered rather than ignored, for the reason `N` is in the keymap: the key
-  // says delete on it, and an extract has to say why nothing left.
+  // says delete on it, and an export has to say why nothing left.
   if (offline) {
     vault.notice = READ_ONLY
     return
@@ -249,7 +249,7 @@ export const go = {
   /**
    * §02b Screen 4, over one `*.conflict-<ts>.md` copy.
    *
-   * In an extract the copy opens as the note it is: Screen 4 exists to write a
+   * In an export the copy opens as the note it is: Screen 4 exists to write a
    * merge, and a merge table whose only button is refused is a worse reading of
    * the file than the file. The index still names it an artefact.
    */

@@ -23,7 +23,7 @@ export function editorExtensions(options: { readOnly?: boolean } = {}): Extensio
     markdownDecorations,
     editorTheme,
     EditorView.lineWrapping,
-    // An extract (§12) reads with the same surface it would write with, and
+    // An export (§12) reads with the same surface it would write with, and
     // both facets are needed for it to be a reading surface: `readOnly` is what
     // the commands and the task widget consult, and `editable` is what takes
     // the caret and the keyboard away. One without the other is a document

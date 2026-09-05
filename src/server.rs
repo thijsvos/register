@@ -22,6 +22,7 @@ use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::time::timeout;
 
+use crate::export;
 use crate::vault::{self, Vault};
 use crate::watch::Event;
 
@@ -30,8 +31,8 @@ use crate::watch::Event;
 /// `allow_missing` keeps `cargo build` green in CI, which builds the server
 /// without building the frontend first.
 ///
-/// `extract/` rides along: that is the single-file build `register extract`
-/// writes into a page (§12), and `extract.rs` reads it, the fonts and the boot
+/// `export/` rides along: that is the single-file build `register export`
+/// writes into a page (§12), and `export.rs` reads it, the fonts and the boot
 /// script from here rather than embedding any of them twice. `asset()` refuses
 /// to serve it — it is in the binary for the CLI, not for the browser. An
 /// `#[exclude]` would have been tidier and costs a crate feature that pulls in
@@ -70,6 +71,10 @@ pub struct AppState {
     /// `Checkpointer::with_idle`'s reason: a test should not have to wait half a
     /// minute to find out whether this works.
     ping: Duration,
+    /// The export's reader — the folded UI — or `None` to take the embedded
+    /// one at request time, which is every shipped configuration. Tests hand
+    /// in a stand-in, because CI's server job has no built UI to embed.
+    reader: Option<Arc<export::Reader>>,
     /// One extra origin the guard will accept, for `pnpm dev`.
     ///
     /// Empty in every shipped configuration. The guard used to accept *any*
@@ -90,8 +95,16 @@ impl AppState {
             token: None,
             assets: None,
             ping: PING_EVERY,
+            reader: None,
             dev_origin: None,
         }
+    }
+
+    /// Export with this reader rather than the embedded bundle. Tests only.
+    #[cfg(test)]
+    pub fn with_reader(mut self, reader: export::Reader) -> Self {
+        self.reader = Some(Arc::new(reader));
+        self
     }
 
     /// Ping an idle socket this often instead of every [`PING_EVERY`].
@@ -400,6 +413,9 @@ pub fn router(state: AppState) -> Router {
         // §02b Screen 10. The INDEX is a register of notes, so a file nothing
         // references is invisible in the app.
         .route("/api/files", get(list_files))
+        // §12, ADR-008. The same file `register export` writes, answered as a
+        // download: the browser saves it and the server writes nothing.
+        .route("/api/export", get(export_vault))
         // §04 Rev Y. Deleting and creating both existed; the third of the set
         // did not, so reorganising a vault was still Finder's job.
         .route("/api/move", post(move_path))
@@ -841,6 +857,58 @@ async fn list_files(State(state): State<AppState>) -> Response {
     }
 }
 
+/// §12, ADR-008: the vault and its reader as one file, as a download.
+///
+/// An attachment, never a page. Rendered under this origin the file's inline
+/// script would run with this origin's cookies, and its own `connect-src
+/// 'none'` would be all that stood between it and the API — so
+/// `Content-Disposition` keeps the browser from rendering it at all. The reader
+/// saves it wherever downloads go, which is the CLI's rule kept from a surface
+/// that cannot ask where to put a file: the server writes nothing.
+///
+/// `?media=` and `?faces=` are the CLI's flags, parsed by the same code.
+async fn export_vault(State(state): State<AppState>, uri: Uri) -> Response {
+    let (media, faces) = match export::options(uri.query().unwrap_or("")) {
+        Ok(chosen) => chosen,
+        Err(why) => return (StatusCode::BAD_REQUEST, format!("{why}\n")).into_response(),
+    };
+
+    let vault = state.vault.clone();
+    let reader = state.reader.clone();
+    let rendered = tokio::task::spawn_blocking(move || {
+        let reader = match reader {
+            Some(reader) => reader,
+            None => Arc::new(export::Reader::embedded()?),
+        };
+        let now = std::time::SystemTime::now();
+        let name = export::default_name(&export::name_of(&vault), now);
+        export::render(&vault, &reader, media, faces, now).map(|rendered| (name, rendered.html))
+    })
+    .await;
+
+    match rendered {
+        Ok(Ok((name, html))) => (
+            StatusCode::OK,
+            [
+                (header::CONTENT_TYPE, "text/html; charset=utf-8".to_owned()),
+                (header::CONTENT_DISPOSITION, export::attachment(&name)),
+                // Every export is a fresh reading; a cached one would be a
+                // stale vault handed on with today's date in its name.
+                (header::CACHE_CONTROL, "no-store".to_owned()),
+            ],
+            html,
+        )
+            .into_response(),
+        // "No UI bundled" is the one failure a request can do nothing about
+        // and a build can; everything else is the vault's, and 500 says so.
+        Ok(Err(why)) if why.contains("bundled") => {
+            (StatusCode::SERVICE_UNAVAILABLE, format!("{why}\n")).into_response()
+        }
+        Ok(Err(why)) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{why}\n")).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "vault task failed\n").into_response(),
+    }
+}
+
 // ------------------------------------------------------------ config + fonts
 
 async fn read_config(State(state): State<AppState>) -> Response {
@@ -1088,11 +1156,11 @@ async fn asset(State(state): State<AppState>, uri: Uri) -> Response {
     if path == "api" || path.starts_with("api/") {
         return (StatusCode::NOT_FOUND, "no such endpoint\n").into_response();
     }
-    // The extract's bundle is embedded for `register extract`, not for a
+    // The export's bundle is embedded for `register export`, not for a
     // browser: the same UI a second way, and a served page has no use for it.
     // Refused rather than left reachable, so the served surface is exactly
     // what `index.html` asks for and nothing that happens to be in the folder.
-    if path == "extract" || path.starts_with("extract/") {
+    if path == "export" || path.starts_with("export/") {
         return (StatusCode::NOT_FOUND, "not served\n").into_response();
     }
 

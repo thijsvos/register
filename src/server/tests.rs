@@ -1935,17 +1935,17 @@ async fn a_folder_deletion_takes_the_same_guard() {
 }
 
 #[tokio::test]
-async fn the_extract_bundle_is_embedded_but_never_served() {
-    // `pnpm build` writes the single-file bundle into `app/dist/extract/`, so
-    // it rides along in `Assets` for `register extract` to read — and nothing
+async fn the_export_bundle_is_embedded_but_never_served() {
+    // `pnpm build` writes the single-file bundle into `app/dist/export/`, so
+    // it rides along in `Assets` for `register export` to read — and nothing
     // else. A served page has its own bundle; this one is refused rather than
     // left reachable because it happens to be in the folder.
     let (tmp, dist) = ui_dir();
-    fs::create_dir_all(dist.join("extract")).expect("extract dir");
-    fs::write(dist.join("extract/extract.js"), "console.log('folded')").expect("js");
+    fs::create_dir_all(dist.join("export")).expect("export dir");
+    fs::write(dist.join("export/export.js"), "console.log('folded')").expect("js");
     let addr = start_serving(&tmp, &dist).await;
 
-    let folded = request(addr, "GET", "/extract/extract.js", &[], "").await;
+    let folded = request(addr, "GET", "/export/export.js", &[], "").await;
     assert_eq!(folded.status, 404);
     assert!(!folded.body.contains("folded"), "the bundle was served");
     // And not the shell either: an unknown route gets the shell, but this is a
@@ -1956,4 +1956,101 @@ async fn the_extract_bundle_is_embedded_but_never_served() {
     // still served.
     let css = request(addr, "GET", "/assets/app.css", &[], "").await;
     assert_eq!(css.status, 200);
+}
+
+// ------------------------------------------------------------------ the export
+
+/// A server whose export reads with the stand-in, as CI's server job must.
+async fn start_exporting(tmp: &TempVault) -> SocketAddr {
+    let vault = Arc::new(tmp.open());
+    let (events, _keep) = broadcast::channel(64);
+    let state = AppState::new(vault, events).with_reader(crate::export::tests::stand_in());
+
+    let bound = listener("127.0.0.1", 0).await.expect("bind");
+    let addr = bound.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(bound, router(state)).await;
+    });
+    addr
+}
+
+#[tokio::test]
+async fn the_export_route_answers_the_file_as_a_download() {
+    // §12, ADR-008. The same file the CLI writes, but the server writes nothing:
+    // the headers hand it to the browser to save, and the body is the export.
+    let tmp = TempVault::new();
+    crate::scaffold::init(tmp.path(), false).expect("scaffold");
+    tmp.put("notes/003-terminal-aesthetics.md", NOTE);
+    let addr = start_exporting(&tmp).await;
+
+    let reply = request(addr, "GET", "/api/export", &[], "").await;
+    assert_eq!(reply.status, 200, "{}", reply.body);
+    assert_eq!(
+        reply.headers.get("content-type").map(String::as_str),
+        Some("text/html; charset=utf-8")
+    );
+    let disposition = reply
+        .headers
+        .get("content-disposition")
+        .expect("a download");
+    assert!(
+        disposition.starts_with("attachment; filename=\""),
+        "{disposition}"
+    );
+    assert!(disposition.ends_with(".html\""), "{disposition}");
+    // Named by the folder and the day, never by the path: the folder is a
+    // `register-test-…` temp directory and that is all the name may say.
+    assert!(disposition.contains("register-test-"), "{disposition}");
+    assert!(!disposition.contains(&tmp.path().display().to_string()));
+    assert_eq!(
+        reply.headers.get("cache-control").map(String::as_str),
+        Some("no-store")
+    );
+
+    assert!(
+        reply.body.contains("id=\"register-export\""),
+        "not an export"
+    );
+    assert!(reply.body.contains("Body."), "the note did not travel");
+    assert!(
+        reply.body.contains("V09GRg=="),
+        "the stand-in's face did not travel"
+    );
+    // The served origin's own policy is on the response and the file's own
+    // policy is inside it; the second is the one that governs once saved.
+    assert!(reply.body.contains("connect-src 'none'"));
+
+    // Nothing was written anywhere the server could reach.
+    let written: Vec<_> = fs::read_dir(tmp.path())
+        .expect("read vault")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().and_then(|e| e.to_str()) == Some("html"))
+        .collect();
+    assert!(
+        written.is_empty(),
+        "the server wrote an export into the vault"
+    );
+}
+
+#[tokio::test]
+async fn the_export_route_takes_the_cli_flags_and_refuses_what_it_does_not_know() {
+    let tmp = TempVault::new();
+    crate::scaffold::init(tmp.path(), false).expect("scaffold");
+    tmp.put("notes/003-terminal-aesthetics.md", NOTE);
+    let addr = start_exporting(&tmp).await;
+
+    let lean = request(addr, "GET", "/api/export?faces=none", &[], "").await;
+    assert_eq!(lean.status, 200);
+    assert!(
+        !lean.body.contains("@font-face"),
+        "faces=none carried a face"
+    );
+
+    let bad = request(addr, "GET", "/api/export?media=bogus", &[], "").await;
+    assert_eq!(bad.status, 400);
+    assert!(bad.body.contains("inline or none"), "{}", bad.body);
+
+    let unknown = request(addr, "GET", "/api/export?depth=3", &[], "").await;
+    assert_eq!(unknown.status, 400);
+    assert!(unknown.body.contains("no option"), "{}", unknown.body);
 }

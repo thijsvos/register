@@ -536,12 +536,12 @@ describe('font licensing (rule 7, §03)', () => {
   })
 })
 
-describe('the extract (§12, ADR-008)', () => {
+describe('the export (§12, ADR-008)', () => {
   // One app, two transports: served, and folded into a file that opens from
   // disk. The rules below are what keep the second one honest — read-only by
   // construction, and offline by policy rather than by promise.
   const api = sources['./core/api.ts'] ?? ''
-  const extractConfig = import.meta.glob('../vite.extract.config.ts', {
+  const exportConfig = import.meta.glob('../vite.export.config.ts', {
     query: '?raw',
     import: 'default',
     eager: true,
@@ -560,12 +560,12 @@ describe('the extract (§12, ADR-008)', () => {
   })
 
   it('folds the whole app into one script, under a name the binary can address', () => {
-    const [config] = Object.values(extractConfig)
-    expect(config, 'vite.extract.config.ts read as empty').toBeTruthy()
+    const [config] = Object.values(exportConfig)
+    expect(config, 'vite.export.config.ts read as empty').toBeTruthy()
     expect(config).toMatch(/inlineDynamicImports:\s*true/)
-    expect(config).toMatch(/entryFileNames:\s*'extract\.js'/)
-    expect(config).toMatch(/assetFileNames:\s*'extract\.\[ext\]'/)
-    expect(config).toMatch(/outDir:\s*'dist\/extract'/)
+    expect(config).toMatch(/entryFileNames:\s*'export\.js'/)
+    expect(config).toMatch(/assetFileNames:\s*'export\.\[ext\]'/)
+    expect(config).toMatch(/outDir:\s*'dist\/export'/)
     // No second copy of the fonts and the boot script in the binary.
     expect(config).toMatch(/publicDir:\s*false/)
     // The served config's chunking is the thing this one must not carry. Read
@@ -574,7 +574,7 @@ describe('the extract (§12, ADR-008)', () => {
   })
 
   it('reads with the editor rather than a second renderer', () => {
-    // The point of the extract is that it is the same surface. A read-only
+    // The point of the export is that it is the same surface. A read-only
     // CodeMirror is one facet; a separate markdown-to-HTML path would be a
     // second implementation of every decoration, and would drift.
     expect(sources['./editor/setup.ts']).toMatch(/EditorState\.readOnly\.of\(true\)/)
@@ -586,7 +586,7 @@ describe('the extract (§12, ADR-008)', () => {
     )
   })
 
-  it('hides every command that writes rather than showing it inert', () => {
+  it('hides every command that needs the server rather than showing it inert', () => {
     const commands = sources['./ui/Palette/commands.ts'] ?? ''
     for (const id of [
       'new',
@@ -598,9 +598,10 @@ describe('the extract (§12, ADR-008)', () => {
       'move',
       'reveal',
       'reload',
+      'export',
     ]) {
-      const row = new RegExp(`id: '${id}',[\\s\\S]*?enabled:[^\\n]*writes`)
-      expect(commands, `${id} is offered in an extract`).toMatch(row)
+      const row = new RegExp(`id: '${id}',[\\s\\S]*?enabled:[^\\n]*served`)
+      expect(commands, `${id} is offered in an export`).toMatch(row)
     }
   })
 

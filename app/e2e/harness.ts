@@ -148,15 +148,15 @@ export async function msUntilVisible(
 }
 
 /**
- * `register extract` over a vault, written beside it (§12).
+ * `register export` over a vault, written beside it (§12).
  *
- * The release binary again, for the reason `serve` uses it: the extract is a
+ * The release binary again, for the reason `serve` uses it: the export is a
  * claim about what ships — the bundle the binary embeds is the one that lands
  * in the file. Returns the file's path; `pathToFileURL` it to open.
  */
-export function extract(vault: string, ...args: string[]): string {
-  const out = join(mkdtempSync(join(tmpdir(), 'register-extract-')), 'extract.html')
-  execFileSync(BINARY, ['extract', vault, '-o', out, ...args], {
+export function exportVault(vault: string, ...args: string[]): string {
+  const out = join(mkdtempSync(join(tmpdir(), 'register-export-')), 'export.html')
+  execFileSync(BINARY, ['export', vault, '-o', out, ...args], {
     stdio: ['ignore', 'pipe', 'inherit'],
   })
   return out

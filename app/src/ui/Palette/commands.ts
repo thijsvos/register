@@ -1,4 +1,4 @@
-import { revealVault } from '../../core/api'
+import { exportUrl, revealVault } from '../../core/api'
 import { rewrites } from '../../core/move'
 import { offline } from '../../core/offline'
 import { folders, isListed, isTemplate, splitFolder } from '../../core/paths'
@@ -52,15 +52,16 @@ export interface Command {
 }
 
 /**
- * Whether a command that writes can be offered at all.
+ * Whether a command that needs the server can be offered at all.
  *
- * An extract (§12) is a reading of a vault, opened from disk, and every write
- * it is asked for is refused. The frame's rule for a command that cannot act is
- * to hide it rather than show it inert, so each writing command is gated here —
- * one predicate rather than a flag threaded through eleven rows — and the rows
- * that only read are untouched.
+ * An export (§12) is a reading of a vault, opened from disk: every write it is
+ * asked for is refused, and there is nothing behind it to reveal, reload from,
+ * or export again. The frame's rule for a command that cannot act is to hide it
+ * rather than show it inert, so each such command is gated here — one predicate
+ * rather than a flag threaded through twelve rows — and the rows that only read
+ * are untouched.
  */
-const writes = () => !offline
+const served = () => !offline
 
 export function allCommands(): Command[] {
   return [
@@ -69,7 +70,7 @@ export function allCommands(): Command[] {
       label: 'NEW · NOTE',
       keys: 'N',
       takesQuery: true,
-      enabled: writes,
+      enabled: served,
       // The query is the title, and the folder, exactly as NEW FROM TEMPLATE
       // already reads them. Throwing it away meant a titled note could only be
       // made from a stencil — so a vault whose `templates/` had been emptied
@@ -101,8 +102,8 @@ export function allCommands(): Command[] {
       id: 'trash',
       label: 'GO · TRASH',
       keys: '',
-      // The trash lives under `.register/`, which an extract never reads.
-      enabled: writes,
+      // The trash lives under `.register/`, which an export never reads.
+      enabled: served,
       run: () => go.trash(),
     },
     {
@@ -117,8 +118,8 @@ export function allCommands(): Command[] {
       id: 'history',
       label: 'HISTORY · NOTE',
       keys: 'G H',
-      // An extract carries the vault as it was, not how it got there.
-      enabled: () => writes() && vault.openPath !== null,
+      // An export carries the vault as it was, not how it got there.
+      enabled: () => served() && vault.openPath !== null,
       run: () => {
         if (vault.openPath !== null) go.history(vault.openPath)
       },
@@ -127,7 +128,7 @@ export function allCommands(): Command[] {
       id: 'ledger',
       label: 'GO · LEDGER',
       keys: '',
-      enabled: writes,
+      enabled: served,
       run: () => go.ledger(),
     },
     {
@@ -208,8 +209,8 @@ export function allCommands(): Command[] {
       id: 'reload',
       label: 'RELOAD FROM DISK',
       keys: '',
-      // There is no disk behind an extract to reload from.
-      enabled: () => writes() && vault.openPath !== null,
+      // There is no disk behind an export to reload from.
+      enabled: () => served() && vault.openPath !== null,
       run: () => vault.reloadFromDisk(),
     },
     // §02b Screen 4. Hidden with nothing to resolve, like every other command
@@ -219,7 +220,7 @@ export function allCommands(): Command[] {
       id: 'resolve',
       label: 'RESOLVE · CONFLICT',
       keys: '',
-      enabled: () => writes() && vault.unresolved.length > 0,
+      enabled: () => served() && vault.unresolved.length > 0,
       run: () => go.newestConflict(),
     },
     // §04 Rev P. Both arm the palette rather than acting, so the confirm is the
@@ -229,7 +230,7 @@ export function allCommands(): Command[] {
       id: 'delete-note',
       label: 'DELETE · NOTE → TRASH',
       keys: '⌫',
-      enabled: () => writes() && vault.openPath !== null,
+      enabled: () => served() && vault.openPath !== null,
       takesFocus: true,
       run: () => {
         const path = vault.openPath
@@ -243,7 +244,7 @@ export function allCommands(): Command[] {
       id: 'delete-folder',
       label: 'DELETE · FOLDER → TRASH',
       keys: '',
-      enabled: () => writes() && openFolder() !== null,
+      enabled: () => served() && openFolder() !== null,
       takesFocus: true,
       run: () => {
         const folder = openFolder()
@@ -265,7 +266,7 @@ export function allCommands(): Command[] {
       label: 'MOVE · NOTE',
       keys: '',
       takesQuery: true,
-      enabled: () => writes() && vault.openPath !== null,
+      enabled: () => served() && vault.openPath !== null,
       takesFocus: true,
       run: (query: string) => {
         const path = vault.openPath
@@ -285,12 +286,26 @@ export function allCommands(): Command[] {
         })
       },
     },
+    // §12, ADR-008: the same file `register export` writes, from the page. The
+    // server renders it and the browser saves it — nothing is written beside
+    // the vault by anyone but the reader, which is the CLI's rule kept from a
+    // surface that cannot ask where to put a file.
+    {
+      id: 'export',
+      label: 'EXPORT · VAULT AS HTML',
+      keys: '',
+      enabled: served,
+      run: () => {
+        download(exportUrl())
+        vault.notice = 'Exporting. The browser saves it with its downloads.'
+      },
+    },
     {
       id: 'reveal',
       label: 'OPEN VAULT IN FILE MANAGER',
       keys: '',
-      // The vault an extract was cut from is wherever it was; this file is not it.
-      enabled: writes,
+      // The vault an export was cut from is wherever it was; this file is not it.
+      enabled: served,
       run: async () => {
         try {
           await revealVault()
@@ -300,6 +315,25 @@ export function allCommands(): Command[] {
       },
     },
   ]
+}
+
+/**
+ * Ask the browser to save what a URL serves, without leaving the page.
+ *
+ * An anchor with `download`, clicked: the one route to a file dialog that is
+ * neither a navigation — which would tear down the socket and the buffer — nor
+ * a `fetch` into memory, which a multi-megabyte export has no business being.
+ * Same-origin, so the attribute is honoured and the server's own
+ * `Content-Disposition` names the file.
+ */
+function download(url: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = ''
+  anchor.hidden = true
+  document.body.append(anchor)
+  anchor.click()
+  anchor.remove()
 }
 
 /**
@@ -366,7 +400,7 @@ export interface FolderChoice {
  * no flag, and nothing to turn off.
  */
 export function folderChoices(query: string): FolderChoice[] {
-  // A folder is offered as somewhere to put a new note, and an extract takes none.
+  // A folder is offered as somewhere to put a new note, and an export takes none.
   if (offline) return []
   const typed = query.trim()
   if (typed.length < FOLDER_MIN) return []
@@ -409,7 +443,7 @@ export const UNTITLED = 'Untitled note'
  * fallback is what `N` already calls a note nobody has named.
  */
 export function templateChoices(query: string): TemplateChoice[] {
-  // A stencil is offered as a note to cut, and an extract cuts none.
+  // A stencil is offered as a note to cut, and an export cuts none.
   if (offline) return []
   // The query may name where the note goes as well as what it is called, so the
   // title is what is left after the last separator rather than the whole line.
