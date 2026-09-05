@@ -24,6 +24,7 @@ import { charCount, setField, touchModified, wordCount } from './frontmatter'
 import { outsideSince } from './ledger'
 import { NoteLookup } from './links'
 import { apply, moved as movedPath, rewrites } from './move'
+import { offline } from './offline'
 import { basename, cleanFolder, DAILY_TEMPLATE, inside, isListed } from './paths'
 import { dailyFrom, dailyPath, noteFrom, notePath } from './refs'
 import { toggle } from './tasks'
@@ -216,6 +217,12 @@ class VaultStore {
     await this.refresh()
 
     if (!this.tree.some((entry) => entry.path === path)) {
+      // Said in the extract's own terms rather than left to the write to refuse:
+      // the reader asked for a day, and the answer is about the day.
+      if (offline) {
+        this.notice = `No log for ${path.slice(6, 16)} in this extract.`
+        return
+      }
       // Anything but `free` means do not write: taken is today's log, already
       // there, and refused means we could not find out — and guessing free
       // would put the stencil straight over whatever is on disk.
@@ -272,6 +279,13 @@ class VaultStore {
     const found = this.resolve(target)
     if (found !== null) {
       await this.open(found.path)
+      return
+    }
+    // The link's other half of the promise — a missing target is created — is
+    // a write, and an extract makes none. The dotted mark already says the note
+    // is not here; this says it in words when the mark is followed anyway.
+    if (offline) {
+      this.notice = `No note called ${target.trim()} in this extract.`
       return
     }
     await this.create(target.trim())
@@ -394,6 +408,11 @@ class VaultStore {
   /** Record an edit and arm the debounced save. */
   edit(text: string): void {
     if (this.openPath === null) return
+    // The editor is read-only in an extract, so this is never reached from a
+    // keystroke. It is still the one door every edit comes through — the
+    // PROPERTIES pane included — and the store, not the surface, is what
+    // promises the buffer never diverges from the file it was cut from.
+    if (offline) return
     this.buffer = text
     if (!this.dirty) {
       this.dirty = true

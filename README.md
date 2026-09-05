@@ -167,6 +167,9 @@ breaks one gets smaller — the budget does not.
 | Stylesheet | ≤ 10 kB gz | 4.8 kB |
 | Agent edit → visible | ≤ 100 ms | asserted, real file write |
 | Server start → editable | < 500 ms | asserted |
+| Extract chrome (UI + faces, no notes) | ≤ 800 kB | 743 kB |
+| Extract of a 1k-note vault | ≤ 8 MB | asserted |
+| Extract open → readable, from `file://` | < 500 ms | asserted |
 
 Idle RAM on a 1k-note vault, document-switch time and repository size are held
 the same way. The full table and the reasoning are in `SPEC.html` §06.
@@ -177,6 +180,34 @@ Off by default, and neither adds an account or any telemetry. REGISTER can commi
 your vault for you if it is a git repository, and can serve beyond localhost
 behind a token — Tailscale is the intended shape. Both in
 [`docs/remote.md`](docs/remote.md).
+
+## Take it with you
+
+```sh
+register extract ~/vault                      # → vault-2026-09-05.html
+register extract ~/vault -o handoff.html --media none
+```
+
+One HTML file that **is** the vault and its reader. Open it from disk, on a
+plane, on a phone, in twenty years: the same instrument — ⌘K full-text search
+over the bodies, `[[wikilinks]]` that follow, backlinks, tag meters, the
+outline, TODAY, both schemes, Commit Mono — reading a copy of every note. No
+server, no account, and no network: the file's own policy says
+`connect-src 'none'`, and the browser enforces that before a line of it runs.
+The e2e suite records every request the page makes and fails on anything that
+is not the file itself.
+
+It is a *reading*, and it says so. The watcher's cell reads `EXTRACT · <stamp>Z`,
+every command that writes is absent from ⌘K, and `N` answers with why. Nothing
+under `.register/` travels — not the trash, not the config, and never a licensed
+font — and neither does the vault's path: the file names the folder, not where
+it lived. It is written beside the vault and refused inside it, and it never
+overwrites a file that is not already an extract.
+
+`--media none` leaves the images and PDFs out and draws each reference the way
+a missing one is drawn. `--faces none` drops the bundled fonts and reads in the
+system's monospace. The chrome — the UI and its faces, before a single note —
+is 743 kB, and a thousand short notes come to 1.1 MB; both are budgets.
 
 ## More
 

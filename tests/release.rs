@@ -925,3 +925,67 @@ fn every_release_says_what_the_image_redistributes() {
         "the notice mirrors a different Alpine release than {tag}"
     );
 }
+
+#[test]
+fn the_client_counts_the_endpoints_the_server_declares() {
+    // `app/src/core/api.ts` opens by saying how many endpoints §04 has, and
+    // its own second paragraph records that the number went stale once — at
+    // Rev O — "which is the argument for it being here at all". It went stale
+    // again: it read thirteen while the router declared sixteen, for as long
+    // as the trash, the files and the move routes had existed. A count nothing
+    // reads is a count that drifts, so this reads it.
+    let client = read("app/src/core/api.ts");
+    let server = read("src/server.rs");
+
+    let sentence = client
+        .lines()
+        .find(|line| line.contains("endpoints, nothing else"))
+        .expect("api.ts no longer states an endpoint count");
+    let word = sentence
+        .split_whitespace()
+        .find(|word| {
+            WORDS
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case(word))
+        })
+        .unwrap_or_else(|| panic!("no number word in {sentence:?}"));
+    let claimed = WORDS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(word))
+        .map(|(_, n)| *n)
+        .expect("counted above");
+
+    // Every `.route(` in the router, the socket included — §04's API table
+    // lists `WS /api/events` as one of them. Counted as calls rather than as
+    // lines, because two routes are written over three lines each, and
+    // stripped of `//` prose so a comment naming a route does not count as one.
+    let declared = server
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .map(|line| line.matches(".route(").count())
+        .sum::<usize>();
+
+    assert!(declared > 0, "no routes found in src/server.rs");
+    assert_eq!(
+        claimed, declared,
+        "api.ts says {word} endpoints; src/server.rs declares {declared}"
+    );
+}
+
+/// The number words the sentence is allowed to use. A digit would be simpler
+/// and is not how that file speaks.
+const WORDS: &[(&str, usize)] = &[
+    ("eight", 8),
+    ("nine", 9),
+    ("ten", 10),
+    ("eleven", 11),
+    ("twelve", 12),
+    ("thirteen", 13),
+    ("fourteen", 14),
+    ("fifteen", 15),
+    ("sixteen", 16),
+    ("seventeen", 17),
+    ("eighteen", 18),
+    ("nineteen", 19),
+    ("twenty", 20),
+];

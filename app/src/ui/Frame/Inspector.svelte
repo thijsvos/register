@@ -1,6 +1,7 @@
 <script lang="ts">
 import { rawFields } from '../../core/frontmatter'
 import { links } from '../../core/links'
+import { offline } from '../../core/offline'
 import { outline } from '../../core/outline'
 import { tagsOf } from '../../core/refs'
 import { vault } from '../../core/store.svelte'
@@ -99,6 +100,7 @@ function meta(count: number): string {
               aria-label={key}
               spellcheck="false"
               autocomplete="off"
+              readonly={offline}
               onkeydown={(event) => keys(event, key)}
               onblur={(event) => commit(key, event.currentTarget)}
             />

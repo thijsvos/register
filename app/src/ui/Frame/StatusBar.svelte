@@ -24,6 +24,7 @@ let {
   onresolve,
   outside = 0,
   onoutside,
+  extract = null,
 }: {
   renderMs?: number | null
   /**
@@ -55,6 +56,15 @@ let {
   /** Notes changed outside the app since the last save (§02b Screen 11). */
   outside?: number
   onoutside?: () => void
+  /**
+   * When this page is an extract (§12): the stamp the binary wrote it at.
+   *
+   * It takes the watcher's cell, because it answers the watcher's question —
+   * how current is what you are reading — for a page nothing will ever update.
+   * GIT goes with it: there is no repository behind an extract to report on,
+   * and a dash there would claim a measurement nothing made.
+   */
+  extract?: string | null
 } = $props()
 
 const dash = '—'
@@ -76,10 +86,14 @@ let renderValue = $derived.by(() => {
 </script>
 
 <footer>
-  <div class="cell">
-    <span class="led" class:live={watcherLive} aria-hidden="true">●</span>
-    <span class="lab">Watcher</span> <b>{watcherLive ? 'Live' : dash}</b>
-  </div>
+  {#if extract !== null}
+    <div class="cell"><span class="lab">Extract</span> <b>{extract}</b></div>
+  {:else}
+    <div class="cell">
+      <span class="led" class:live={watcherLive} aria-hidden="true">●</span>
+      <span class="lab">Watcher</span> <b>{watcherLive ? 'Live' : dash}</b>
+    </div>
+  {/if}
   <div class="cell"><span class="lab">Vault</span> <b>{vault ?? dash}</b></div>
   {#if watcherDelta !== null && watcherDelta !== 0}
     <!-- §02b Screen 7 draws the delta twice — once alone and once inside the
@@ -131,7 +145,9 @@ let renderValue = $derived.by(() => {
       </button>
     </div>
   {/if}
-  <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
+  {#if extract === null}
+    <div class="cell"><span class="lab">Git</span> <b>{git ?? dash}</b></div>
+  {/if}
 </footer>
 
 <style>

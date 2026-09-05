@@ -483,7 +483,7 @@ fn fold(ch: char) -> char {
 
 // ---------------------------------------------------------------------- dates
 
-fn unix_seconds(now: SystemTime) -> i64 {
+pub(crate) fn unix_seconds(now: SystemTime) -> i64 {
     now.duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
@@ -491,13 +491,13 @@ fn unix_seconds(now: SystemTime) -> i64 {
 
 /// `2026-08-05` from a Unix timestamp, by the civil-from-days algorithm — the
 /// standard shift-the-epoch-to-March one, so leap years need no special case.
-fn iso_date(seconds: i64) -> String {
+pub(crate) fn iso_date(seconds: i64) -> String {
     let (year, month, day) = civil(seconds.div_euclid(86_400));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
 /// `2026-08-05T09:16:40Z` — §04's `modified`.
-fn iso_seconds(seconds: i64) -> String {
+pub(crate) fn iso_seconds(seconds: i64) -> String {
     let (year, month, day) = civil(seconds.div_euclid(86_400));
     let rest = seconds.rem_euclid(86_400);
     format!(

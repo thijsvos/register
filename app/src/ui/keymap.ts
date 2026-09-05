@@ -1,3 +1,4 @@
+import { offline, READ_ONLY } from '../core/offline'
 import { vault } from '../core/store.svelte'
 import { enterIndex, focusedFolder, go } from './nav'
 import { UNTITLED } from './Palette/commands'
@@ -281,6 +282,13 @@ export function installKeymap(): () => void {
       }
       case 'n':
         event.preventDefault()
+        // The key is kept and answered rather than unbound in an extract: a
+        // reader who knows it will press it, and a key that does nothing says
+        // nothing about why.
+        if (offline) {
+          vault.notice = READ_ONLY
+          return
+        }
         // Into the folder the INDEX is pointing at, when it is pointing at one.
         // Anywhere else this is exactly what it always was.
         go.create(UNTITLED, undefined, focusedFolder() ?? undefined)

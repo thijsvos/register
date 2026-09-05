@@ -1,12 +1,22 @@
 /**
- * The whole server surface (§04). Thirteen endpoints, nothing else — refs,
+ * The whole server surface (§04). Sixteen endpoints, nothing else — refs,
  * links, tasks, tags and search are all client-side derivations of plain text.
  *
  * Eight until Rev O added `GET /api/file` and Rev P `DELETE /api/folder`, ten
  * until Rev Z added history, a version and the ledger; this count went stale
  * at the first of those, which is the argument for it being here at all rather
- * than left to the reader to take on trust.
+ * than left to the reader to take on trust. It went stale a second time — it
+ * read thirteen while the router declared sixteen — so `tests/release.rs` now
+ * reads this sentence against `src/server.rs` and fails the build when the two
+ * disagree.
+ *
+ * Every read here has a second answer (§12, ADR-008): an extract is this same
+ * app opened from disk with the vault's answers inlined, and `payload` is where
+ * they are. A served page has no payload and never takes those branches; an
+ * extract has no server and never takes the others. A write asked of an extract
+ * refuses with `READ_ONLY`, which every caller already reports as a notice.
  */
+import { offline, payload, READ_ONLY } from './offline'
 
 /**
  * The body of `GET /api/tree` (§04).
@@ -126,7 +136,23 @@ function urlPath(path: string): string {
  * better than this module could, and none of which shows up in the bundle.
  */
 export function fileUrl(path: string): string {
+  // A `data:` URL the extract carried, or the empty string for one it did not:
+  // an `<img src="">` fetches nothing and reports an error, which is the path
+  // by which a target the vault never had becomes a dotted, inert reference.
+  if (payload) return payload.files[path] ?? ''
   return `/api/file/${urlPath(path)}`
+}
+
+/**
+ * Whether the extract left this file out.
+ *
+ * Only an extract can answer before the browser tries: the served app learns a
+ * target is missing when its `<img>` fails, and `media.svelte.ts` records that.
+ * An extract knows at load, because the binary either carried the bytes or did
+ * not, and there is nothing to try.
+ */
+export function fileLeftOut(path: string): boolean {
+  return payload !== null && !(path in payload.files)
 }
 
 async function refuse(response: Response): Promise<never> {
@@ -136,10 +162,30 @@ async function refuse(response: Response): Promise<never> {
   )
 }
 
+/** What a write is told in an extract. Never reached on a served page. */
+function readOnly(): Promise<never> {
+  return Promise.reject(new ApiError(405, READ_ONLY))
+}
+
 export async function getTree(): Promise<Tree> {
+  if (payload) return asTree(payload.tree)
   const response = await fetch('/api/tree')
   if (!response.ok) await refuse(response)
   return asTree(await response.json())
+}
+
+/**
+ * The extract's etag for a note: the tree's, so the corpus fill and the echo
+ * check compare like with like. Built once, since every note asks.
+ */
+let extractEtags: Map<string, string> | null = null
+function extractEtag(path: string): string {
+  if (extractEtags === null) {
+    extractEtags = new Map(
+      asTree(payload?.tree).notes.map((entry) => [entry.path, entry.etag]),
+    )
+  }
+  return extractEtags.get(path) ?? 'extract'
 }
 
 /**
@@ -180,12 +226,20 @@ export function forgetLineEndings(): void {
 }
 
 export async function getNote(path: string): Promise<Loaded> {
+  if (payload) {
+    const raw = payload.notes[path]
+    if (raw === undefined) throw new ApiError(404, `${path} is not in this extract`)
+    return loaded(path, raw, extractEtag(path))
+  }
   const response = await fetch(noteUrl(path))
   if (!response.ok) await refuse(response)
   const etag = etagOf(response)
   if (etag === null) throw new ApiError(response.status, 'note came back with no etag')
+  return loaded(path, await response.text(), etag)
+}
 
-  const raw = await response.text()
+/** A note's bytes as the editor holds them: LF, with the convention remembered. */
+function loaded(path: string, raw: string, etag: string): Loaded {
   // A mixed-ending file is left exactly as it is: there is no convention there
   // to preserve, and guessing one would be the app editing prose nobody asked
   // it to edit.
@@ -198,6 +252,7 @@ export async function getNote(path: string): Promise<Loaded> {
 }
 
 export async function putNote(path: string, body: string, etag?: string): Promise<Saved> {
+  if (offline) return readOnly()
   const response = await fetch(noteUrl(path), {
     method: 'PUT',
     headers: etag === undefined ? {} : { 'If-Match': etag },
@@ -224,6 +279,7 @@ export async function putNote(path: string, body: string, etag?: string): Promis
  * the client cannot aim it at anything.
  */
 export async function revealVault(): Promise<void> {
+  if (offline) return readOnly()
   const response = await fetch('/api/reveal', { method: 'POST' })
   if (!response.ok) await refuse(response)
 }
@@ -244,6 +300,7 @@ export class VaultMoved extends Error {
 
 /** The revision a delete was armed against, or undefined to go unguarded. */
 export async function deleteNote(path: string, rev?: number): Promise<void> {
+  if (offline) return readOnly()
   const response = await fetch(noteUrl(path), {
     method: 'DELETE',
     headers: rev === undefined ? {} : { 'If-Match': String(rev) },
@@ -279,6 +336,7 @@ export interface Trashed {
  * cannot move the images either.
  */
 export async function deleteFolder(path: string, rev?: number): Promise<Trashed> {
+  if (offline) return readOnly()
   const response = await fetch(`/api/folder/${urlPath(path)}`, {
     method: 'DELETE',
     headers: rev === undefined ? {} : { 'If-Match': String(rev) },
@@ -300,6 +358,12 @@ export function openEvents(handlers: {
   onResync: () => void
   onConnected: (connected: boolean) => void
 }): () => void {
+  // An extract has no watcher and nothing to watch: the vault it was cut from
+  // is wherever it was, and this file is a reading of it. Not even a first
+  // attempt — its own policy says `connect-src 'none'`, and a socket that was
+  // never opened is the only kind that policy has nothing to report about.
+  if (offline) return () => {}
+
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = `${protocol}://${location.host}/api/events`
 
@@ -472,12 +536,25 @@ function asEvent(value: unknown): VaultEvent | null {
 
 /** `.register/config.json` (§02b Screen 6). `{}` when the vault has no config. */
 export async function getConfig(): Promise<unknown> {
+  // An extract carries no config: what it looks like on this machine is this
+  // machine's to decide, and nothing decided elsewhere should travel in a file
+  // meant to be handed on.
+  if (offline) return {}
   const response = await fetch('/api/config')
   if (!response.ok) await refuse(response)
   return await response.json()
 }
 
+/**
+ * Settings in an extract are held for the session and written nowhere.
+ *
+ * Accepted rather than refused: the scheme, the face and the scale are all
+ * applied to `<html>` before this is called, and the page is theirs until it is
+ * closed. Screen 6 says so. Refusing would put a notice on a control that had
+ * just worked, which is a worse account of what happened than silence.
+ */
 export async function putConfig(value: unknown): Promise<void> {
+  if (offline) return
   const response = await fetch('/api/config', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -507,12 +584,15 @@ export interface Restored {
 }
 
 export async function getTrash(): Promise<Bucket[]> {
+  // The trash lives under `.register/`, which an extract never reads.
+  if (offline) return []
   const response = await fetch('/api/trash')
   if (!response.ok) await refuse(response)
   return (await response.json()) as Bucket[]
 }
 
 export async function restoreBucket(name: string): Promise<Restored> {
+  if (offline) return readOnly()
   const response = await fetch(`/api/trash/${encodeURIComponent(name)}`, {
     method: 'POST',
   })
@@ -522,6 +602,7 @@ export async function restoreBucket(name: string): Promise<Restored> {
 
 /** Destroy a bucket. The one call in this API that really deletes. */
 export async function purgeBucket(name: string): Promise<void> {
+  if (offline) return readOnly()
   const response = await fetch(`/api/trash/${encodeURIComponent(name)}`, {
     method: 'DELETE',
   })
@@ -550,6 +631,9 @@ export interface Version {
 
 /** Every commit that touched a note, newest first. `[]` for a vault that keeps no history. */
 export async function getHistory(path: string): Promise<Version[]> {
+  // An extract carries the vault as it was, not how it got there: `[]`, the
+  // same measured absence a vault that keeps no history answers.
+  if (offline) return []
   const response = await fetch(`/api/history/${urlPath(path)}`)
   if (!response.ok) await refuse(response)
   return (await response.json()) as Version[]
@@ -565,6 +649,7 @@ export async function getHistory(path: string): Promise<Version[]> {
  * encoded.
  */
 export async function getVersion(sha: string, path: string): Promise<string> {
+  if (offline) throw new ApiError(404, 'an extract carries no history')
   const response = await fetch(`/api/version/${encodeURIComponent(sha)}/${urlPath(path)}`)
   if (!response.ok) await refuse(response)
   const raw = await response.text()
@@ -573,6 +658,7 @@ export async function getVersion(sha: string, path: string): Promise<string> {
 
 /** The vault's recent history, one row per note per commit, newest first. */
 export async function getLedger(): Promise<Version[]> {
+  if (offline) return []
   const response = await fetch('/api/ledger')
   if (!response.ok) await refuse(response)
   return (await response.json()) as Version[]
@@ -580,6 +666,9 @@ export async function getLedger(): Promise<Version[]> {
 
 /** Every non-note file in the vault (§02b Screen 10). */
 export async function getFiles(): Promise<string[]> {
+  // What was carried, which is what Screen 10 can show. A file left out is
+  // still referenced from its note and drawn there as missing.
+  if (payload) return Object.keys(payload.files).sort()
   const response = await fetch('/api/files')
   if (!response.ok) await refuse(response)
   return (await response.json()) as string[]
@@ -599,6 +688,7 @@ export interface Moved {
  * destination rather than merging: §04 never destroys.
  */
 export async function movePath(from: string, to: string): Promise<Moved> {
+  if (offline) return readOnly()
   const response = await fetch('/api/move', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -620,12 +710,15 @@ export async function movePath(from: string, to: string): Promise<Moved> {
  * of them wrong.
  */
 export async function getLocal(): Promise<unknown> {
+  if (offline) return {}
   const response = await fetch('/api/local')
   if (!response.ok) await refuse(response)
   return await response.json()
 }
 
 export async function putLocal(value: unknown): Promise<void> {
+  // Held for the session, as `putConfig` says.
+  if (offline) return
   const response = await fetch('/api/local', {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
@@ -642,6 +735,10 @@ export async function putLocal(value: unknown): Promise<void> {
  * in from the user's own disk.
  */
 export async function getFont(): Promise<ArrayBuffer | null> {
+  // Never in an extract, by rule 7 before anything else: the licensed face is
+  // the user's, and a file made to be handed on must not carry it. The binary
+  // does not read it; this side does not ask.
+  if (offline) return null
   const response = await fetch('/api/font')
   if (response.status === 404) return null
   if (!response.ok) await refuse(response)
@@ -649,11 +746,13 @@ export async function getFont(): Promise<ArrayBuffer | null> {
 }
 
 export async function putFont(bytes: ArrayBuffer): Promise<void> {
+  if (offline) return readOnly()
   const response = await fetch('/api/font', { method: 'PUT', body: bytes })
   if (!response.ok) await refuse(response)
 }
 
 export async function deleteFont(): Promise<void> {
+  if (offline) return readOnly()
   const response = await fetch('/api/font', { method: 'DELETE' })
   if (!response.ok) await refuse(response)
 }

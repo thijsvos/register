@@ -2,6 +2,7 @@
 import { fileUrl } from '../core/api'
 import { bodyOffset } from '../core/frontmatter'
 import { misses } from '../core/media.svelte'
+import { offline } from '../core/offline'
 import { resolveSrc } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import type { EditorHandle } from '../editor'
@@ -41,6 +42,10 @@ $effect(() => {
       host: wikiHost(),
       onEdit: (doc) => vault.edit(doc),
       onRender: setRenderMs,
+      // An extract is the same surface, reading (§12). Nothing else in this
+      // component changes: the caret memory, the outline's reveal and the
+      // wikilink host all work on a document that cannot be typed into.
+      readOnly: offline,
     })
     loaded = path
     handle.focus()
@@ -138,6 +143,10 @@ function wikiHost() {
     fileUrl: (src: string) => {
       if (from === null) return null
       const path = resolveSrc(from, src)
+      // Passed through as is, the empty string included. That is an extract
+      // saying it did not carry the file, and an `<img src="">` fetches nothing
+      // and reports an error — so the reference is demoted by the same path a
+      // served page's missing target takes, rather than by a second one.
       return path === null ? null : fileUrl(path)
     },
     openFile: (src: string) => {

@@ -1,3 +1,4 @@
+import { offline, READ_ONLY } from '../core/offline'
 import { folders } from '../core/paths'
 import { vault } from '../core/store.svelte'
 import { notesUnder } from '../core/tree'
@@ -129,6 +130,12 @@ function armFromRow(event: KeyboardEvent): void {
   if (path === undefined) return
 
   event.preventDefault()
+  // Answered rather than ignored, for the reason `N` is in the keymap: the key
+  // says delete on it, and an extract has to say why nothing left.
+  if (offline) {
+    vault.notice = READ_ONLY
+    return
+  }
   chrome.arm(
     row.dataset.kind === 'folder'
       ? { kind: 'folder', path, notes: notesUnder(vault.tree, path), rev: vault.rev }
@@ -239,8 +246,18 @@ export const go = {
     chrome.showSettings()
   },
 
-  /** §02b Screen 4, over one `*.conflict-<ts>.md` copy. */
+  /**
+   * §02b Screen 4, over one `*.conflict-<ts>.md` copy.
+   *
+   * In an extract the copy opens as the note it is: Screen 4 exists to write a
+   * merge, and a merge table whose only button is refused is a worse reading of
+   * the file than the file. The index still names it an artefact.
+   */
   conflict(copy: string): void {
+    if (offline) {
+      go.note(copy)
+      return
+    }
     chrome.showConflict(copy)
   },
 
@@ -261,6 +278,6 @@ export const go = {
    */
   newestConflict(): void {
     const first = vault.unresolved[0]
-    if (first !== undefined) chrome.showConflict(first.copy.path)
+    if (first !== undefined) go.conflict(first.copy.path)
   },
 }

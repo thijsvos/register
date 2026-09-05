@@ -1933,3 +1933,27 @@ async fn a_folder_deletion_takes_the_same_guard() {
         "the folder went anyway"
     );
 }
+
+#[tokio::test]
+async fn the_extract_bundle_is_embedded_but_never_served() {
+    // `pnpm build` writes the single-file bundle into `app/dist/extract/`, so
+    // it rides along in `Assets` for `register extract` to read — and nothing
+    // else. A served page has its own bundle; this one is refused rather than
+    // left reachable because it happens to be in the folder.
+    let (tmp, dist) = ui_dir();
+    fs::create_dir_all(dist.join("extract")).expect("extract dir");
+    fs::write(dist.join("extract/extract.js"), "console.log('folded')").expect("js");
+    let addr = start_serving(&tmp, &dist).await;
+
+    let folded = request(addr, "GET", "/extract/extract.js", &[], "").await;
+    assert_eq!(folded.status, 404);
+    assert!(!folded.body.contains("folded"), "the bundle was served");
+    // And not the shell either: an unknown route gets the shell, but this is a
+    // known one, answered by name.
+    assert!(!folded.body.contains("from disk"));
+
+    // The rule reads the path, not the folder: the served bundle beside it is
+    // still served.
+    let css = request(addr, "GET", "/assets/app.css", &[], "").await;
+    assert_eq!(css.status, 200);
+}

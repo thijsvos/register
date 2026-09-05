@@ -8,7 +8,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.extract.config.ts",
     "preview": "vite preview",
     "check": "biome check --config-path=.. . && svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
@@ -50,6 +50,16 @@
       "path": "dist/assets/editor-*.js",
       "limit": "150 kB",
       "gzip": true
+    },
+    {
+      "name": "extract",
+      "path": [
+        "dist/extract/extract.js",
+        "dist/extract/extract.css"
+      ],
+      "limit": "560 kB",
+      "gzip": false,
+      "brotli": false
     }
   ],
   "dependencies": {

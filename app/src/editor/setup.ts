@@ -1,4 +1,4 @@
-import type { Extension } from '@codemirror/state'
+import { EditorState, type Extension } from '@codemirror/state'
 import { drawSelection, EditorView } from '@codemirror/view'
 import { markdownDecorations } from './decorations'
 import { editorKeymap } from './keymap'
@@ -12,7 +12,7 @@ import { editorTheme } from './theme'
  * autocomplete, lint, search, a fold gutter and line numbers — none of which
  * this design wants, and all of which spend the §06 budget.
  */
-export function editorExtensions(): Extension {
+export function editorExtensions(options: { readOnly?: boolean } = {}): Extension {
   return [
     // `cursorBlinkRate: 0` is the kill switch for the only animation CodeMirror
     // ships. §02 permits exactly one animation in the product and it is the
@@ -23,5 +23,13 @@ export function editorExtensions(): Extension {
     markdownDecorations,
     editorTheme,
     EditorView.lineWrapping,
+    // An extract (§12) reads with the same surface it would write with, and
+    // both facets are needed for it to be a reading surface: `readOnly` is what
+    // the commands and the task widget consult, and `editable` is what takes
+    // the caret and the keyboard away. One without the other is a document
+    // that refuses keystrokes while still inviting them.
+    options.readOnly === true
+      ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+      : [],
   ]
 }

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <!-- The served app forbids inline script and this file is nothing else, so
+         the policy is turned the other way round: everything inline, and no
+         way out. `connect-src 'none'` is the line that matters — nothing on
+         this page can fetch, open a socket, or send a beacon, and the browser
+         enforces it before any script here runs. Images, fonts and the PDF
+         frame are `data:` only, which is how they arrived. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; frame-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>{{TITLE}}</title>
+    <!-- Synchronous and in <head>, as the served boot.js is: the scheme lands
+         before the first paint. -->
+    <script>{{BOOT}}</script>
+    <style>{{CSS}}</style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- The vault. A JSON block the client reads by id — `core/offline.ts` —
+         with `<`, `>` and `&` written as escapes, so no note can close it. -->
+    <script type="application/json" id="{{ID}}">{{PAYLOAD}}</script>
+    <script type="module">{{JS}}</script>
+  </body>
+</html>

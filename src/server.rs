@@ -29,10 +29,17 @@ use crate::watch::Event;
 /// `pnpm dev` hot-reloads while a shipped binary is self-contained.
 /// `allow_missing` keeps `cargo build` green in CI, which builds the server
 /// without building the frontend first.
+///
+/// `extract/` rides along: that is the single-file build `register extract`
+/// writes into a page (§12), and `extract.rs` reads it, the fonts and the boot
+/// script from here rather than embedding any of them twice. `asset()` refuses
+/// to serve it — it is in the binary for the CLI, not for the browser. An
+/// `#[exclude]` would have been tidier and costs a crate feature that pulls in
+/// a glob matcher, which rule 6 prices as a dependency.
 #[derive(Embed)]
 #[folder = "app/dist"]
 #[allow_missing = true]
-struct Assets;
+pub(crate) struct Assets;
 
 /// Carries remote mode's token into the WebSocket, which can send no headers.
 const TOKEN_COOKIE: &str = "register_token";
@@ -1080,6 +1087,13 @@ async fn asset(State(state): State<AppState>, uri: Uri) -> Response {
     // the SPA shell would turn a 404 into a silently successful HTML response.
     if path == "api" || path.starts_with("api/") {
         return (StatusCode::NOT_FOUND, "no such endpoint\n").into_response();
+    }
+    // The extract's bundle is embedded for `register extract`, not for a
+    // browser: the same UI a second way, and a served page has no use for it.
+    // Refused rather than left reachable, so the served surface is exactly
+    // what `index.html` asks for and nothing that happens to be in the folder.
+    if path == "extract" || path.starts_with("extract/") {
+        return (StatusCode::NOT_FOUND, "not served\n").into_response();
     }
 
     let wanted = if path.is_empty() { "index.html" } else { path };

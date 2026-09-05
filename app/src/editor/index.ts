@@ -19,6 +19,8 @@ export interface EditorOptions {
   onEdit: (doc: string) => void
   /** Cost of the update CodeMirror just performed, in milliseconds. */
   onRender: (ms: number) => void
+  /** A reading surface: no caret, no keystrokes, no widget that writes (§12). */
+  readOnly?: boolean
 }
 
 export interface EditorHandle {
@@ -64,7 +66,7 @@ export function createEditor(options: EditorOptions): EditorHandle {
         anchor: Math.min(Math.max(options.caret ?? 0, 0), options.doc.length),
       },
       extensions: [
-        editorExtensions(),
+        editorExtensions({ readOnly: options.readOnly ?? false }),
         hostSlot.of(wikiLinkHost.of(options.host)),
         EditorView.updateListener.of((update) => {
           const started = performance.now()

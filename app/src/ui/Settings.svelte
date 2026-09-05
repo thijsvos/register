@@ -1,4 +1,5 @@
 <script lang="ts">
+import { offline } from '../core/offline'
 import type { BodyFace, Scale, Scheme } from '../core/settings.svelte'
 import { settings } from '../core/settings.svelte'
 import { vault } from '../core/store.svelte'
@@ -39,7 +40,10 @@ function pick(event: Event) {
 
 <div class="settings">
   <div class="stamp">
-    <span>Config · .register/config.json</span>
+    <!-- An extract (§12) keeps the three controls that describe this screen
+         and this machine, and writes none of them anywhere: the page is theirs
+         until it is closed. The stamp says so where the file's name was. -->
+    <span>{offline ? 'Extract · held for this page, not saved' : 'Config · .register/config.json'}</span>
     <!-- §01: "every control shows its key". Escape leaves any raised view. -->
     <button class="back" onclick={() => chrome.showNotes()}>[Esc] back</button>
   </div>
@@ -89,6 +93,7 @@ function pick(event: Event) {
     </div>
   </div>
 
+  {#if !offline}
   <div class="row">
     <div class="key">Checkpoints</div>
     <div class="controls">
@@ -148,6 +153,7 @@ function pick(event: Event) {
     <code>{vault.vaultPath ?? 'the vault'}/.register/fonts/</code>, which
     <code>register init --git</code> puts in .gitignore.
   </p>
+  {/if}
 </div>
 
 <style>

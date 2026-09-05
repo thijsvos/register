@@ -41,6 +41,10 @@ export class TaskToggle extends WidgetType {
 
     const toggle = (event: Event) => {
       event.preventDefault()
+      // A read-only document keeps its boxes as they are (§12, the extract).
+      // `readOnly` stops keystrokes; it does not stop a `dispatch`, so a widget
+      // that writes has to ask for itself.
+      if (view.state.readOnly) return
       // One character replaced, which is the smallest edit that expresses the
       // change — so the vault's diff stays clean and an agent reading the file
       // sees exactly what happened.

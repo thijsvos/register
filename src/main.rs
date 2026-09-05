@@ -1,3 +1,4 @@
+mod extract;
 mod git;
 mod import;
 mod scaffold;
@@ -129,6 +130,26 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Write a vault and its reader as one HTML file (§12).
+    ///
+    /// Read-only and offline: the page opens from disk in any browser, with
+    /// search, links, backlinks, tags and tasks, and asks nothing of any
+    /// server — its own policy forbids it. Nothing in the vault is touched
+    /// and nothing under `.register/` is carried.
+    Extract {
+        /// The vault to read.
+        vault: PathBuf,
+        /// Where to write it. Defaults to `<vault>-<date>.html` in the current
+        /// directory. Refused inside the vault.
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<PathBuf>,
+        /// Whether to carry the vault's images and PDFs.
+        #[arg(long, value_enum, default_value = "inline")]
+        media: extract::Media,
+        /// Whether to carry the bundled OFL faces, or read in the system's own.
+        #[arg(long, value_enum, default_value = "all")]
+        faces: extract::Faces,
+    },
     /// Print health status.
     Health,
 }
@@ -181,7 +202,41 @@ async fn main() -> ExitCode {
             vault,
             dry_run,
         } => report(import_vault(&source, &vault, dry_run)),
+        Command::Extract {
+            vault,
+            out,
+            media,
+            faces,
+        } => report(extract_vault(&vault, out.as_deref(), media, faces)),
     }
+}
+
+/// `register extract`, as one line saying what was written and what was not.
+fn extract_vault(
+    vault: &Path,
+    out: Option<&Path>,
+    media: extract::Media,
+    faces: extract::Faces,
+) -> Result<String, String> {
+    let written = extract::extract(vault, out, media, faces, std::time::SystemTime::now())?;
+    let mut said = format!(
+        "wrote {} · {} · {} · {}",
+        written.out.display(),
+        plural(written.notes, "note"),
+        plural(written.files, "file"),
+        extract::human(written.bytes),
+    );
+    // Each thing left out, on its own line, the way `init` reports a note.
+    for line in &written.skipped {
+        said.push_str("\n! ");
+        said.push_str(line);
+    }
+    Ok(said)
+}
+
+/// `1 note` / `2 notes` — the plural that would otherwise read as a bug.
+fn plural(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
 /// Print an outcome the way §01 asks for: what happened, then what to do next.

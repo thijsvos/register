@@ -28,11 +28,15 @@ failures reproduce only on Linux.
 
 ## Your call
 
-**Empty, and everything ruled has shipped.** All twenty-one were answered in one
-sitting on 2026-08-17 and the rulings are recorded in `ROADMAP.md` under *Ruled
-on after v0.6.3*, each with what was decided and why. **Twenty are built**; the
-twenty-first — per-screen screenshot baselines — was ruled against, and the
-reasoning is there too.
+**One.** All twenty-one earlier rulings were answered in one sitting on
+2026-08-17 and are recorded in `ROADMAP.md` under *Ruled on after v0.6.3*, each
+with what was decided and why. **Twenty are built**; the twenty-first —
+per-screen screenshot baselines — was ruled against, and the reasoning is there
+too.
+
+| Item | The question |
+|---|---|
+| **The extract wants a spec revision, and Z was the last letter** | `register extract` shipped (§12 row, ADR-008, *Parked during P15*) without touching `SPEC.html`, because a revision is yours to issue — Rev Z landed as its own commit after the ledger's four. What it would carry: a §12 row; three §06 budgets (extract chrome ≤ 800 kB, a 1k-note extract ≤ 8 MB, open → readable < 500 ms from `file://`, `BUDGET_FACTOR`-scaled); §02b's Screen 1 with `EXTRACT · <stamp>Z` in the watcher's cell and no GIT cell, Screen 6's stamp reading *held for this page, not saved*; a §08 P15. And a name: `tests/release.rs::the_spec_states_one_revision_of_itself` asserts the revision is **one** uppercase letter, and Z is spent. `AA` fails that test; so does anything but a rule about what follows Z. |
 
 Three of them needed a surface rather than a rule and became §02b Screens 9 and
 10 plus §04 Rev Y's move: the trash, the attachments, and reorganising a vault
@@ -51,7 +55,8 @@ without dropping to Finder.
 
 ## Expansion (§12)
 
-Ten rows — query views, kanban, graph, plugins, importers, co-editing, richer
-sync, native shells, encrypted remote, richer editing. Not defects and not a
-todo list; they are the shape of a v2.
+Eleven rows — query views, kanban, graph, plugins, importers, co-editing, richer
+sync, native shells, encrypted remote, richer editing, and the extract, which is
+the one struck through. Not defects and not a todo list; they are the shape of a
+v2.
 

@@ -535,3 +535,79 @@ describe('font licensing (rule 7, §03)', () => {
     expect(srcs.filter((s) => /berkeley|tx-?02/i.test(s))).toEqual([])
   })
 })
+
+describe('the extract (§12, ADR-008)', () => {
+  // One app, two transports: served, and folded into a file that opens from
+  // disk. The rules below are what keep the second one honest — read-only by
+  // construction, and offline by policy rather than by promise.
+  const api = sources['./core/api.ts'] ?? ''
+  const extractConfig = import.meta.glob('../vite.extract.config.ts', {
+    query: '?raw',
+    import: 'default',
+    eager: true,
+  }) as Record<string, string>
+
+  it('answers every read from the payload and refuses every write', () => {
+    // Each exported function of api.ts that touches the wire has an offline
+    // branch. Counted against the fetch sites so a route added later without
+    // one fails here rather than in a file somebody opened on a plane.
+    const fetches = (code(api).match(/await fetch\(/g) ?? []).length
+    const branches = (code(api).match(/if \((?:payload|offline)\)/g) ?? []).length
+    expect(fetches).toBeGreaterThan(10)
+    expect(branches, 'a fetch site has no offline answer').toBeGreaterThanOrEqual(fetches)
+    // And the writes say the one sentence.
+    expect(api).toMatch(/new ApiError\(405, READ_ONLY\)/)
+  })
+
+  it('folds the whole app into one script, under a name the binary can address', () => {
+    const [config] = Object.values(extractConfig)
+    expect(config, 'vite.extract.config.ts read as empty').toBeTruthy()
+    expect(config).toMatch(/inlineDynamicImports:\s*true/)
+    expect(config).toMatch(/entryFileNames:\s*'extract\.js'/)
+    expect(config).toMatch(/assetFileNames:\s*'extract\.\[ext\]'/)
+    expect(config).toMatch(/outDir:\s*'dist\/extract'/)
+    // No second copy of the fonts and the boot script in the binary.
+    expect(config).toMatch(/publicDir:\s*false/)
+    // The served config's chunking is the thing this one must not carry. Read
+    // as code: the file's own comment names it to say why it is absent.
+    expect(code(config ?? '')).not.toMatch(/manualChunks/)
+  })
+
+  it('reads with the editor rather than a second renderer', () => {
+    // The point of the extract is that it is the same surface. A read-only
+    // CodeMirror is one facet; a separate markdown-to-HTML path would be a
+    // second implementation of every decoration, and would drift.
+    expect(sources['./editor/setup.ts']).toMatch(/EditorState\.readOnly\.of\(true\)/)
+    expect(sources['./editor/setup.ts']).toMatch(/EditorView\.editable\.of\(false\)/)
+    expect(sources['./ui/Editor.svelte']).toMatch(/readOnly:\s*offline/)
+    // And the one widget that writes asks first.
+    expect(sources['./editor/decorations/tasks.ts']).toMatch(
+      /if \(view\.state\.readOnly\) return/,
+    )
+  })
+
+  it('hides every command that writes rather than showing it inert', () => {
+    const commands = sources['./ui/Palette/commands.ts'] ?? ''
+    for (const id of [
+      'new',
+      'trash',
+      'ledger',
+      'resolve',
+      'delete-note',
+      'delete-folder',
+      'move',
+      'reveal',
+      'reload',
+    ]) {
+      const row = new RegExp(`id: '${id}',[\\s\\S]*?enabled:[^\\n]*writes`)
+      expect(commands, `${id} is offered in an extract`).toMatch(row)
+    }
+  })
+
+  it('never carries the licensed face, on either side', () => {
+    // Rule 7, restated for a file meant to be handed on: the client does not
+    // ask for the font and the binary does not read it.
+    expect(api).toMatch(/getFont[\s\S]*?if \(offline\) return null/)
+    expect(sources['./core/offline.ts']).not.toMatch(/fonts?\//)
+  })
+})

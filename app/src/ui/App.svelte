@@ -1,6 +1,7 @@
 <script lang="ts">
 import { untrack } from 'svelte'
 import { gitLabel } from '../core/git'
+import { payload } from '../core/offline'
 import { basename, folders } from '../core/paths'
 import { search } from '../core/search'
 import { settings } from '../core/settings.svelte'
@@ -31,6 +32,17 @@ import { chrome } from './view.svelte'
  * `—` when the vault is not a repository, which is most of them.
  */
 let gitField = $derived(gitLabel(vault.git))
+
+/**
+ * The extract's stamp for the status bar (§12), or null on a served page.
+ *
+ * `2026-09-05 11:32Z` — the chrome's own form for a time, UTC to the minute,
+ * cut from the ISO the binary wrote. Not the vault's mtime and not "today": it
+ * is the moment this file was made, which is the only date it can be sure of.
+ */
+let extract = $derived(
+  payload === null ? null : `${payload.stamp.slice(0, 16).replace('T', ' ')}Z`,
+)
 
 /** Newest first, so the status bar's route lands on the one that just happened. */
 let unresolved = $derived(vault.unresolved)
@@ -188,6 +200,7 @@ $effect(() => {
     onresolve={() => go.newestConflict()}
     outside={vault.outside.length}
     onoutside={() => go.ledger()}
+    {extract}
   />
 </div>
 

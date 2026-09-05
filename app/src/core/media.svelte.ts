@@ -12,6 +12,8 @@
  * express, and "this URL 404'd once in this tab" is not knowledge about anyone's
  * notes. It is not persisted and it is not meant to be.
  */
+import { fileLeftOut } from './api'
+
 class Misses {
   #paths = new Set<string>()
 
@@ -24,9 +26,13 @@ class Misses {
    */
   version = $state(0)
 
-  /** Has this vault path already failed to load in this session? */
+  /**
+   * Has this vault path already failed to load in this session — or, in an
+   * extract, was it never carried at all (§12)? The second is known before
+   * anything is tried, and it is the same fact drawn the same way.
+   */
   missing(path: string): boolean {
-    return this.#paths.has(path)
+    return this.#paths.has(path) || fileLeftOut(path)
   }
 
   /**
