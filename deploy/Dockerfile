@@ -39,7 +39,7 @@ RUN npm i -g "pnpm@$(node -p "require('./package.json').packageManager.split('@'
 COPY app/ .
 RUN pnpm build
 
-FROM rust:1.97-alpine AS server
+FROM rust:1.98-alpine AS server
 RUN apk add --no-cache musl-dev
 WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs ./
