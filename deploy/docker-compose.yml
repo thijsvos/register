@@ -19,7 +19,7 @@ services:
     # README's one-liner uses; this file names a version because a compose file
     # is checked in, and a checked-in file that silently changes what it runs is
     # the drift rule 11 is about.
-    image: ghcr.io/thijsvos/register:v0.7.0
+    image: ghcr.io/thijsvos/register:v0.8.0
     # Loopback only. `"7777:7777"` publishes on every interface, which makes
     # putting your vault on the network the default — while the README calls it
     # "a decision, not a default". One of the two had to change, and it was not

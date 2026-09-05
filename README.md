@@ -161,7 +161,7 @@ breaks one gets smaller — the budget does not.
 
 | Budget | Limit | Measured |
 |---|---|---|
-| Release binary | ≤ 10 MB | 3.3–4.3 MB depending on platform |
+| Release binary | ≤ 10 MB | 4.4–5.6 MB depending on platform |
 | Shell JS (initial) | ≤ 60 kB gz | 50.1 kB |
 | Editor chunk (lazy) | ≤ 150 kB gz | 102.9 kB |
 | Stylesheet | ≤ 10 kB gz | 4.8 kB |
